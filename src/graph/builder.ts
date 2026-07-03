@@ -7,7 +7,7 @@ import type { Graph } from "./types";
 
 // ── Domain Taxonomy ──
 
-const DOMAINS = [
+export const DOMAINS = [
   "verification", "escalation", "scope", "delivery", "communication",
   "deployment", "security", "ui-testing", "data", "browser",
   "memory", "algorithm", "delegation",
@@ -103,6 +103,73 @@ export function keywordClassify(name: string, description: string, content: stri
   if (/read.*before.*answer|check.*before.*claim|verify.*before.*answer|look.*before|read.*source.*first/.test(text)) return ["verification"];
 
   return null;
+}
+
+// ── AI Domain Detection (fallback for ambiguous rules) ──
+
+export interface DomainDetector {
+  detect(name: string, description: string, text: string): Promise<string[]>;
+}
+
+const DOMAIN_SYSTEM_PROMPT = `You are a behavioral rule classifier. Assign 1-3 domain tags.
+Domains: ${DOMAINS.join(", ")}
+Respond with JSON only: {"domains": ["tag1", "tag2"]}`;
+
+/**
+ * Create a domain detector that uses an inference function.
+ * Falls back to keyword classification, only calls LLM for ambiguous cases.
+ */
+export function createAIDetector(
+  infer: (system: string, user: string) => Promise<{ success: boolean; parsed?: unknown }>,
+): DomainDetector {
+  return {
+    async detect(name: string, description: string, text: string): Promise<string[]> {
+      // Try keyword classifier first
+      const keywords = keywordClassify(name, description, text);
+      if (keywords) return keywords;
+
+      // Fall back to LLM inference
+      try {
+        const result = await infer(
+          DOMAIN_SYSTEM_PROMPT,
+          `Name: ${name}\nDescription: ${description}\nRule: ${text.slice(0, 400)}`,
+        );
+        if (result.success && result.parsed) {
+          const parsed = result.parsed as { domains?: string[] };
+          const valid = (parsed.domains || []).filter((d): d is Domain =>
+            (DOMAINS as readonly string[]).includes(d),
+          );
+          if (valid.length > 0) return valid;
+        }
+      } catch { /* fall through */ }
+
+      return ["verification"];
+    },
+  };
+}
+
+// ── Drift Detection ──
+
+export interface DriftReport {
+  unindexedFiles: string[];
+  staleNodes: string[];
+  driftCount: number;
+  staleCount: number;
+}
+
+export function detectDrift(graph: Graph, ruleFiles: string[]): DriftReport {
+  const fileIds = new Set(ruleFiles.map((f) => f.replace(/\.md$/, "")));
+  const nodeIds = new Set(Object.keys(graph.nodes));
+
+  const unindexedFiles = [...fileIds].filter((id) => !nodeIds.has(id));
+  const staleNodes = [...nodeIds].filter((id) => !fileIds.has(id));
+
+  return {
+    unindexedFiles,
+    staleNodes,
+    driftCount: unindexedFiles.length,
+    staleCount: staleNodes.length,
+  };
 }
 
 // ── File Discovery ──
@@ -246,6 +313,111 @@ export async function buildGraph(rulesDir: string, stateOutputDir?: string): Pro
 
   // Same-domain edges
   const existingPairs = new Set(allEdges.map(e => [e.from, e.to].sort().join("::")));
+  const domainEdges = buildSameDomainEdges(nodes, existingPairs);
+  for (const edge of domainEdges) {
+    const key = [edge.from, edge.to].sort().join("::") + "::" + edge.relationship;
+    if (!edgeSeen.has(key)) {
+      edgeSeen.add(key);
+      allEdges.push(edge);
+    }
+  }
+
+  const graph: Graph = {
+    version: "1.0",
+    builtAt: new Date().toISOString(),
+    nodeCount: Object.keys(nodes).length,
+    edgeCount: allEdges.length,
+    nodes,
+    edges: allEdges,
+  };
+
+  if (stateOutputDir) {
+    const outputPath = join(stateOutputDir, "knowledge-graph.json");
+    const dir = dirname(outputPath);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(outputPath, JSON.stringify(graph, null, 2), "utf-8");
+  } else {
+    writeGraphFile(graph);
+  }
+
+  return graph;
+}
+
+// ── Build Graph with AI domain detection ──
+
+export async function buildGraphWithAI(
+  rulesDir: string,
+  detector: DomainDetector,
+  stateOutputDir?: string,
+): Promise<Graph> {
+  const files = discoverRuleFiles(rulesDir);
+  const existingGraph = readGraph();
+
+  const cachedHashes = new Map<string, { domains: string[]; hash: string }>();
+  for (const node of Object.values(existingGraph.nodes)) {
+    if (node.content_hash) {
+      cachedHashes.set(node.id, { domains: node.domains, hash: node.content_hash });
+    }
+  }
+
+  const nodes: Record<string, GraphNode> = {};
+
+  for (const file of files) {
+    const name = file.frontmatter["name"] || file.id;
+    const desc = file.frontmatter["description"] || "";
+    const bodyText = file.content.replace(/^---[\s\S]*?---\n/, "");
+    const hash = computeHash(bodyText.trim());
+
+    const cached = cachedHashes.get(file.id);
+    let domains: string[];
+    if (cached && cached.hash === hash) {
+      domains = cached.domains;
+    } else {
+      // Use AI detector for changed/new nodes
+      domains = await detector.detect(name, desc, bodyText);
+    }
+
+    const existing = existingGraph.nodes[file.id];
+    nodes[file.id] = {
+      id: file.id,
+      file: file.filename,
+      type: file.frontmatter["type"] || "rule",
+      name,
+      description: desc || bodyText.trim().slice(0, 500),
+      domains,
+      severity: inferSeverity(bodyText),
+      occurrence_count: existing?.occurrence_count ?? 0,
+      last_updated: existing?.last_updated ?? new Date().toISOString(),
+      content_hash: hash,
+      memoryType: file.frontmatter["memoryType"] || "behavioral-rule",
+    };
+  }
+
+  const allEdges: GraphEdge[] = [];
+  const edgeSeen = new Set<string>();
+
+  // Restore cached edges where both nodes unchanged
+  for (const edge of existingGraph.edges) {
+    const fromNode = nodes[edge.from];
+    const toNode = nodes[edge.to];
+    if (!fromNode || !toNode) continue;
+
+    const fromCached = cachedHashes.get(edge.from);
+    const toCached = cachedHashes.get(edge.to);
+    const fromUnchanged = fromCached && fromNode.content_hash === fromCached.hash;
+    const toUnchanged = toCached && toNode.content_hash === toCached.hash;
+
+    if (fromUnchanged && toUnchanged) {
+      const key = [edge.from, edge.to].sort().join("::") + "::" + edge.relationship;
+      if (!edgeSeen.has(key)) {
+        edgeSeen.add(key);
+        allEdges.push(edge);
+      }
+    }
+  }
+
+  // Same-domain edges
+  const existingPairs = new Set(allEdges.map((e) => [e.from, e.to].sort().join("::")));
   const domainEdges = buildSameDomainEdges(nodes, existingPairs);
   for (const edge of domainEdges) {
     const key = [edge.from, edge.to].sort().join("::") + "::" + edge.relationship;

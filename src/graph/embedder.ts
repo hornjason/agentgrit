@@ -5,6 +5,7 @@ const DEFAULT_MODEL = "voyage-3-lite";
 const DEFAULT_BATCH_SIZE = 20;
 const DEFAULT_MAX_EDGES = 8;
 const DEFAULT_SIMILARITY_FLOOR = 0.60;
+const DEFAULT_DUPLICATE_THRESHOLD = 0.92;
 
 const SIMILARITY_TIERS = [
   { min: 0.75, strength: 1.0 },
@@ -156,4 +157,106 @@ export function findEmbeddingEdges(
   }
 
   return edges;
+}
+
+// ── Near-Duplicate Detection (from MemoryConsolidator) ──
+
+export interface DuplicateCluster {
+  nodes: string[];
+  maxSimilarity: number;
+  pairs: Array<{ a: string; b: string; similarity: number }>;
+}
+
+export function findNearDuplicates(
+  embeddings: Embedding[],
+  threshold: number = DEFAULT_DUPLICATE_THRESHOLD,
+): DuplicateCluster[] {
+  const pairs: Array<{ a: string; b: string; similarity: number }> = [];
+
+  for (let i = 0; i < embeddings.length; i++) {
+    for (let j = i + 1; j < embeddings.length; j++) {
+      const sim = cosine(embeddings[i].vector, embeddings[j].vector);
+      if (sim >= threshold) {
+        pairs.push({ a: embeddings[i].id, b: embeddings[j].id, similarity: sim });
+      }
+    }
+  }
+
+  if (pairs.length === 0) return [];
+
+  // Union-find clustering
+  const parent = new Map<string, string>();
+  function find(x: string): string {
+    if (!parent.has(x)) parent.set(x, x);
+    if (parent.get(x) !== x) parent.set(x, find(parent.get(x)!));
+    return parent.get(x)!;
+  }
+  function union(a: string, b: string): void {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent.set(ra, rb);
+  }
+
+  for (const p of pairs) {
+    union(p.a, p.b);
+  }
+
+  // Group by root
+  const groups = new Map<string, Set<string>>();
+  const allNodes = new Set(pairs.flatMap((p) => [p.a, p.b]));
+  for (const node of allNodes) {
+    const root = find(node);
+    if (!groups.has(root)) groups.set(root, new Set());
+    groups.get(root)!.add(node);
+  }
+
+  return [...groups.values()].map((nodes) => {
+    const nodeArr = [...nodes];
+    const clusterPairs = pairs.filter((p) => nodes.has(p.a) && nodes.has(p.b));
+    const maxSimilarity = Math.max(...clusterPairs.map((p) => p.similarity));
+    return { nodes: nodeArr, maxSimilarity, pairs: clusterPairs };
+  });
+}
+
+// ── Memory Classification (from MemoryTagger) ──
+
+export type MemoryType = "episodic" | "procedural" | "semantic";
+
+const MEMORY_TYPE_PATTERNS: Record<MemoryType, RegExp[]> = {
+  episodic: [
+    /\bfound\b/i, /\bdiscovered\b/i, /\boccurred\b/i, /\bhappened\b/i,
+    /\bconfirmed\b/i, /\bbroke\b/i, /\bfailed\b/i, /\bincident\b/i,
+    /\bsession\b.*\b(revealed|showed|exposed)\b/i,
+  ],
+  procedural: [
+    /\balways\b/i, /\bnever\b/i, /\bmust\b/i, /\bstep\s*\d/i,
+    /\bworkflow\b/i, /\bprocess\b/i, /\bsequence\b/i, /\bbefore\b.*\bafter\b/i,
+    /\bfirst\b.*\bthen\b/i, /\bpipeline\b/i,
+  ],
+  semantic: [
+    /\buser\s+(is|prefers|uses|wants)\b/i, /\bproject\s+(uses|has|requires)\b/i,
+    /\bsystem\s+(is|uses|has)\b/i, /\barchitecture\b/i, /\bpreference\b/i,
+    /\bfact\b/i, /\bconfiguration\b/i,
+  ],
+};
+
+export function classifyMemoryType(content: string): MemoryType {
+  const scores: Record<MemoryType, number> = { episodic: 0, procedural: 0, semantic: 0 };
+
+  for (const [type, patterns] of Object.entries(MEMORY_TYPE_PATTERNS) as Array<[MemoryType, RegExp[]]>) {
+    for (const pattern of patterns) {
+      if (pattern.test(content)) scores[type]++;
+    }
+  }
+
+  let best: MemoryType = "semantic";
+  let bestScore = 0;
+  for (const [type, score] of Object.entries(scores) as Array<[MemoryType, number]>) {
+    if (score > bestScore) {
+      best = type;
+      bestScore = score;
+    }
+  }
+
+  return best;
 }

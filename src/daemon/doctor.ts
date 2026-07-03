@@ -1,4 +1,4 @@
-import { existsSync, statSync, readdirSync } from "fs";
+import { existsSync, statSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import type { AgentGritConfig } from "../adapters/types";
 
@@ -257,6 +257,121 @@ function checkSignals(config: AgentGritConfig): DoctorSection {
   };
 }
 
+// ── Integrity: Config validation ──
+
+function checkConfig(config: AgentGritConfig): DoctorSection {
+  const checks: CheckResult[] = [];
+
+  // Validate adapter setting
+  const validAdapters = ["local", "langfuse", "both"];
+  if (validAdapters.includes(config.adapter)) {
+    checks.push({ name: "adapter", status: "ok", message: `Adapter: ${config.adapter}` });
+  } else {
+    checks.push({ name: "adapter", status: "error", message: `Invalid adapter: ${config.adapter}` });
+  }
+
+  // Langfuse credentials when needed
+  if ((config.adapter === "langfuse" || config.adapter === "both") && !config.langfuse?.publicKey) {
+    checks.push({
+      name: "langfuse-keys",
+      status: "warning",
+      message: "Langfuse adapter configured but no public key set",
+    });
+  } else if (config.langfuse?.publicKey) {
+    checks.push({ name: "langfuse-keys", status: "ok", message: "Langfuse keys configured" });
+  }
+
+  // Rule budgets
+  if (config.rules.globalBudget > 0) {
+    checks.push({
+      name: "rule-budget",
+      status: "ok",
+      message: `Rule budgets: global=${config.rules.globalBudget}, project=${config.rules.projectBudget}`,
+    });
+  }
+
+  // Daemon interval
+  if (config.daemon.interval) {
+    checks.push({
+      name: "daemon-interval",
+      status: "ok",
+      message: `Daemon interval: ${config.daemon.interval}, weekly: ${config.daemon.weeklyDay}`,
+    });
+  }
+
+  return {
+    name: "CONFIG",
+    status: worstStatus(checks.map((c) => c.status)),
+    checks,
+  };
+}
+
+// ── Integrity: Cross-reference validation ──
+
+function checkCrossReferences(config: AgentGritConfig): DoctorSection {
+  const checks: CheckResult[] = [];
+  const stateBase = join(config.signalDir, "..", "state");
+  const graphPath = join(stateBase, "knowledge-graph.json");
+  const rulesBase = join(config.signalDir, "..", "rules");
+
+  // Check graph nodes vs rule files
+  if (existsSync(graphPath) && existsSync(rulesBase)) {
+    try {
+      const graph = JSON.parse(readFileSync(graphPath, "utf-8"));
+      const graphNodeIds = new Set(Object.keys(graph.nodes || {}));
+      const ruleFiles = readdirSync(rulesBase).filter((f) => f.endsWith(".md"));
+      const ruleIds = new Set(ruleFiles.map((f) => f.replace(/\.md$/, "")));
+
+      const orphanedNodes = [...graphNodeIds].filter((id) => !ruleIds.has(id));
+      const unindexedRules = [...ruleIds].filter((id) => !graphNodeIds.has(id));
+
+      if (orphanedNodes.length > 0) {
+        checks.push({
+          name: "orphaned-nodes",
+          status: "warning",
+          message: `${orphanedNodes.length} graph nodes with no backing rule file`,
+        });
+      }
+
+      if (unindexedRules.length > 0) {
+        checks.push({
+          name: "unindexed-rules",
+          status: "warning",
+          message: `${unindexedRules.length} rule files not yet in graph`,
+        });
+      }
+
+      if (orphanedNodes.length === 0 && unindexedRules.length === 0) {
+        checks.push({
+          name: "graph-rules-sync",
+          status: "ok",
+          message: `Graph and rules directory in sync (${graphNodeIds.size} nodes)`,
+        });
+      }
+    } catch (err) {
+      checks.push({
+        name: "cross-ref-error",
+        status: "warning",
+        message: `Could not validate cross-references: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  } else {
+    checks.push({
+      name: "cross-ref-skip",
+      status: "ok",
+      message: "Cross-reference check skipped (graph or rules not yet created)",
+    });
+  }
+
+  return {
+    name: "INTEGRITY",
+    status: worstStatus(checks.map((c) => c.status)),
+    checks,
+  };
+}
+
+// ── Run Doctor ──
+
 export async function runDoctor(config: AgentGritConfig): Promise<DoctorReport> {
   const sections: DoctorSection[] = [
     checkCapture(config),
@@ -264,6 +379,8 @@ export async function runDoctor(config: AgentGritConfig): Promise<DoctorReport> 
     checkGraph(config),
     checkRules(config),
     checkSignals(config),
+    checkConfig(config),
+    checkCrossReferences(config),
   ];
 
   return {

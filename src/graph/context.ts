@@ -1,3 +1,12 @@
+/**
+ * context.ts — Session-start context injection + reranking
+ *
+ * Consolidated from:
+ *   - PAI hooks/GraphContext.hook.ts — domain detection, rule cluster injection
+ *   - PAI hooks/lib/learning-readback.ts — read learnings back into context
+ *   - PAI Tools/VoyageReranker.ts — optional reranking of candidates
+ */
+
 import type { Graph, BM25Index, RankedCluster } from "./types";
 import { Tier, type Rule } from "../adapters/types";
 import { queryGraph } from "./query";
@@ -46,7 +55,6 @@ export function getContextRules(
   // Optionally boost with BM25 keyword search
   const queryText = domains.join(" ");
   const bm25Results = searchIndex(index, queryText, limit);
-  const bm25Ids = new Set(bm25Results.map(r => r.id));
 
   // Merge: graph-first, BM25 fills gaps
   const resultIds = new Set<string>();
@@ -90,4 +98,180 @@ export function getContextRules(
   }
 
   return rules;
+}
+
+// ── Learning Readback ──
+
+import { existsSync, readFileSync, readdirSync } from "fs";
+import { join } from "path";
+
+interface LearningDigest {
+  recentSignals: string[];
+  failurePatterns: string[];
+  themes: string[];
+}
+
+function getRecentLearnings(baseDir: string, subdir: string, count: number): string[] {
+  const insights: string[] = [];
+  const learningDir = join(baseDir, "learning", subdir);
+  if (!existsSync(learningDir)) return insights;
+
+  try {
+    // Look for month directories sorted descending
+    const months = readdirSync(learningDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && /^\d{4}-\d{2}$/.test(d.name))
+      .map((d) => d.name)
+      .sort()
+      .reverse();
+
+    for (const month of months) {
+      if (insights.length >= count) break;
+      const monthPath = join(learningDir, month);
+      try {
+        const files = readdirSync(monthPath).filter((f) => f.endsWith(".md")).sort().reverse();
+        for (const file of files) {
+          if (insights.length >= count) break;
+          try {
+            const content = readFileSync(join(monthPath, file), "utf-8");
+            const feedbackMatch = content.match(/\*\*Feedback:\*\*\s*(.+)/);
+            const ratingMatch = content.match(/rating:\s*(\d+)/);
+            if (feedbackMatch) {
+              const rating = ratingMatch ? ratingMatch[1] : "?";
+              insights.push(`[${rating}/10] ${feedbackMatch[1].substring(0, 80)}`);
+            }
+          } catch { /* skip unreadable */ }
+        }
+      } catch { /* skip unreadable month */ }
+    }
+  } catch { /* skip if dir fails */ }
+
+  return insights;
+}
+
+export function loadLearningDigest(baseDir: string): LearningDigest {
+  return {
+    recentSignals: getRecentLearnings(baseDir, "algorithm", 5),
+    failurePatterns: getRecentLearnings(baseDir, "failures", 3),
+    themes: getRecentLearnings(baseDir, "system", 3),
+  };
+}
+
+export function formatLearningContext(digest: LearningDigest): string | null {
+  const parts: string[] = [];
+
+  if (digest.recentSignals.length > 0) {
+    parts.push("**Recent Signals:**");
+    digest.recentSignals.forEach((s) => parts.push(`  ${s}`));
+  }
+
+  if (digest.failurePatterns.length > 0) {
+    parts.push("**Failure Patterns:**");
+    digest.failurePatterns.forEach((s) => parts.push(`  ${s}`));
+  }
+
+  if (digest.themes.length > 0) {
+    parts.push("**Themes:**");
+    digest.themes.forEach((s) => parts.push(`  ${s}`));
+  }
+
+  return parts.length > 0 ? parts.join("\n") : null;
+}
+
+// ── Reranking ──
+
+export interface RerankCandidate {
+  id: string;
+  text: string;
+}
+
+export interface RerankResult {
+  id: string;
+  text: string;
+  relevanceScore: number;
+  originalIndex: number;
+}
+
+export interface Reranker {
+  rerank(query: string, candidates: RerankCandidate[], topK?: number): Promise<RerankResult[]>;
+}
+
+/**
+ * Create a reranker that uses Jina AI or Voyage AI reranking API.
+ * Provider is auto-detected from environment variables.
+ */
+export function createReranker(apiKey: string, provider: "jina" | "voyage" = "jina"): Reranker {
+  return {
+    async rerank(query: string, candidates: RerankCandidate[], topK = 10): Promise<RerankResult[]> {
+      const documents = candidates.map((c) => c.text);
+
+      const url = provider === "jina"
+        ? "https://api.jina.ai/v1/rerank"
+        : "https://api.voyageai.com/v1/rerank";
+
+      const model = provider === "jina"
+        ? "jina-reranker-v2-base-multilingual"
+        : "rerank-2-lite";
+
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          query,
+          documents,
+          top_n: Math.min(topK, candidates.length),
+        }),
+      });
+
+      if (!resp.ok) {
+        throw new Error(`Rerank API ${resp.status}: ${await resp.text()}`);
+      }
+
+      const json = (await resp.json()) as {
+        results?: Array<{ index: number; relevance_score: number }>;
+        data?: Array<{ index: number; relevance_score: number }>;
+      };
+
+      const results = json.results || json.data || [];
+      return results
+        .sort((a, b) => b.relevance_score - a.relevance_score)
+        .map((r) => ({
+          id: candidates[r.index].id,
+          text: candidates[r.index].text,
+          relevanceScore: r.relevance_score,
+          originalIndex: r.index,
+        }));
+    },
+  };
+}
+
+/**
+ * Get context rules with optional reranking.
+ * First retrieves via graph + BM25, then optionally reranks with an API.
+ */
+export function getContextRulesWithReranking(
+  graph: Graph,
+  index: BM25Index,
+  currentDomains: string[],
+  reranker: Reranker | null,
+  query: string,
+  limit: number = 10,
+): Promise<Rule[]> {
+  const rules = getContextRules(graph, index, currentDomains, limit * 2);
+
+  if (!reranker || rules.length === 0) {
+    return Promise.resolve(rules.slice(0, limit));
+  }
+
+  const candidates = rules.map((r) => ({ id: r.id, text: r.text }));
+
+  return reranker.rerank(query, candidates, limit).then((reranked) => {
+    const ruleMap = new Map(rules.map((r) => [r.id, r]));
+    return reranked
+      .map((r) => ruleMap.get(r.id))
+      .filter((r): r is Rule => r !== undefined);
+  });
 }
