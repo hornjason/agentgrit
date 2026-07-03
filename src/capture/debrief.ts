@@ -1,6 +1,24 @@
+/**
+ * debrief.ts - Session-end extraction of correction and approval signals
+ *
+ * Consolidates:
+ * - AutoDebrief.hook.ts: Full transcript analysis that extracts correction and
+ *   approval moments from every session. Feeds the learning pipeline with raw
+ *   behavioral data that weekly review can promote into hard rules.
+ *
+ * Key capabilities:
+ * - Transcript parsing (JSONL format with user/assistant turns)
+ * - Correction phrase detection with noise filtering
+ * - Approval signal detection
+ * - Reprompt detection via word overlap analysis
+ * - Theme-based grouping of corrections into rule candidates
+ */
+
 import { randomUUID } from "crypto";
 import type { CorrectionSignal } from "../adapters/types";
 import { SCHEMA_VERSION } from "../adapters/types";
+
+// ── Types ──
 
 export interface RuleCandidate {
   id: string;
@@ -9,6 +27,21 @@ export interface RuleCandidate {
   frequency: number;
   severity: number;
 }
+
+export interface DebriefResult {
+  candidates: RuleCandidate[];
+  corrections: CorrectionSignal[];
+  approvals: ApprovalSignal[];
+  reprompts: number;
+}
+
+export interface ApprovalSignal {
+  phrase: string;
+  context: string;
+  turnIndex: number;
+}
+
+// ── Phrase lists ──
 
 const CORRECTION_PHRASES: { phrase: RegExp; severity: number }[] = [
   { phrase: /\bno[,.]?\s+not\s+(?:like\s+)?that\b/i, severity: 7 },
@@ -22,6 +55,7 @@ const CORRECTION_PHRASES: { phrase: RegExp; severity: number }[] = [
   { phrase: /\bnot\s+(?:right|correct)\b/i, severity: 5 },
   { phrase: /\byou\s+missed\b/i, severity: 5 },
   { phrase: /\btoo\s+much\b/i, severity: 4 },
+  { phrase: /\bbad\s+approach\b/i, severity: 7 },
 ];
 
 const NOISE_FILTER: RegExp[] = [
@@ -35,12 +69,30 @@ const NOISE_FILTER: RegExp[] = [
   /\bdon'?t\s+(?:forget|mind)\b/i,
 ];
 
+const APPROVAL_PHRASES = [
+  "perfect",
+  "yes exactly",
+  "great work",
+  "love it",
+  "keep doing that",
+  "nice",
+  "that's right",
+  "excellent",
+  "well done",
+  "nailed it",
+  "go for it",
+];
+
+// ── Turn type ──
+
 interface Turn {
   role: "user" | "assistant";
   text: string;
 }
 
-function parseTranscript(transcript: string): Turn[] {
+// ── Transcript parsing ──
+
+export function parseTranscript(transcript: string): Turn[] {
   const turns: Turn[] = [];
   const lines = transcript.split("\n").filter((l) => l.trim());
 
@@ -77,6 +129,8 @@ function parseTranscript(transcript: string): Turn[] {
 
   return turns;
 }
+
+// ── Correction detection ──
 
 function detectCorrections(
   turns: Turn[],
@@ -116,7 +170,71 @@ function detectCorrections(
   return corrections;
 }
 
-function groupByTheme(corrections: CorrectionSignal[]): Map<string, CorrectionSignal[]> {
+// ── Approval detection (from AutoDebrief) ──
+
+function detectApprovals(turns: Turn[]): ApprovalSignal[] {
+  const approvals: ApprovalSignal[] = [];
+  const userTurns = turns.filter((t) => t.role === "user");
+
+  for (let i = 0; i < userTurns.length; i++) {
+    const lowerText = userTurns[i].text.toLowerCase();
+
+    for (const phrase of APPROVAL_PHRASES) {
+      if (lowerText.includes(phrase)) {
+        const phraseIdx = lowerText.indexOf(phrase);
+        const context = userTurns[i].text
+          .slice(Math.max(0, phraseIdx - 80), phraseIdx)
+          .trim();
+
+        approvals.push({
+          phrase,
+          context,
+          turnIndex: i,
+        });
+        break;
+      }
+    }
+  }
+
+  return approvals;
+}
+
+// ── Reprompt detection via word overlap ──
+
+function detectReprompts(turns: Turn[]): number {
+  const userTexts = turns
+    .filter((t) => t.role === "user")
+    .map((t) => t.text);
+
+  let reprompts = 0;
+  const maxPairs = Math.min(userTexts.length - 1, 50);
+
+  for (let i = 0; i < maxPairs; i++) {
+    const wordsA = new Set(
+      userTexts[i].toLowerCase().split(/\s+/).filter((w) => w.length > 2),
+    );
+    const wordsB = new Set(
+      userTexts[i + 1].toLowerCase().split(/\s+/).filter((w) => w.length > 2),
+    );
+    if (wordsA.size === 0 || wordsB.size === 0) continue;
+
+    let overlap = 0;
+    for (const word of wordsA) {
+      if (wordsB.has(word)) overlap++;
+    }
+
+    const ratio = overlap / Math.min(wordsA.size, wordsB.size);
+    if (ratio > 0.6) reprompts++;
+  }
+
+  return reprompts;
+}
+
+// ── Theme grouping ──
+
+function groupByTheme(
+  corrections: CorrectionSignal[],
+): Map<string, CorrectionSignal[]> {
   const themes = new Map<string, CorrectionSignal[]>();
 
   for (const correction of corrections) {
@@ -141,15 +259,19 @@ function groupByTheme(corrections: CorrectionSignal[]): Map<string, CorrectionSi
   return themes;
 }
 
+// ── Main debrief extraction ──
+
 export async function extractDebrief(
   transcript: string,
   sessionId: string,
-): Promise<{ candidates: RuleCandidate[]; corrections: CorrectionSignal[] }> {
+): Promise<DebriefResult> {
   const turns = parseTranscript(transcript);
   const corrections = detectCorrections(turns, sessionId);
+  const approvals = detectApprovals(turns);
+  const reprompts = detectReprompts(turns);
 
-  if (corrections.length === 0) {
-    return { candidates: [], corrections: [] };
+  if (corrections.length === 0 && approvals.length === 0) {
+    return { candidates: [], corrections: [], approvals: [], reprompts };
   }
 
   const themes = groupByTheme(corrections);
@@ -167,5 +289,5 @@ export async function extractDebrief(
     });
   }
 
-  return { candidates, corrections };
+  return { candidates, corrections, approvals, reprompts };
 }
