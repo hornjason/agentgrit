@@ -16,7 +16,7 @@
 import { spawn } from "child_process";
 
 export type InferenceLevel = "fast" | "standard" | "smart";
-export type InferenceProvider = "claude" | "gemini" | "openai";
+export type InferenceProvider = "claude-cli" | "gemini" | "openai";
 
 export interface InferenceOptions {
   systemPrompt: string;
@@ -45,9 +45,9 @@ interface LevelConfig {
 }
 
 const CLAUDE_LEVELS: Record<InferenceLevel, LevelConfig> = {
-  fast: { model: "haiku", defaultTimeout: 15_000 },
-  standard: { model: "sonnet", defaultTimeout: 30_000 },
-  smart: { model: "opus", defaultTimeout: 90_000 },
+  fast: { model: "claude-haiku-4-5-20251001", defaultTimeout: 15_000 },
+  standard: { model: "claude-sonnet-5", defaultTimeout: 30_000 },
+  smart: { model: "claude-opus-4-6", defaultTimeout: 90_000 },
 };
 
 const GEMINI_LEVELS: Record<InferenceLevel, LevelConfig> = {
@@ -66,6 +66,7 @@ function getConfig(provider: InferenceProvider, level: InferenceLevel): LevelCon
   switch (provider) {
     case "gemini": return GEMINI_LEVELS[level];
     case "openai": return OPENAI_LEVELS[level];
+    case "claude-cli":
     default: return CLAUDE_LEVELS[level];
   }
 }
@@ -76,6 +77,8 @@ function inferenceClaude(options: InferenceOptions, config: LevelConfig, timeout
   const level = options.level || "standard";
 
   return new Promise((resolve) => {
+    // Strip API key and CLAUDECODE to force subscription auth and prevent
+    // recursive invocation when running inside Claude Code
     const env = { ...process.env };
     delete env.ANTHROPIC_API_KEY;
     delete env.CLAUDECODE;
@@ -85,7 +88,8 @@ function inferenceClaude(options: InferenceOptions, config: LevelConfig, timeout
       "--bare",
       "--model", config.model,
       "--tools", "",
-      "--output-format", "text",
+      "--output-format", options.expectJson ? "json" : "text",
+      "--max-tokens", "4096",
       "--system-prompt", options.systemPrompt,
     ];
 
@@ -98,6 +102,7 @@ function inferenceClaude(options: InferenceOptions, config: LevelConfig, timeout
       stdio: ["pipe", "pipe", "pipe"],
     });
 
+    // Write prompt via stdin to avoid ARG_MAX limits on large inputs
     proc.stdin.write(options.userPrompt);
     proc.stdin.end();
 
@@ -112,7 +117,7 @@ function inferenceClaude(options: InferenceOptions, config: LevelConfig, timeout
         error: `Timeout after ${timeout}ms`,
         latencyMs: Date.now() - startTime,
         level,
-        provider: "claude",
+        provider: "claude-cli",
       });
     }, timeout);
 
@@ -121,7 +126,7 @@ function inferenceClaude(options: InferenceOptions, config: LevelConfig, timeout
       const latencyMs = Date.now() - startTime;
 
       if (code !== 0) {
-        resolve({ success: false, output: stdout, error: stderr || `exit ${code}`, latencyMs, level, provider: "claude" });
+        resolve({ success: false, output: stdout, error: stderr || `exit ${code}`, latencyMs, level, provider: "claude-cli" });
         return;
       }
 
@@ -130,19 +135,22 @@ function inferenceClaude(options: InferenceOptions, config: LevelConfig, timeout
       if (options.expectJson) {
         const parsed = tryParseJson(output);
         if (parsed !== undefined) {
-          resolve({ success: true, output, parsed, latencyMs, level, provider: "claude" });
+          resolve({ success: true, output, parsed, latencyMs, level, provider: "claude-cli" });
         } else {
-          resolve({ success: false, output, error: "Failed to parse JSON response", latencyMs, level, provider: "claude" });
+          resolve({ success: false, output, error: "Failed to parse JSON response", latencyMs, level, provider: "claude-cli" });
         }
         return;
       }
 
-      resolve({ success: true, output, latencyMs, level, provider: "claude" });
+      resolve({ success: true, output, latencyMs, level, provider: "claude-cli" });
     });
 
     proc.on("error", (err) => {
       clearTimeout(timeoutId);
-      resolve({ success: false, output: "", error: err.message, latencyMs: Date.now() - startTime, level, provider: "claude" });
+      const msg = err.message.includes("ENOENT")
+        ? "claude CLI not found — install Claude Code first"
+        : err.message;
+      resolve({ success: false, output: "", error: msg, latencyMs: Date.now() - startTime, level, provider: "claude-cli" });
     });
   });
 }
@@ -291,10 +299,12 @@ function tryParseJson(text: string): unknown | undefined {
 function detectProvider(): InferenceProvider {
   if (process.env.AGENTGRIT_PROVIDER) {
     const p = process.env.AGENTGRIT_PROVIDER.toLowerCase();
-    if (p === "gemini" || p === "openai" || p === "claude") return p as InferenceProvider;
+    if (p === "gemini") return "gemini";
+    if (p === "openai") return "openai";
+    if (p === "claude-cli" || p === "claude") return "claude-cli";
   }
-  // Default to claude
-  return "claude";
+  // Default to claude CLI — every AgentGrit user has Claude Code installed
+  return "claude-cli";
 }
 
 // ── Main Inference Function ──
@@ -310,6 +320,7 @@ export async function inference(options: InferenceOptions): Promise<InferenceRes
       return inferenceGemini(options, config, timeout);
     case "openai":
       return inferenceOpenAI(options, config, timeout);
+    case "claude-cli":
     default:
       return inferenceClaude(options, config, timeout);
   }
