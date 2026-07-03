@@ -11,10 +11,10 @@ export enum Tier {
 // ── Signals ──
 
 export interface Signal {
-  id: string;
+  id?: string;
   timestamp: string;
-  sessionId: string;
-  schemaVersion: number;
+  session_id: string;
+  schemaVersion?: number;
 }
 
 export interface RatingSignal extends Signal {
@@ -24,15 +24,15 @@ export interface RatingSignal extends Signal {
   comment?: string;
   sentimentSummary?: string;
   confidence?: number;
-  responsePreview?: string;
-  ruleIds?: string[];
+  response_preview?: string;
+  rule_ids?: string[];
 }
 
 export interface CorrectionSignal extends Signal {
   type: "correction";
-  trigger: string;
+  correction_phrase: string;
   context: string;
-  severity: number;
+  turn_index?: number;
 }
 
 export interface SentimentSignal extends Signal {
@@ -47,10 +47,8 @@ export interface SentimentSignal extends Signal {
 
 export interface SkillInvocationSignal extends Signal {
   type: "skill-invocation";
-  skillName: string;
-  trigger: string;
-  duration?: number;
-  success?: boolean;
+  skill: string;
+  workflow?: string;
 }
 
 export type AnySignal =
@@ -122,28 +120,24 @@ export type EdgeSource = "inferred" | "explicit" | "manual" | "embedding";
 
 export interface GraphNode {
   id: string;
+  file: string;
+  type: string;
   name: string;
+  description: string;
   domains: string[];
-  ruleText?: string;
-  hash?: string;
-  stats: GraphNodeStats;
-}
-
-export interface GraphNodeStats {
-  injectionCount: number;
-  avgRating: number;
-  highRatingActivations: number;
-  lowRatingActivations: number;
-  sessionRatings: number[];
-  lastSeen: string;
+  severity: number;
+  occurrence_count: number;
+  last_updated: string;
+  content_hash: string;
+  memoryType: string;
 }
 
 export interface GraphEdge {
-  source: string;
-  target: string;
-  type: EdgeType;
+  from: string;
+  to: string;
+  relationship: EdgeType;
   strength: number;
-  edgeSource?: EdgeSource;
+  source?: EdgeSource;
 }
 
 // ── Trajectories ──

@@ -84,8 +84,8 @@ function computeHash(body: string): string {
 
 // ── Keyword Domain Classifier ──
 
-export function keywordClassify(name: string, description: string, ruleText: string): string[] | null {
-  const text = `${name} ${description} ${ruleText}`.toLowerCase();
+export function keywordClassify(name: string, description: string, content: string): string[] | null {
+  const text = `${name} ${description} ${content}`.toLowerCase();
 
   if (/makefile|make rebuild|make test|test container|docker|podman|deploy sequence|rebuild/.test(text) &&
       !/before assert|check before|read before|verify state/.test(text)) return ["deployment"];
@@ -162,9 +162,9 @@ function buildSameDomainEdges(
 
         seen.add(pairKey);
         edges.push({
-          source: sorted[i].id,
-          target: neighbor.id,
-          type: "same_domain",
+          from: sorted[i].id,
+          to: neighbor.id,
+          relationship: "same_domain",
           strength: 0.5,
         });
         edgesForNode++;
@@ -183,8 +183,8 @@ export async function buildGraph(rulesDir: string, stateOutputDir?: string): Pro
 
   const cachedHashes = new Map<string, { domains: string[]; hash: string }>();
   for (const node of Object.values(existingGraph.nodes)) {
-    if (node.hash) {
-      cachedHashes.set(node.id, { domains: node.domains, hash: node.hash });
+    if (node.content_hash) {
+      cachedHashes.set(node.id, { domains: node.domains, hash: node.content_hash });
     }
   }
 
@@ -192,33 +192,32 @@ export async function buildGraph(rulesDir: string, stateOutputDir?: string): Pro
 
   for (const file of files) {
     const name = file.frontmatter["name"] || file.id;
-    const description = file.frontmatter["description"] || "";
-    const ruleText = file.content.replace(/^---[\s\S]*?---\n/, "");
-    const hash = computeHash(ruleText.trim());
+    const desc = file.frontmatter["description"] || "";
+    const bodyText = file.content.replace(/^---[\s\S]*?---\n/, "");
+    const hash = computeHash(bodyText.trim());
 
     const cached = cachedHashes.get(file.id);
     let domains: string[];
     if (cached && cached.hash === hash) {
       domains = cached.domains;
     } else {
-      const classified = keywordClassify(name, description, ruleText);
+      const classified = keywordClassify(name, desc, bodyText);
       domains = classified || ["verification"];
     }
 
+    const existing = existingGraph.nodes[file.id];
     nodes[file.id] = {
       id: file.id,
+      file: file.filename,
+      type: file.frontmatter["type"] || "rule",
       name,
+      description: desc || bodyText.trim().slice(0, 500),
       domains,
-      ruleText: ruleText.trim().slice(0, 500),
-      hash,
-      stats: {
-        injectionCount: existingGraph.nodes[file.id]?.stats.injectionCount ?? 0,
-        avgRating: existingGraph.nodes[file.id]?.stats.avgRating ?? 0,
-        highRatingActivations: existingGraph.nodes[file.id]?.stats.highRatingActivations ?? 0,
-        lowRatingActivations: existingGraph.nodes[file.id]?.stats.lowRatingActivations ?? 0,
-        sessionRatings: existingGraph.nodes[file.id]?.stats.sessionRatings ?? [],
-        lastSeen: existingGraph.nodes[file.id]?.stats.lastSeen ?? new Date().toISOString(),
-      },
+      severity: inferSeverity(bodyText),
+      occurrence_count: existing?.occurrence_count ?? 0,
+      last_updated: existing?.last_updated ?? new Date().toISOString(),
+      content_hash: hash,
+      memoryType: file.frontmatter["memoryType"] || "behavioral-rule",
     };
   }
 
@@ -227,17 +226,17 @@ export async function buildGraph(rulesDir: string, stateOutputDir?: string): Pro
 
   // Restore cached inferred edges where both nodes are unchanged
   for (const edge of existingGraph.edges) {
-    const sourceNode = nodes[edge.source];
-    const targetNode = nodes[edge.target];
-    if (!sourceNode || !targetNode) continue;
+    const fromNode = nodes[edge.from];
+    const toNode = nodes[edge.to];
+    if (!fromNode || !toNode) continue;
 
-    const sourceCached = cachedHashes.get(edge.source);
-    const targetCached = cachedHashes.get(edge.target);
-    const sourceUnchanged = sourceCached && sourceNode.hash === sourceCached.hash;
-    const targetUnchanged = targetCached && targetNode.hash === targetCached.hash;
+    const fromCached = cachedHashes.get(edge.from);
+    const toCached = cachedHashes.get(edge.to);
+    const fromUnchanged = fromCached && fromNode.content_hash === fromCached.hash;
+    const toUnchanged = toCached && toNode.content_hash === toCached.hash;
 
-    if (sourceUnchanged && targetUnchanged) {
-      const key = [edge.source, edge.target].sort().join("::") + "::" + edge.type;
+    if (fromUnchanged && toUnchanged) {
+      const key = [edge.from, edge.to].sort().join("::") + "::" + edge.relationship;
       if (!edgeSeen.has(key)) {
         edgeSeen.add(key);
         allEdges.push(edge);
@@ -246,10 +245,10 @@ export async function buildGraph(rulesDir: string, stateOutputDir?: string): Pro
   }
 
   // Same-domain edges
-  const existingPairs = new Set(allEdges.map(e => [e.source, e.target].sort().join("::")));
+  const existingPairs = new Set(allEdges.map(e => [e.from, e.to].sort().join("::")));
   const domainEdges = buildSameDomainEdges(nodes, existingPairs);
   for (const edge of domainEdges) {
-    const key = [edge.source, edge.target].sort().join("::") + "::" + edge.type;
+    const key = [edge.from, edge.to].sort().join("::") + "::" + edge.relationship;
     if (!edgeSeen.has(key)) {
       edgeSeen.add(key);
       allEdges.push(edge);
@@ -290,26 +289,24 @@ export function updateGraph(graph: Graph, newRules: Rule[]): Graph {
       updated.nodes[rule.id] = {
         ...updated.nodes[rule.id],
         domains,
-        ruleText: rule.text.slice(0, 500),
-        hash,
+        description: rule.text.slice(0, 500),
+        content_hash: hash,
       };
       continue;
     }
 
     updated.nodes[rule.id] = {
       id: rule.id,
+      file: `${rule.id}.md`,
+      type: "rule",
       name: rule.id,
+      description: rule.text.slice(0, 500),
       domains,
-      ruleText: rule.text.slice(0, 500),
-      hash,
-      stats: {
-        injectionCount: 0,
-        avgRating: 0,
-        highRatingActivations: 0,
-        lowRatingActivations: 0,
-        sessionRatings: [],
-        lastSeen: new Date().toISOString(),
-      },
+      severity: inferSeverity(rule.text),
+      occurrence_count: 0,
+      last_updated: new Date().toISOString(),
+      content_hash: hash,
+      memoryType: "behavioral-rule",
     };
 
     // Connect to domain siblings
@@ -320,13 +317,13 @@ export function updateGraph(graph: Graph, newRules: Rule[]): Graph {
     for (const sibling of siblings.slice(0, 4)) {
       const pairKey = [rule.id, sibling.id].sort().join("::");
       const exists = updated.edges.some(
-        e => [e.source, e.target].sort().join("::") === pairKey,
+        e => [e.from, e.to].sort().join("::") === pairKey,
       );
       if (!exists) {
         updated.edges.push({
-          source: rule.id,
-          target: sibling.id,
-          type: "same_domain",
+          from: rule.id,
+          to: sibling.id,
+          relationship: "same_domain",
           strength: 0.5,
         });
       }
@@ -350,7 +347,7 @@ export function pruneStaleNodes(graph: Graph, validIds: Set<string>): Graph {
 
   const staleSet = new Set(staleIds);
   for (const id of staleIds) delete pruned.nodes[id];
-  pruned.edges = pruned.edges.filter(e => !staleSet.has(e.source) && !staleSet.has(e.target));
+  pruned.edges = pruned.edges.filter(e => !staleSet.has(e.from) && !staleSet.has(e.to));
   pruned.nodeCount = Object.keys(pruned.nodes).length;
   pruned.edgeCount = pruned.edges.length;
 

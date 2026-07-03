@@ -26,7 +26,7 @@ describe("signals command", () => {
       id: `r${i}`,
       type: "rating",
       timestamp: new Date().toISOString(),
-      sessionId: `s${i}`,
+      session_id: `s${i}`,
       schemaVersion: 1,
       rating: 7,
       source: "explicit",
@@ -42,7 +42,7 @@ describe("signals command", () => {
   });
 
   test("rotates large files", async () => {
-    const line = JSON.stringify({ id: "1", type: "correction", timestamp: new Date().toISOString(), sessionId: "s1", schemaVersion: 1, trigger: "no", context: "wrong", severity: 3 }) + "\n";
+    const line = JSON.stringify({ id: "1", type: "correction", timestamp: new Date().toISOString(), session_id: "s1", schemaVersion: 1, correction_phrase: "no", context: "wrong" }) + "\n";
     const path = join(TEST_DIR, "signals", "big.jsonl");
     writeFileSync(path, line.repeat(1000));
 

@@ -4,7 +4,7 @@ import { join } from "path";
 import { getContextRules, detectDomains } from "../../src/graph/context";
 import { buildIndex } from "../../src/graph/bm25";
 import type { Graph } from "../../src/graph/types";
-import type { GraphNode, GraphNodeStats } from "../../src/adapters/types";
+import type { GraphNode } from "../../src/adapters/types";
 
 const TMP_DIR = join(import.meta.dir, ".tmp-context-test");
 
@@ -17,25 +17,19 @@ afterEach(() => {
   if (existsSync(TMP_DIR)) rmSync(TMP_DIR, { recursive: true });
 });
 
-function makeStats(): GraphNodeStats {
-  return {
-    injectionCount: 0,
-    avgRating: 0,
-    highRatingActivations: 0,
-    lowRatingActivations: 0,
-    sessionRatings: [],
-    lastSeen: new Date().toISOString(),
-  };
-}
-
-function makeNode(id: string, domains: string[], ruleText?: string): GraphNode {
+function makeNode(id: string, domains: string[], description?: string): GraphNode {
   return {
     id,
+    file: `${id}.md`,
+    type: "rule",
     name: `Rule: ${id}`,
+    description: description || `Text for ${id}`,
     domains,
-    ruleText: ruleText || `Text for ${id}`,
-    hash: id.slice(0, 8),
-    stats: makeStats(),
+    severity: 3,
+    occurrence_count: 0,
+    last_updated: new Date().toISOString(),
+    content_hash: id.slice(0, 8),
+    memoryType: "behavioral-rule",
   };
 }
 
@@ -139,8 +133,6 @@ describe("getContextRules", () => {
       makeNode("graph_rule", ["deployment"], "Deploy with make rebuild"),
     ]);
 
-    // BM25 index has a doc not in the graph — content must match the BM25 query
-    // which is domains.join(" ") = "deployment"
     const f1 = join(TMP_DIR, "bm25_rule.md");
     writeFileSync(f1, "deployment deployment deployment containers", "utf-8");
     const index = buildIndex([f1]);

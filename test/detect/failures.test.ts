@@ -11,18 +11,16 @@ const TMP_DIR = join(import.meta.dir, ".tmp-failures-test");
 function makeCorrection(
   id: string,
   sessionId: string,
-  trigger: string,
-  severity = 5,
+  correctionPhrase: string,
 ): CorrectionSignal {
   return {
     id,
     type: "correction",
     timestamp: new Date().toISOString(),
-    sessionId,
+    session_id: sessionId,
     schemaVersion: SCHEMA_VERSION,
-    trigger,
-    context: `Context for ${trigger}`,
-    severity,
+    correction_phrase: correctionPhrase,
+    context: `Context for ${correctionPhrase}`,
   };
 }
 
@@ -89,19 +87,19 @@ describe("detectFailurePatterns", () => {
     expect(patterns.length).toBe(0);
   });
 
-  test("patterns include session ids and severity", async () => {
+  test("patterns include session ids and timestamps", async () => {
     const file = join(TMP_DIR, "corrections.jsonl");
     for (let i = 0; i < 6; i++) {
       await appendSignal(
         file,
-        makeCorrection(`c${i}`, `sess-${i}`, "verify before asserting claims", 8),
+        makeCorrection(`c${i}`, `sess-${i}`, "verify before asserting claims"),
       );
     }
 
     const patterns = await detectFailurePatterns(TMP_DIR, 5);
     expect(patterns.length).toBe(1);
     expect(patterns[0].sessions.length).toBeGreaterThanOrEqual(5);
-    expect(patterns[0].severity).toBe(8);
+    expect(patterns[0].severity).toBeGreaterThan(0);
     expect(patterns[0].firstSeen).toBeDefined();
     expect(patterns[0].lastSeen).toBeDefined();
   });

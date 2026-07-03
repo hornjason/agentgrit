@@ -13,7 +13,7 @@ function makeSignal(id: string, rating = 8): RatingSignal {
     id,
     type: "rating",
     timestamp: new Date().toISOString(),
-    sessionId: "test-session",
+    session_id: "test-session",
     schemaVersion: SCHEMA_VERSION,
     rating,
     source: "explicit",
@@ -87,7 +87,7 @@ describe("readSignals", () => {
   });
 
   test("skips malformed lines", async () => {
-    await Bun.write(TEST_FILE, '{"id":"s1","type":"rating","timestamp":"2024-01-01T00:00:00Z","sessionId":"x","schemaVersion":1,"rating":8,"source":"explicit"}\nnot-json\n{"id":"s2","type":"rating","timestamp":"2024-01-01T00:00:00Z","sessionId":"x","schemaVersion":1,"rating":9,"source":"explicit"}\n');
+    await Bun.write(TEST_FILE, '{"id":"s1","type":"rating","timestamp":"2024-01-01T00:00:00Z","session_id":"x","schemaVersion":1,"rating":8,"source":"explicit"}\nnot-json\n{"id":"s2","type":"rating","timestamp":"2024-01-01T00:00:00Z","session_id":"x","schemaVersion":1,"rating":9,"source":"explicit"}\n');
 
     const result = await readSignals(TEST_FILE);
     expect(result).toHaveLength(2);

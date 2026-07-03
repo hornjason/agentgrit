@@ -5,23 +5,23 @@ import type { CorrectionSignal, RatingSignal, SentimentSignal } from "../../src/
 function makeRating(rating: number): RatingSignal {
   return {
     id: `r-${Math.random()}`, timestamp: new Date().toISOString(),
-    sessionId: "test-session", schemaVersion: 1, type: "rating",
+    session_id: "test-session", schemaVersion: 1, type: "rating",
     rating, source: "explicit",
   };
 }
 
-function makeCorrection(severity: number): CorrectionSignal {
+function makeCorrection(): CorrectionSignal {
   return {
     id: `c-${Math.random()}`, timestamp: new Date().toISOString(),
-    sessionId: "test-session", schemaVersion: 1, type: "correction",
-    trigger: "no", context: "test context", severity,
+    session_id: "test-session", schemaVersion: 1, type: "correction",
+    correction_phrase: "no", context: "test context",
   };
 }
 
 function makeSentiment(rating: number): SentimentSignal {
   return {
     id: `s-${Math.random()}`, timestamp: new Date().toISOString(),
-    sessionId: "test-session", schemaVersion: 1, type: "sentiment",
+    session_id: "test-session", schemaVersion: 1, type: "sentiment",
     rating, source: "transcript-analysis", confidence: 0.8,
     corrections: 0, approvals: 1, reprompts: 0,
   };
@@ -39,7 +39,7 @@ describe("scoreSession", () => {
   test("terrible session scores low", () => {
     const score = scoreSession({
       ratings: [makeRating(1)],
-      corrections: [makeCorrection(5), makeCorrection(5)],
+      corrections: [makeCorrection(), makeCorrection()],
       sentiment: [makeSentiment(1)],
     });
     expect(score).toBeLessThan(0.2);
@@ -56,7 +56,7 @@ describe("scoreSession", () => {
     });
     const with_ = scoreSession({
       ratings: [makeRating(7)],
-      corrections: [makeCorrection(3), makeCorrection(2)],
+      corrections: [makeCorrection(), makeCorrection()],
       sentiment: [makeSentiment(7)],
     });
     expect(with_).toBeLessThan(without);
@@ -73,7 +73,7 @@ describe("scoreSession", () => {
   test("score is clamped between 0 and 1", () => {
     const score = scoreSession({
       ratings: [makeRating(0)],
-      corrections: [makeCorrection(10), makeCorrection(10)],
+      corrections: [makeCorrection(), makeCorrection()],
       sentiment: [makeSentiment(0)],
     });
     expect(score).toBeGreaterThanOrEqual(0);

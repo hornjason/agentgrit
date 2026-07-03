@@ -25,7 +25,7 @@ describe("detectCorrection", () => {
     );
     expect(signal).not.toBeNull();
     expect(signal!.type).toBe("correction");
-    expect(signal!.severity).toBeGreaterThanOrEqual(5);
+    expect(signal!.correction_phrase).toBeTruthy();
   });
 
   test("detects 'stop doing'", async () => {
@@ -54,7 +54,7 @@ describe("detectCorrection", () => {
       "test-session",
     );
     expect(signal).not.toBeNull();
-    expect(signal!.severity).toBeGreaterThanOrEqual(7);
+    expect(signal!.correction_phrase).toBeTruthy();
   });
 
   test("returns null for 'no problem'", async () => {
@@ -114,6 +114,6 @@ describe("detectCorrection", () => {
     const line = readFileSync(filePath, "utf-8").trim();
     const parsed = JSON.parse(line);
     expect(parsed.type).toBe("correction");
-    expect(parsed.sessionId).toBe("test-session");
+    expect(parsed.session_id).toBe("test-session");
   });
 });

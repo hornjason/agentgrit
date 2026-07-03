@@ -40,15 +40,14 @@ function groupByKeywordSimilarity(
   const groups: CorrectionGroup[] = [];
 
   for (const signal of corrections) {
-    const text = `${signal.trigger} ${signal.context}`;
+    const text = `${signal.correction_phrase} ${signal.context}`;
     const tokens = tokenize(text);
 
     let matched = false;
     for (const group of groups) {
       if (similarity(tokens, group.tokens) >= similarityThreshold) {
         group.signals.push(signal);
-        group.sessions.add(signal.sessionId);
-        group.maxSeverity = Math.max(group.maxSeverity, signal.severity);
+        group.sessions.add(signal.session_id);
         for (const t of tokens) group.tokens.add(t);
         matched = true;
         break;
@@ -57,11 +56,11 @@ function groupByKeywordSimilarity(
 
     if (!matched) {
       groups.push({
-        representative: signal.trigger.slice(0, 200),
+        representative: signal.correction_phrase.slice(0, 200),
         tokens,
         signals: [signal],
-        sessions: new Set([signal.sessionId]),
-        maxSeverity: signal.severity,
+        sessions: new Set([signal.session_id]),
+        maxSeverity: 5,
       });
     }
   }
@@ -72,7 +71,7 @@ function groupByKeywordSimilarity(
 function buildCandidateRule(group: CorrectionGroup): string {
   const triggers = group.signals
     .slice(0, 3)
-    .map((s) => s.trigger.slice(0, 80))
+    .map((s) => s.correction_phrase.slice(0, 80))
     .join("; ");
   return `Recurring correction (${group.signals.length}x): ${triggers}`;
 }

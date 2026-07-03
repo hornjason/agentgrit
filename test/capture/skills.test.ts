@@ -47,25 +47,23 @@ describe("captureSkillInvocation", () => {
     );
 
     expect(signal.type).toBe("skill-invocation");
-    expect(signal.skillName).toBe("ship");
-    expect(signal.trigger).toBe("/ship fix auth bug");
-    expect(signal.sessionId).toBe("test-session");
-    expect(signal.success).toBe(true);
+    expect(signal.skill).toBe("ship");
+    expect(signal.session_id).toBe("test-session");
 
     const filePath = join(TMP_DIR, "signals", "skill-invocations.jsonl");
     expect(existsSync(filePath)).toBe(true);
     const line = readFileSync(filePath, "utf-8").trim();
     const parsed = JSON.parse(line);
-    expect(parsed.skillName).toBe("ship");
+    expect(parsed.skill).toBe("ship");
   });
 
-  test("truncates long triggers", async () => {
-    const longTrigger = "x".repeat(1000);
+  test("supports optional workflow field", async () => {
     const signal = await captureSkillInvocation(
       "Research",
-      longTrigger,
+      "/research deep",
       "test-session",
+      "deep-research",
     );
-    expect(signal.trigger.length).toBeLessThanOrEqual(500);
+    expect(signal.workflow).toBe("deep-research");
   });
 });

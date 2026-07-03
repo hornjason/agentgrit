@@ -31,16 +31,16 @@ describe("graph types", () => {
     const cluster: RankedCluster = {
       primary: {
         id: "test",
+        file: "test.md",
+        type: "rule",
         name: "test",
+        description: "Test node",
         domains: ["verification"],
-        stats: {
-          injectionCount: 0,
-          avgRating: 0,
-          highRatingActivations: 0,
-          lowRatingActivations: 0,
-          sessionRatings: [],
-          lastSeen: "",
-        },
+        severity: 3,
+        occurrence_count: 0,
+        last_updated: "",
+        content_hash: "abc",
+        memoryType: "behavioral-rule",
       },
       connected: [],
       score: 0.5,
@@ -94,27 +94,27 @@ describe("graph types", () => {
   test("re-exported GraphNode from adapters works", () => {
     const node: GraphNode = {
       id: "test",
+      file: "test.md",
+      type: "rule",
       name: "test",
+      description: "Test node",
       domains: ["verification"],
-      stats: {
-        injectionCount: 0,
-        avgRating: 0,
-        highRatingActivations: 0,
-        lowRatingActivations: 0,
-        sessionRatings: [],
-        lastSeen: "",
-      },
+      severity: 3,
+      occurrence_count: 0,
+      last_updated: "",
+      content_hash: "abc",
+      memoryType: "behavioral-rule",
     };
     expect(node.id).toBe("test");
   });
 
   test("re-exported GraphEdge from adapters works", () => {
     const edge: GraphEdge = {
-      source: "a",
-      target: "b",
-      type: "reinforces",
+      from: "a",
+      to: "b",
+      relationship: "reinforces",
       strength: 0.8,
     };
-    expect(edge.type).toBe("reinforces");
+    expect(edge.relationship).toBe("reinforces");
   });
 });

@@ -60,11 +60,10 @@ export async function detectCorrection(
         id: randomUUID(),
         type: "correction",
         timestamp: new Date().toISOString(),
-        sessionId,
+        session_id: sessionId,
         schemaVersion: SCHEMA_VERSION,
-        trigger: message.slice(0, 300),
+        correction_phrase: message.slice(0, 300),
         context: extractContext(message, assistantResponse),
-        severity,
       };
 
       await appendSignal(signalPath(CORRECTIONS_FILE), signal);

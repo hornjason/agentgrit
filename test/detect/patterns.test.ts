@@ -17,7 +17,7 @@ function makeRating(id: string, sessionId: string, rating: number): RatingSignal
     id,
     type: "rating",
     timestamp: new Date().toISOString(),
-    sessionId,
+    session_id: sessionId,
     schemaVersion: SCHEMA_VERSION,
     rating,
     source: "explicit",
@@ -27,36 +27,31 @@ function makeRating(id: string, sessionId: string, rating: number): RatingSignal
 function makeCorrection(
   id: string,
   sessionId: string,
-  trigger: string,
-  severity = 5,
+  correctionPhrase: string,
 ): CorrectionSignal {
   return {
     id,
     type: "correction",
     timestamp: new Date().toISOString(),
-    sessionId,
+    session_id: sessionId,
     schemaVersion: SCHEMA_VERSION,
-    trigger,
-    context: `Context for ${trigger}`,
-    severity,
+    correction_phrase: correctionPhrase,
+    context: `Context for ${correctionPhrase}`,
   };
 }
 
 function makeSkillInvocation(
   id: string,
   sessionId: string,
-  skillName: string,
-  success: boolean,
+  skill: string,
 ): SkillInvocationSignal {
   return {
     id,
     type: "skill-invocation",
     timestamp: new Date().toISOString(),
-    sessionId,
+    session_id: sessionId,
     schemaVersion: SCHEMA_VERSION,
-    skillName,
-    trigger: "test trigger",
-    success,
+    skill,
   };
 }
 
@@ -96,7 +91,7 @@ describe("minePatterns", () => {
     for (let i = 0; i < 3; i++) {
       await appendSignal(
         skillsFile,
-        makeSkillInvocation(`s${i}`, `sess-${i}`, "ship", false),
+        makeSkillInvocation(`s${i}`, `sess-${i}`, "ship"),
       );
     }
 
@@ -134,11 +129,11 @@ describe("minePatterns", () => {
       await appendSignal(ratingsFile, makeRating(`r${i}`, `sess-${i}`, 2));
       await appendSignal(
         correctionsFile,
-        makeCorrection(`c${i}`, `sess-${i}`, "wrong", 9),
+        makeCorrection(`c${i}`, `sess-${i}`, "wrong"),
       );
       await appendSignal(
         skillsFile,
-        makeSkillInvocation(`s${i}`, `sess-${i}`, "tdd", false),
+        makeSkillInvocation(`s${i}`, `sess-${i}`, "tdd"),
       );
     }
 

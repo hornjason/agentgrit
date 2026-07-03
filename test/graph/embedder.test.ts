@@ -40,14 +40,14 @@ describe("findEmbeddingEdges", () => {
     const edges = findEmbeddingEdges(embeddings, { similarityFloor: 0.5 });
 
     const abEdge = edges.find(
-      e => (e.source === "a" && e.target === "b") || (e.source === "b" && e.target === "a"),
+      e => (e.from === "a" && e.to === "b") || (e.from === "b" && e.to === "a"),
     );
     expect(abEdge).toBeDefined();
     expect(abEdge!.strength).toBeGreaterThan(0);
 
     // a and c are orthogonal — no edge
     const acEdge = edges.find(
-      e => (e.source === "a" && e.target === "c") || (e.source === "c" && e.target === "a"),
+      e => (e.from === "a" && e.to === "c") || (e.from === "c" && e.to === "a"),
     );
     expect(acEdge).toBeUndefined();
   });
@@ -65,7 +65,7 @@ describe("findEmbeddingEdges", () => {
     // than 10*2. Verify no node appears in more edges than the cap.
     const edgeCounts: Record<string, number> = {};
     for (const e of edges) {
-      edgeCounts[e.source] = (edgeCounts[e.source] || 0) + 1;
+      edgeCounts[e.from] = (edgeCounts[e.from] || 0) + 1;
     }
     // The source side should have at most maxEdgesPerNode per node
     for (const count of Object.values(edgeCounts)) {

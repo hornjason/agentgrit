@@ -106,7 +106,7 @@ export async function captureRating(
     id: randomUUID(),
     type: "rating",
     timestamp: new Date().toISOString(),
-    sessionId,
+    session_id: sessionId,
     schemaVersion: SCHEMA_VERSION,
     rating: composite,
     source: "explicit",

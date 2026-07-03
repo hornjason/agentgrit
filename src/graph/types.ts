@@ -80,4 +80,4 @@ export interface Embedding {
 
 // ── Re-exports for convenience ──
 
-export type { GraphNode, GraphEdge, GraphNodeStats, EdgeType, EdgeSource, Rule } from "../adapters/types";
+export type { GraphNode, GraphEdge, EdgeType, EdgeSource, Rule } from "../adapters/types";

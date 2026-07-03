@@ -60,10 +60,10 @@ export function getContextRules(
 
     rules.push({
       id: node.id,
-      text: node.ruleText || node.name,
+      text: node.description || node.name,
       tier: Tier.Graph,
       tags: node.domains,
-      created: node.stats.lastSeen,
+      created: node.last_updated,
       correlationScore: cluster.score,
       sourceSignals: [],
       schemaVersion: 1,
@@ -79,10 +79,10 @@ export function getContextRules(
     const node = graph.nodes[result.id];
     rules.push({
       id: result.id,
-      text: node?.ruleText || node?.name || result.id,
+      text: node?.description || node?.name || result.id,
       tier: Tier.Graph,
       tags: node?.domains || [],
-      created: node?.stats.lastSeen || new Date().toISOString(),
+      created: node?.last_updated || new Date().toISOString(),
       correlationScore: result.score,
       sourceSignals: [],
       schemaVersion: 1,

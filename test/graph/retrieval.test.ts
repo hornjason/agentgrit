@@ -4,7 +4,7 @@ import { join } from "path";
 import { hybridRetrieve } from "../../src/graph/retrieval";
 import { buildIndex } from "../../src/graph/bm25";
 import type { Graph } from "../../src/graph/types";
-import type { GraphNode, GraphNodeStats } from "../../src/adapters/types";
+import type { GraphNode } from "../../src/adapters/types";
 
 const TMP_DIR = join(import.meta.dir, ".tmp-retrieval-test");
 
@@ -17,25 +17,19 @@ afterEach(() => {
   if (existsSync(TMP_DIR)) rmSync(TMP_DIR, { recursive: true });
 });
 
-function makeStats(): GraphNodeStats {
-  return {
-    injectionCount: 0,
-    avgRating: 0,
-    highRatingActivations: 0,
-    lowRatingActivations: 0,
-    sessionRatings: [],
-    lastSeen: new Date().toISOString(),
-  };
-}
-
 function makeNode(id: string, domains: string[]): GraphNode {
   return {
     id,
+    file: `${id}.md`,
+    type: "rule",
     name: `Rule: ${id}`,
+    description: `Text for ${id}`,
     domains,
-    ruleText: `Text for ${id}`,
-    hash: id.slice(0, 8),
-    stats: makeStats(),
+    severity: 3,
+    occurrence_count: 0,
+    last_updated: new Date().toISOString(),
+    content_hash: id.slice(0, 8),
+    memoryType: "behavioral-rule",
   };
 }
 

@@ -1,28 +1,21 @@
 import { describe, test, expect } from "bun:test";
 import { queryGraph } from "../../src/graph/query";
 import type { Graph } from "../../src/graph/types";
-import type { GraphNode, GraphNodeStats } from "../../src/adapters/types";
+import type { GraphNode } from "../../src/adapters/types";
 
-function makeStats(overrides?: Partial<GraphNodeStats>): GraphNodeStats {
-  return {
-    injectionCount: 0,
-    avgRating: 0,
-    highRatingActivations: 0,
-    lowRatingActivations: 0,
-    sessionRatings: [],
-    lastSeen: new Date().toISOString(),
-    ...overrides,
-  };
-}
-
-function makeNode(id: string, domains: string[], statsOverrides?: Partial<GraphNodeStats>): GraphNode {
+function makeNode(id: string, domains: string[], severity = 3): GraphNode {
   return {
     id,
+    file: `${id}.md`,
+    type: "rule",
     name: `Rule: ${id}`,
+    description: `Text for ${id}`,
     domains,
-    ruleText: `Text for ${id}`,
-    hash: id.slice(0, 8),
-    stats: makeStats(statsOverrides),
+    severity,
+    occurrence_count: 0,
+    last_updated: new Date().toISOString(),
+    content_hash: id.slice(0, 8),
+    memoryType: "behavioral-rule",
   };
 }
 
@@ -89,7 +82,7 @@ describe("queryGraph", () => {
         makeNode("sibling", ["verification"]),
       ],
       [
-        { source: "primary", target: "sibling", type: "reinforces", strength: 0.8 },
+        { from: "primary", to: "sibling", relationship: "reinforces", strength: 0.8 },
       ],
     );
 
@@ -107,7 +100,7 @@ describe("queryGraph", () => {
         makeNode("b", ["verification"]),
       ],
       [
-        { source: "a", target: "b", type: "same_domain", strength: 0.5 },
+        { from: "a", to: "b", relationship: "same_domain", strength: 0.5 },
       ],
     );
 
@@ -146,7 +139,7 @@ describe("queryGraph", () => {
         makeNode("helper", ["verification"]),
       ],
       [
-        { source: "connected", target: "helper", type: "reinforces", strength: 0.9 },
+        { from: "connected", to: "helper", relationship: "reinforces", strength: 0.9 },
       ],
     );
 

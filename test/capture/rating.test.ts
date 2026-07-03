@@ -79,7 +79,7 @@ describe("captureRating", () => {
     expect(signal!.type).toBe("rating");
     expect(signal!.source).toBe("explicit");
     expect(signal!.rating).toBeGreaterThan(0);
-    expect(signal!.sessionId).toBe("test-session");
+    expect(signal!.session_id).toBe("test-session");
 
     const filePath = join(TMP_DIR, "signals", "ratings.jsonl");
     expect(existsSync(filePath)).toBe(true);

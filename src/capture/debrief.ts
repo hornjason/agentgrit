@@ -100,13 +100,13 @@ function detectCorrections(
           id: randomUUID(),
           type: "correction",
           timestamp: new Date().toISOString(),
-          sessionId,
+          session_id: sessionId,
           schemaVersion: SCHEMA_VERSION,
-          trigger: text.slice(0, 300),
+          correction_phrase: text.slice(0, 300),
           context: prevAssistant
             ? `User: ${text.slice(0, 150)}\nAssistant: ${prevAssistant.text.slice(0, 150)}`
             : text.slice(0, 300),
-          severity,
+          turn_index: i,
         });
         break;
       }
@@ -120,7 +120,7 @@ function groupByTheme(corrections: CorrectionSignal[]): Map<string, CorrectionSi
   const themes = new Map<string, CorrectionSignal[]>();
 
   for (const correction of corrections) {
-    const trigger = correction.trigger.toLowerCase();
+    const trigger = correction.correction_phrase.toLowerCase();
 
     let theme: string;
     if (/stop|don'?t/.test(trigger)) {
@@ -158,15 +158,12 @@ export async function extractDebrief(
   for (const [theme, group] of themes) {
     if (group.length === 0) continue;
 
-    const avgSeverity =
-      group.reduce((sum, c) => sum + c.severity, 0) / group.length;
-
     candidates.push({
       id: randomUUID(),
-      text: `${theme}: ${group[0].trigger.slice(0, 100)}`,
+      text: `${theme}: ${group[0].correction_phrase.slice(0, 100)}`,
       sourceSessions: [sessionId],
       frequency: group.length,
-      severity: Math.round(avgSeverity),
+      severity: group.length >= 3 ? 7 : group.length >= 2 ? 5 : 3,
     });
   }
 

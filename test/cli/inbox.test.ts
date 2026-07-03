@@ -28,11 +28,10 @@ describe("inbox command", () => {
       id: `c${i}`,
       type: "correction",
       timestamp: new Date().toISOString(),
-      sessionId: `session-${i % 3}`,
+      session_id: `session-${i % 3}`,
       schemaVersion: 1,
-      trigger: "stop doing that wrong approach",
+      correction_phrase: "stop doing that wrong approach",
       context: "repeated failure pattern in verification",
-      severity: 5,
     }));
 
     writeFileSync(

@@ -14,7 +14,7 @@ function scoreNode(
   const domainScore = overlap > 0 ? overlap / queryDomains.length : 0;
 
   // Blended edge strength: domain-filtered (70%) + total (30%)
-  const nodeEdges = edges.filter(e => e.source === node.id || e.target === node.id);
+  const nodeEdges = edges.filter(e => e.from === node.id || e.to === node.id);
   const totalEdgeStrength = nodeEdges.length > 0
     ? nodeEdges.reduce((sum, e) => sum + e.strength, 0) / nodeEdges.length
     : 0;
@@ -22,7 +22,7 @@ function scoreNode(
   let domainEdgeStrength = 0;
   if (nodeEdges.length > 0 && queryDomains.length > 0) {
     const relevantEdges = nodeEdges.filter(e => {
-      const neighborId = e.source === node.id ? e.target : e.source;
+      const neighborId = e.from === node.id ? e.to : e.from;
       const neighbor = allNodes[neighborId];
       return neighbor && neighbor.domains.some(d => queryDomains.includes(d));
     });
@@ -32,8 +32,8 @@ function scoreNode(
   }
   const blendedEdge = domainEdgeStrength * 0.7 + totalEdgeStrength * 0.3;
 
-  // Severity (normalized to 0-1)
-  const severityScore = (node.stats.highRatingActivations > node.stats.lowRatingActivations ? 1 : 0.5);
+  // Severity (normalized to 0-1, severity 1-5 scale)
+  const severityScore = node.severity >= 3 ? 1 : 0.5;
 
   return domainScore * 0.50 + blendedEdge * 0.30 + severityScore * 0.20;
 }
@@ -50,11 +50,11 @@ function buildCluster(
   const connected: ConnectedNode[] = [];
 
   for (const edge of edges) {
-    if (!CLUSTER_RELS.has(edge.type)) continue;
+    if (!CLUSTER_RELS.has(edge.relationship)) continue;
 
     let connectedId: string | null = null;
-    if (edge.source === primary.id) connectedId = edge.target;
-    else if (edge.target === primary.id) connectedId = edge.source;
+    if (edge.from === primary.id) connectedId = edge.to;
+    else if (edge.to === primary.id) connectedId = edge.from;
     else continue;
 
     const node = allNodes[connectedId];
@@ -62,7 +62,7 @@ function buildCluster(
 
     connected.push({
       node,
-      relationship: edge.type,
+      relationship: edge.relationship,
       strength: edge.strength,
     });
   }
@@ -91,11 +91,11 @@ export function queryGraph(
     const candidateIds = new Set(candidates.map(n => n.id));
     for (const node of [...candidates]) {
       const embeddingEdges = graph.edges.filter(
-        e => e.edgeSource === "embedding" && e.strength >= 0.6 &&
-             (e.source === node.id || e.target === node.id),
+        e => e.source === "embedding" && e.strength >= 0.6 &&
+             (e.from === node.id || e.to === node.id),
       );
       for (const edge of embeddingEdges) {
-        const neighborId = edge.source === node.id ? edge.target : edge.source;
+        const neighborId = edge.from === node.id ? edge.to : edge.from;
         if (!candidateIds.has(neighborId) && graph.nodes[neighborId]) {
           candidates.push(graph.nodes[neighborId]);
           candidateIds.add(neighborId);

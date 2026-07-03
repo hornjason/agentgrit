@@ -18,7 +18,8 @@ function normalizeRating(ratings: RatingSignal[]): number {
 
 function correctionPenalty(corrections: CorrectionSignal[]): number {
   if (corrections.length === 0) return 1.0;
-  const penalty = corrections.reduce((s, c) => s + c.severity, 0);
+  // Each correction applies a flat penalty (severity removed from signal)
+  const penalty = corrections.length * 5;
   return Math.max(0, 1.0 - penalty * 0.1);
 }
 

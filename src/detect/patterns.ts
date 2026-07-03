@@ -10,7 +10,7 @@ import type {
 const RATING_LOW_THRESHOLD = 4;
 
 interface SessionSnapshot {
-  sessionId: string;
+  session_id: string;
   ratings: RatingSignal[];
   corrections: CorrectionSignal[];
   skillMisses: SkillInvocationSignal[];
@@ -27,7 +27,7 @@ function buildSessionSnapshots(
   function ensure(sid: string): SessionSnapshot {
     if (!sessions.has(sid)) {
       sessions.set(sid, {
-        sessionId: sid,
+        session_id: sid,
         ratings: [],
         corrections: [],
         skillMisses: [],
@@ -38,15 +38,13 @@ function buildSessionSnapshots(
   }
 
   for (const r of ratings) {
-    ensure(r.sessionId).ratings.push(r);
+    ensure(r.session_id).ratings.push(r);
   }
   for (const c of corrections) {
-    ensure(c.sessionId).corrections.push(c);
+    ensure(c.session_id).corrections.push(c);
   }
   for (const s of skills) {
-    if (s.success === false) {
-      ensure(s.sessionId).skillMisses.push(s);
-    }
+    ensure(s.session_id).skillMisses.push(s);
   }
 
   for (const snap of sessions.values()) {
@@ -73,9 +71,9 @@ function findLowRatedWithCorrections(
   }
 
   if (lowSessions.length >= 2) {
-    const sessionIds = lowSessions.map((s) => s.sessionId);
+    const sessionIds = lowSessions.map((s) => s.session_id);
     const allCorrections = lowSessions.flatMap((s) => s.corrections);
-    const maxSeverity = Math.max(...allCorrections.map((c) => c.severity), 1);
+    const maxSeverity = Math.min(allCorrections.length + 3, 10);
     const timestamps = allCorrections.map((c) => c.timestamp).sort();
 
     patterns.push({
@@ -100,28 +98,28 @@ function findSkillMissPatterns(
 
   for (const snap of sessions.values()) {
     for (const miss of snap.skillMisses) {
-      const key = miss.skillName;
+      const key = miss.skill;
       if (!missCounter.has(key)) {
         missCounter.set(key, { sessions: [], count: 0 });
       }
       const entry = missCounter.get(key)!;
-      if (!entry.sessions.includes(snap.sessionId)) {
-        entry.sessions.push(snap.sessionId);
+      if (!entry.sessions.includes(snap.session_id)) {
+        entry.sessions.push(snap.session_id);
       }
       entry.count++;
     }
   }
 
   const patterns: Pattern[] = [];
-  for (const [skillName, data] of missCounter) {
+  for (const [skill, data] of missCounter) {
     if (data.sessions.length >= 2) {
       patterns.push({
-        id: `skill-miss-${skillName}`,
+        id: `skill-miss-${skill}`,
         type: "skill-miss",
         frequency: data.count,
         sessions: data.sessions,
         severity: 5,
-        candidateRule: `Skill "${skillName}" failed in ${data.sessions.length} sessions (${data.count} total failures). Investigate trigger accuracy or skill reliability.`,
+        candidateRule: `Skill "${skill}" failed in ${data.sessions.length} sessions (${data.count} total failures). Investigate trigger accuracy or skill reliability.`,
       });
     }
   }
@@ -155,7 +153,7 @@ function findScoreDrops(
       .reduce((sum, s) => sum + s.avgRating, 0) / windowSize;
 
   if (earlyAvg - lateAvg >= 1.5) {
-    const dropSessions = chronological.slice(-windowSize).map((s) => s.sessionId);
+    const dropSessions = chronological.slice(-windowSize).map((s) => s.session_id);
     patterns.push({
       id: "score-drop-trend",
       type: "score-drop",

@@ -27,7 +27,7 @@ describe("captureToolUse", () => {
     const parsed = JSON.parse(content);
     expect(parsed.toolName).toBe("Bash");
     expect(parsed.argsSummary).toContain("command");
-    expect(parsed.sessionId).toBe("test-session");
+    expect(parsed.session_id).toBe("test-session");
   });
 
   test("summarizes args with truncation", async () => {

@@ -65,10 +65,10 @@ export async function runDaemonCycle(
         );
 
         for (const signal of signals) {
-          if (!("responsePreview" in signal) || !signal.responsePreview) continue;
+          if (!("response_preview" in signal) || !signal.response_preview) continue;
 
           const scores = await judgeTrace(
-            { input: signal.sessionId, output: signal.responsePreview },
+            { input: signal.session_id, output: signal.response_preview },
             rubric,
             {
               provider: config.judge.provider,

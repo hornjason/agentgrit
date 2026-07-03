@@ -122,10 +122,10 @@ export function semanticSearch(
 export function findEmbeddingEdges(
   embeddings: Embedding[],
   config?: Pick<EmbedConfig, "maxEdgesPerNode" | "similarityFloor">,
-): Array<{ source: string; target: string; strength: number }> {
+): Array<{ from: string; to: string; strength: number }> {
   const maxEdges = config?.maxEdgesPerNode ?? DEFAULT_MAX_EDGES;
   const floor = config?.similarityFloor ?? DEFAULT_SIMILARITY_FLOOR;
-  const edges: Array<{ source: string; target: string; strength: number }> = [];
+  const edges: Array<{ from: string; to: string; strength: number }> = [];
   const seen = new Set<string>();
 
   for (let i = 0; i < embeddings.length; i++) {
@@ -147,8 +147,8 @@ export function findEmbeddingEdges(
       const strength = getTierStrength(neighbor.sim);
       if (strength !== null) {
         edges.push({
-          source: embeddings[i].id,
-          target: neighbor.id,
+          from: embeddings[i].id,
+          to: neighbor.id,
           strength,
         });
       }

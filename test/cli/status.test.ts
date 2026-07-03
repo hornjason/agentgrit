@@ -25,8 +25,8 @@ describe("status command", () => {
 
   test("reads signal counts from JSONL files", async () => {
     const signals = [
-      { id: "1", type: "rating", timestamp: new Date().toISOString(), sessionId: "s1", schemaVersion: 1, rating: 7, source: "explicit" },
-      { id: "2", type: "rating", timestamp: new Date().toISOString(), sessionId: "s2", schemaVersion: 1, rating: 8, source: "explicit" },
+      { id: "1", type: "rating", timestamp: new Date().toISOString(), session_id: "s1", schemaVersion: 1, rating: 7, source: "explicit" },
+      { id: "2", type: "rating", timestamp: new Date().toISOString(), session_id: "s2", schemaVersion: 1, rating: 8, source: "explicit" },
     ];
 
     const ratingsPath = join(TEST_DIR, "signals", "ratings.jsonl");

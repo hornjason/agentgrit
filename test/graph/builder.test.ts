@@ -3,7 +3,7 @@ import { existsSync, rmSync, mkdirSync, writeFileSync, readFileSync } from "fs";
 import { join } from "path";
 import { buildGraph, updateGraph, pruneStaleNodes, parseFrontmatter, inferSeverity, keywordClassify } from "../../src/graph/builder";
 import type { Graph } from "../../src/graph/types";
-import type { Rule } from "../../src/adapters/types";
+import type { Rule, GraphNode } from "../../src/adapters/types";
 
 const TMP_DIR = join(import.meta.dir, ".tmp-builder-test");
 const RULES_DIR = join(TMP_DIR, "rules");
@@ -11,6 +11,23 @@ const STATE_DIR = join(TMP_DIR, "state");
 
 function writeRule(id: string, content: string): void {
   writeFileSync(join(RULES_DIR, `${id}.md`), content, "utf-8");
+}
+
+function makeNode(id: string, domains: string[], overrides?: Partial<GraphNode>): GraphNode {
+  return {
+    id,
+    file: `${id}.md`,
+    type: "rule",
+    name: id,
+    description: `Description for ${id}`,
+    domains,
+    severity: 3,
+    occurrence_count: 0,
+    last_updated: new Date().toISOString(),
+    content_hash: "abc",
+    memoryType: "behavioral-rule",
+    ...overrides,
+  };
 }
 
 beforeEach(() => {
@@ -135,8 +152,8 @@ Test container before rebuilding and deploying.`);
 
     expect(graph.edgeCount).toBeGreaterThan(0);
     const hasEdge = graph.edges.some(
-      e => (e.source === "rule_a" || e.target === "rule_a") &&
-           (e.source === "rule_b" || e.target === "rule_b"),
+      e => (e.from === "rule_a" || e.to === "rule_a") &&
+           (e.from === "rule_b" || e.to === "rule_b"),
     );
     expect(hasEdge).toBe(true);
   });
@@ -176,7 +193,7 @@ Run make rebuild to deploy.`);
     // Rebuild without changes — should reuse cached data
     const second = await buildGraph(RULES_DIR, STATE_DIR);
     expect(second.nodes["feedback_cached"].domains).toContain("deployment");
-    expect(second.nodes["feedback_cached"].hash).toBe(first.nodes["feedback_cached"].hash);
+    expect(second.nodes["feedback_cached"].content_hash).toBe(first.nodes["feedback_cached"].content_hash);
   });
 });
 
@@ -215,13 +232,7 @@ describe("updateGraph", () => {
       nodeCount: 1,
       edgeCount: 0,
       nodes: {
-        existing: {
-          id: "existing",
-          name: "existing-rule",
-          domains: ["deployment"],
-          hash: "abc",
-          stats: { injectionCount: 0, avgRating: 0, highRatingActivations: 0, lowRatingActivations: 0, sessionRatings: [], lastSeen: "" },
-        },
+        existing: makeNode("existing", ["deployment"]),
       },
       edges: [],
     };
@@ -239,7 +250,7 @@ describe("updateGraph", () => {
 
     const updated = updateGraph(graph, newRules);
     expect(updated.edgeCount).toBeGreaterThan(0);
-    expect(updated.edges[0].type).toBe("same_domain");
+    expect(updated.edges[0].relationship).toBe("same_domain");
   });
 
   test("updates existing node instead of duplicating", () => {
@@ -249,13 +260,7 @@ describe("updateGraph", () => {
       nodeCount: 1,
       edgeCount: 0,
       nodes: {
-        existing: {
-          id: "existing",
-          name: "existing-rule",
-          domains: ["verification"],
-          hash: "old-hash",
-          stats: { injectionCount: 5, avgRating: 8, highRatingActivations: 3, lowRatingActivations: 1, sessionRatings: [8], lastSeen: "" },
-        },
+        existing: makeNode("existing", ["verification"], { content_hash: "old-hash", occurrence_count: 5 }),
       },
       edges: [],
     };
@@ -284,10 +289,10 @@ describe("pruneStaleNodes", () => {
       nodeCount: 2,
       edgeCount: 1,
       nodes: {
-        keep: { id: "keep", name: "keep", domains: ["scope"], stats: { injectionCount: 0, avgRating: 0, highRatingActivations: 0, lowRatingActivations: 0, sessionRatings: [], lastSeen: "" } },
-        stale: { id: "stale", name: "stale", domains: ["scope"], stats: { injectionCount: 0, avgRating: 0, highRatingActivations: 0, lowRatingActivations: 0, sessionRatings: [], lastSeen: "" } },
+        keep: makeNode("keep", ["scope"]),
+        stale: makeNode("stale", ["scope"]),
       },
-      edges: [{ source: "keep", target: "stale", type: "same_domain", strength: 0.5 }],
+      edges: [{ from: "keep", to: "stale", relationship: "same_domain", strength: 0.5 }],
     };
 
     const pruned = pruneStaleNodes(graph, new Set(["keep"]));
@@ -303,7 +308,7 @@ describe("pruneStaleNodes", () => {
       nodeCount: 1,
       edgeCount: 0,
       nodes: {
-        keep: { id: "keep", name: "keep", domains: [], stats: { injectionCount: 0, avgRating: 0, highRatingActivations: 0, lowRatingActivations: 0, sessionRatings: [], lastSeen: "" } },
+        keep: makeNode("keep", []),
       },
       edges: [],
     };

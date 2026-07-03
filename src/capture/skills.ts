@@ -9,13 +9,13 @@ const SKILL_INVOCATIONS_FILE = "skill-invocations.jsonl";
 export type SkillOutcome = "hit" | "miss" | "unknown";
 
 export function classifyOutcome(
-  skillName: string,
+  skill: string,
   trigger: string,
 ): SkillOutcome {
-  if (!skillName || !trigger) return "unknown";
+  if (!skill || !trigger) return "unknown";
 
   const normalizedTrigger = trigger.toLowerCase();
-  const normalizedSkill = skillName.toLowerCase();
+  const normalizedSkill = skill.toLowerCase();
 
   if (normalizedTrigger.includes(`/${normalizedSkill}`)) return "hit";
   if (normalizedTrigger.includes(normalizedSkill)) return "hit";
@@ -24,21 +24,19 @@ export function classifyOutcome(
 }
 
 export async function captureSkillInvocation(
-  skillName: string,
+  skill: string,
   trigger: string,
   sessionId: string,
+  workflow?: string,
 ): Promise<SkillInvocationSignal> {
-  const outcome = classifyOutcome(skillName, trigger);
-
   const signal: SkillInvocationSignal = {
     id: randomUUID(),
     type: "skill-invocation",
     timestamp: new Date().toISOString(),
-    sessionId,
+    session_id: sessionId,
     schemaVersion: SCHEMA_VERSION,
-    skillName,
-    trigger: trigger.slice(0, 500),
-    success: outcome === "hit" ? true : outcome === "miss" ? false : undefined,
+    skill,
+    workflow,
   };
 
   await appendSignal(signalPath(SKILL_INVOCATIONS_FILE), signal);

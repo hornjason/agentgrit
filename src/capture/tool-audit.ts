@@ -10,7 +10,7 @@ interface ToolAuditEntry {
   id: string;
   type: "tool-audit";
   timestamp: string;
-  sessionId: string;
+  session_id: string;
   schemaVersion: number;
   toolName: string;
   argsSummary: string;
@@ -48,7 +48,7 @@ export async function captureToolUse(
     id: randomUUID(),
     type: "tool-audit",
     timestamp: new Date().toISOString(),
-    sessionId,
+    session_id: sessionId,
     schemaVersion: SCHEMA_VERSION,
     toolName,
     argsSummary: summarizeArgs(args),
