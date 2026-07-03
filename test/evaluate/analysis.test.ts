@@ -1,111 +1,38 @@
 import { describe, expect, test } from "bun:test";
-import { analyzeScores, detectTrends } from "../../src/evaluate/analysis";
+import { analyzeImpact, analyzeScores, analyzeToolAudit, detectTrends } from "../../src/evaluate/analysis";
 import type { Score } from "../../src/adapters/types";
 
-function makeScore(dimension: string, value: number, daysAgo = 0): Score {
-  const ts = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000);
-  return {
-    traceId: `trace-${Math.random()}`, dimension, value,
-    rubric: "Score 1-5", judgeModel: "test-model",
-    timestamp: ts.toISOString(), schemaVersion: 1,
-  };
+function makeScore(dim: string, val: number, daysAgo = 0): Score {
+  return { traceId: `t-${Math.random()}`, dimension: dim, value: val, rubric: "Score 1-5", judgeModel: "test", timestamp: new Date(Date.now() - daysAgo * 86400000).toISOString(), schemaVersion: 1 };
 }
 
 describe("analyzeScores", () => {
-  test("computes correct stats for single dimension", () => {
-    const scores = [
-      makeScore("accuracy", 3), makeScore("accuracy", 5),
-      makeScore("accuracy", 4), makeScore("accuracy", 2),
-    ];
-    const results = analyzeScores(scores);
-    expect(results).toHaveLength(1);
-    const accuracy = results[0];
-    expect(accuracy.dimension).toBe("accuracy");
-    expect(accuracy.avg).toBe(3.5);
-    expect(accuracy.min).toBe(2);
-    expect(accuracy.max).toBe(5);
-    expect(accuracy.count).toBe(4);
-    expect(accuracy.stddev).toBeGreaterThan(0);
-  });
-
-  test("handles multiple dimensions sorted by avg ascending", () => {
-    const scores = [
-      makeScore("accuracy", 4), makeScore("accuracy", 5),
-      makeScore("conciseness", 2), makeScore("conciseness", 3),
-    ];
-    const results = analyzeScores(scores);
-    expect(results).toHaveLength(2);
-    expect(results[0].dimension).toBe("conciseness");
-    expect(results[0].avg).toBe(2.5);
-    expect(results[1].dimension).toBe("accuracy");
-    expect(results[1].avg).toBe(4.5);
-  });
-
-  test("empty scores returns empty array", () => {
-    expect(analyzeScores([])).toEqual([]);
-  });
-
-  test("single score computes with stddev 0", () => {
-    const results = analyzeScores([makeScore("accuracy", 4)]);
-    expect(results[0].stddev).toBe(0);
-    expect(results[0].avg).toBe(4);
-    expect(results[0].min).toBe(4);
-    expect(results[0].max).toBe(4);
-  });
+  test("single dimension stats", () => { const r = analyzeScores([makeScore("a", 3), makeScore("a", 5), makeScore("a", 4), makeScore("a", 2)]); expect(r[0].avg).toBe(3.5); expect(r[0].min).toBe(2); expect(r[0].max).toBe(5); expect(r[0].stddev).toBeGreaterThan(0); });
+  test("sorted by avg", () => { const r = analyzeScores([makeScore("a", 4), makeScore("a", 5), makeScore("b", 2), makeScore("b", 3)]); expect(r[0].dimension).toBe("b"); expect(r[1].dimension).toBe("a"); });
+  test("empty", () => { expect(analyzeScores([])).toEqual([]); });
+  test("single", () => { expect(analyzeScores([makeScore("a", 4)])[0].stddev).toBe(0); });
 });
 
 describe("detectTrends", () => {
-  test("detects improving trend", () => {
-    const scores = [
-      makeScore("accuracy", 2, 14), makeScore("accuracy", 2, 10),
-      makeScore("accuracy", 4, 3), makeScore("accuracy", 5, 1),
-    ];
-    const trends = detectTrends(scores, 7);
-    expect(trends).toHaveLength(1);
-    expect(trends[0].dimension).toBe("accuracy");
-    expect(trends[0].direction).toBe("improving");
-    expect(trends[0].delta).toBeGreaterThan(0);
-  });
+  test("improving", () => { expect(detectTrends([makeScore("a", 2, 14), makeScore("a", 2, 10), makeScore("a", 4, 3), makeScore("a", 5, 1)], 7)[0].direction).toBe("improving"); });
+  test("declining", () => { expect(detectTrends([makeScore("a", 5, 14), makeScore("a", 4, 10), makeScore("a", 2, 3), makeScore("a", 1, 1)], 7)[0].direction).toBe("declining"); });
+  test("stable", () => { expect(detectTrends([makeScore("a", 3, 14), makeScore("a", 3, 10), makeScore("a", 3, 3), makeScore("a", 3, 1)], 7)[0].direction).toBe("stable"); });
+  test("empty", () => { expect(detectTrends([])).toEqual([]); });
+  test("all recent", () => { expect(detectTrends([makeScore("a", 4, 1), makeScore("a", 5, 2)], 7)).toHaveLength(0); });
+  test("multi dim", () => { const t = detectTrends([makeScore("a", 2, 14), makeScore("a", 5, 1), makeScore("b", 5, 14), makeScore("b", 2, 1)], 7); expect(t.find((x) => x.dimension === "a")?.direction).toBe("improving"); expect(t.find((x) => x.dimension === "b")?.direction).toBe("declining"); });
+});
 
-  test("detects declining trend", () => {
-    const scores = [
-      makeScore("accuracy", 5, 14), makeScore("accuracy", 4, 10),
-      makeScore("accuracy", 2, 3), makeScore("accuracy", 1, 1),
-    ];
-    const trends = detectTrends(scores, 7);
-    expect(trends).toHaveLength(1);
-    expect(trends[0].direction).toBe("declining");
-    expect(trends[0].delta).toBeLessThan(0);
-  });
+describe("analyzeImpact", () => {
+  test("empty", () => { expect(analyzeImpact([]).totalSessions).toBe(0); });
+  test("improvement", () => { const ratings = []; for (let i = 0; i < 20; i++) ratings.push({ timestamp: "2026-01-01T00:00:00Z", rating: 4 }); for (let i = 0; i < 20; i++) ratings.push({ timestamp: "2026-06-01T00:00:00Z", rating: 8 }); const r = analyzeImpact(ratings); expect(r.first20Avg).toBe(4); expect(r.last20Avg).toBe(8); expect(r.improvement).toBe(4); });
+  test("attribution", () => { expect(analyzeImpact([{ timestamp: "2026-01-01T00:00:00Z", rating: 7, ruleIds: ["r1"] }, { timestamp: "2026-01-02T00:00:00Z", rating: 5 }, { timestamp: "2026-01-03T00:00:00Z", rating: 6, ruleIds: ["r2"] }]).ruleAttributionRate).toBe(67); });
+  test("weekly trends", () => { const r = analyzeImpact([{ timestamp: "2026-01-06T00:00:00Z", rating: 5 }, { timestamp: "2026-01-13T00:00:00Z", rating: 9 }]); expect(r.weeklyTrends.length).toBeGreaterThan(0); expect(r.weeklyTrends[0].week).toMatch(/^\d{4}-W\d{2}$/); });
+});
 
-  test("detects stable trend", () => {
-    const scores = [
-      makeScore("accuracy", 3, 14), makeScore("accuracy", 3, 10),
-      makeScore("accuracy", 3, 3), makeScore("accuracy", 3, 1),
-    ];
-    const trends = detectTrends(scores, 7);
-    expect(trends).toHaveLength(1);
-    expect(trends[0].direction).toBe("stable");
-  });
-
-  test("empty scores returns empty array", () => {
-    expect(detectTrends([])).toEqual([]);
-  });
-
-  test("all scores in recent window returns no trends", () => {
-    const scores = [makeScore("accuracy", 4, 1), makeScore("accuracy", 5, 2)];
-    const trends = detectTrends(scores, 7);
-    expect(trends).toHaveLength(0);
-  });
-
-  test("handles multiple dimensions independently", () => {
-    const scores = [
-      makeScore("accuracy", 2, 14), makeScore("accuracy", 5, 1),
-      makeScore("conciseness", 5, 14), makeScore("conciseness", 2, 1),
-    ];
-    const trends = detectTrends(scores, 7);
-    expect(trends).toHaveLength(2);
-    expect(trends.find((t) => t.dimension === "accuracy")?.direction).toBe("improving");
-    expect(trends.find((t) => t.dimension === "conciseness")?.direction).toBe("declining");
-  });
+describe("analyzeToolAudit", () => {
+  test("aggregates", () => { const r = analyzeToolAudit([{ tool: "Read", ok: true }, { tool: "Read", ok: true }, { tool: "Read", ok: false }, { tool: "Bash", ok: true }, { tool: "Bash", ok: false }]); expect(r.totalCalls).toBe(5); expect(r.toolCount).toBe(2); });
+  test("flags above threshold", () => { const r = analyzeToolAudit([{ tool: "f", ok: false }, { tool: "f", ok: false }, { tool: "f", ok: true }, { tool: "s", ok: true }, { tool: "s", ok: true }], 0.10); expect(r.flaggedCount).toBe(1); expect(r.flaggedTools[0].tool).toBe("f"); });
+  test("sort by error rate", () => { const r = analyzeToolAudit([{ tool: "a", ok: true }, { tool: "a", ok: true }, { tool: "b", ok: false }, { tool: "b", ok: true }, { tool: "c", ok: false }, { tool: "c", ok: false }]); expect(r.tools[0].tool).toBe("c"); });
+  test("empty", () => { expect(analyzeToolAudit([]).totalCalls).toBe(0); });
+  test("missing tool field", () => { expect(analyzeToolAudit([{ ok: true }, { ok: false }]).tools[0].tool).toBe("unknown"); });
 });

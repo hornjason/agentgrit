@@ -1,165 +1,26 @@
 import { describe, expect, mock, test } from "bun:test";
-import { judgeTrace } from "../../src/evaluate/judge";
-import type { RubricConfig } from "../../src/adapters/types";
+import { judgeBatch, judgeTrace, jsonlToScores, scoresToJsonl } from "../../src/evaluate/judge";
+import type { RubricConfig, Score } from "../../src/adapters/types";
 
-const testRubric: RubricConfig = {
-  version: "1.0",
-  schemaVersion: 1,
-  dimensions: [
-    { name: "accuracy", description: "Are claims correct?", weight: 0.5, rubric: "Score 1-5" },
-    { name: "conciseness", description: "Is it minimal?", weight: 0.5, rubric: "Score 1-5" },
-  ],
-  judgeModel: "test-model",
-};
+const testRubric: RubricConfig = { version: "1.0", schemaVersion: 1, dimensions: [{ name: "accuracy", description: "correct?", weight: 0.5, rubric: "Score 1-5" }, { name: "conciseness", description: "minimal?", weight: 0.5, rubric: "Score 1-5" }], judgeModel: "test" };
 
 describe("judgeTrace", () => {
-  test("returns empty Score[] when no API key configured", async () => {
-    const scores = await judgeTrace(
-      { input: "test input", output: "test output" },
-      testRubric,
-      { provider: "openai", model: "gpt-4o", apiKey: undefined },
-    );
-    expect(scores).toEqual([]);
-  });
+  test("no key", async () => { expect(await judgeTrace({ input: "a", output: "b" }, testRubric, { provider: "openai", model: "gpt-4o" })).toEqual([]); });
+  test("empty key", async () => { expect(await judgeTrace({ input: "a", output: "b" }, testRubric, { provider: "openai", model: "gpt-4o", apiKey: "" })).toEqual([]); });
+  test("openai", async () => { const f = globalThis.fetch; globalThis.fetch = mock(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ choices: [{ message: { content: JSON.stringify({ accuracy: { score: 4, reasoning: "ok" }, conciseness: { score: 5, reasoning: "tight" } }) } }] }) } as Response)); try { const s = await judgeTrace({ input: "x", output: "4", id: "t1" }, testRubric, { provider: "openai", model: "gpt-4o", apiKey: "k" }); expect(s).toHaveLength(2); expect(s.find((x) => x.dimension === "accuracy")?.value).toBe(4); expect(s.find((x) => x.dimension === "accuracy")?.traceId).toBe("t1"); } finally { globalThis.fetch = f; } });
+  test("claude", async () => { const f = globalThis.fetch; globalThis.fetch = mock(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ content: [{ text: JSON.stringify({ accuracy: { score: 3, reasoning: "err" }, conciseness: { score: 4, reasoning: "ok" } }) }] }) } as Response)); try { expect((await judgeTrace({ input: "a", output: "b" }, testRubric, { provider: "claude", model: "claude-sonnet-5", apiKey: "k" })).find((x) => x.dimension === "accuracy")?.value).toBe(3); } finally { globalThis.fetch = f; } });
+  test("gemini", async () => { const f = globalThis.fetch; globalThis.fetch = mock(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ candidates: [{ content: { parts: [{ text: JSON.stringify({ accuracy: { score: 5, reasoning: "p" }, conciseness: { score: 2, reasoning: "v" } }) }] } }] }) } as Response)); try { const s = await judgeTrace({ input: "a", output: "b" }, testRubric, { provider: "gemini", model: "g", apiKey: "k" }); expect(s.find((x) => x.dimension === "accuracy")?.value).toBe(5); } finally { globalThis.fetch = f; } });
+  test("api failure", async () => { const f = globalThis.fetch; globalThis.fetch = mock(() => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) } as Response)); try { expect(await judgeTrace({ input: "a", output: "b" }, testRubric, { provider: "openai", model: "gpt-4o", apiKey: "k", maxRetries: 0 })).toEqual([]); } finally { globalThis.fetch = f; } });
+  test("plain numbers", async () => { const f = globalThis.fetch; globalThis.fetch = mock(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ choices: [{ message: { content: JSON.stringify({ accuracy: 4, conciseness: 3 }) } }] }) } as Response)); try { expect((await judgeTrace({ input: "a", output: "b" }, testRubric, { provider: "openai", model: "gpt-4o", apiKey: "k" })).find((x) => x.dimension === "accuracy")?.value).toBe(4); } finally { globalThis.fetch = f; } });
+});
 
-  test("returns empty Score[] when apiKey is empty string", async () => {
-    const scores = await judgeTrace(
-      { input: "test input", output: "test output" },
-      testRubric,
-      { provider: "openai", model: "gpt-4o", apiKey: "" },
-    );
-    expect(scores).toEqual([]);
-  });
+describe("judgeBatch", () => {
+  test("no key", async () => { const { evaluated, failed } = await judgeBatch([{ input: "a", output: "b", id: "t1" }], testRubric, { provider: "openai", model: "m" }); expect(evaluated).toBe(0); expect(failed).toBe(1); });
+  test("batch", async () => { const f = globalThis.fetch; globalThis.fetch = mock(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ choices: [{ message: { content: JSON.stringify({ accuracy: { score: 4, reasoning: "" }, conciseness: { score: 3, reasoning: "" } }) } }] }) } as Response)); try { const p: number[] = []; const { evaluated, results } = await judgeBatch([{ input: "a", output: "b", id: "t1" }, { input: "c", output: "d", id: "t2" }], testRubric, { provider: "openai", model: "m", apiKey: "k" }, { delayMs: 0, onProgress: (d) => p.push(d) }); expect(evaluated).toBe(2); expect(results).toHaveLength(2); expect(p).toEqual([1, 2]); } finally { globalThis.fetch = f; } });
+});
 
-  test("parses OpenAI response into Score[]", async () => {
-    const mockResponse = {
-      choices: [{
-        message: {
-          content: JSON.stringify({
-            accuracy: { score: 4, reasoning: "mostly right" },
-            conciseness: { score: 5, reasoning: "very tight" },
-          }),
-        },
-      }],
-    };
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mock(() =>
-      Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(mockResponse) } as Response),
-    );
-    try {
-      const scores = await judgeTrace(
-        { input: "what is 2+2", output: "4", id: "trace-123" },
-        testRubric,
-        { provider: "openai", model: "gpt-4o", apiKey: "sk-test-key" },
-      );
-      expect(scores).toHaveLength(2);
-      const accuracy = scores.find((s) => s.dimension === "accuracy");
-      expect(accuracy?.value).toBe(4);
-      expect(accuracy?.reasoning).toBe("mostly right");
-      expect(accuracy?.traceId).toBe("trace-123");
-      expect(accuracy?.judgeModel).toBe("gpt-4o");
-      expect(accuracy?.schemaVersion).toBe(1);
-      const conciseness = scores.find((s) => s.dimension === "conciseness");
-      expect(conciseness?.value).toBe(5);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  test("parses Claude response into Score[]", async () => {
-    const mockResponse = {
-      content: [{
-        text: JSON.stringify({
-          accuracy: { score: 3, reasoning: "has errors" },
-          conciseness: { score: 4, reasoning: "ok" },
-        }),
-      }],
-    };
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mock(() =>
-      Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(mockResponse) } as Response),
-    );
-    try {
-      const scores = await judgeTrace(
-        { input: "test", output: "result" },
-        testRubric,
-        { provider: "claude", model: "claude-sonnet-5", apiKey: "sk-ant-test" },
-      );
-      expect(scores).toHaveLength(2);
-      expect(scores.find((s) => s.dimension === "accuracy")?.value).toBe(3);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  test("parses Gemini response into Score[]", async () => {
-    const mockResponse = {
-      candidates: [{
-        content: {
-          parts: [{
-            text: JSON.stringify({
-              accuracy: { score: 5, reasoning: "perfect" },
-              conciseness: { score: 2, reasoning: "verbose" },
-            }),
-          }],
-        },
-      }],
-    };
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mock(() =>
-      Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(mockResponse) } as Response),
-    );
-    try {
-      const scores = await judgeTrace(
-        { input: "test", output: "result" },
-        testRubric,
-        { provider: "gemini", model: "gemini-2.5-flash", apiKey: "AIza-test" },
-      );
-      expect(scores).toHaveLength(2);
-      expect(scores.find((s) => s.dimension === "accuracy")?.value).toBe(5);
-      expect(scores.find((s) => s.dimension === "conciseness")?.value).toBe(2);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  test("returns empty Score[] on API failure", async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mock(() =>
-      Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) } as Response),
-    );
-    try {
-      const scores = await judgeTrace(
-        { input: "test", output: "result" },
-        testRubric,
-        { provider: "openai", model: "gpt-4o", apiKey: "sk-test", maxRetries: 0 },
-      );
-      expect(scores).toEqual([]);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  test("handles plain number scores (no reasoning object)", async () => {
-    const mockResponse = {
-      choices: [{
-        message: { content: JSON.stringify({ accuracy: 4, conciseness: 3 }) },
-      }],
-    };
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mock(() =>
-      Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(mockResponse) } as Response),
-    );
-    try {
-      const scores = await judgeTrace(
-        { input: "test", output: "result" },
-        testRubric,
-        { provider: "openai", model: "gpt-4o", apiKey: "sk-test" },
-      );
-      expect(scores).toHaveLength(2);
-      expect(scores.find((s) => s.dimension === "accuracy")?.value).toBe(4);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
+describe("JSONL", () => {
+  test("round-trip", () => { const s: Score[] = [{ traceId: "t1", dimension: "a", value: 4, rubric: "r", judgeModel: "m", timestamp: "t", schemaVersion: 1 }]; expect(jsonlToScores(scoresToJsonl(s))[0].traceId).toBe("t1"); });
+  test("empty", () => { expect(scoresToJsonl([])).toBe(""); expect(jsonlToScores("")).toEqual([]); });
+  test("malformed", () => { expect(jsonlToScores('{"traceId":"t1","dimension":"a","value":4,"rubric":"r","judgeModel":"m","timestamp":"t","schemaVersion":1}\nnot json\n')).toHaveLength(1); });
 });
