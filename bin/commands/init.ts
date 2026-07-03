@@ -19,7 +19,7 @@ function ensureDirectories(base: string): void {
 }
 
 function copyStarterRubric(base: string): void {
-  const src = join(dirname(dirname(dirname(import.meta.dir))), "rubrics", "starter.json");
+  const src = join(dirname(dirname(import.meta.dir)), "rubrics", "starter.json");
   const dest = join(base, "rubrics", "starter.json");
   if (existsSync(src) && !existsSync(dest)) {
     copyFileSync(src, dest);
@@ -77,6 +77,7 @@ export async function initCommand(args: string[]): Promise<void> {
   copyStarterRubric(base);
 
   const config = { ...PRESETS[speed] };
+  config.signalDir = join(getBaseDir(), "signals");
 
   if (speed !== "quick") {
     const apiKey = await askApiKey(speed);
