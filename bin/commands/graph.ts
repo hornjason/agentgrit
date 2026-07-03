@@ -37,9 +37,9 @@ function showStats(base: string): void {
 }
 
 async function doBuild(base: string, full: boolean): Promise<void> {
-  const rulesDir = join(base, "rubrics");
+  const memoryDir = join(base, "memory");
   console.log(`  Building graph${full ? " (full)" : " (incremental)"}...`);
-  const graph = await buildGraph(rulesDir, join(base, "state"));
+  const graph = await buildGraph(memoryDir, join(base, "state"));
   console.log(`  ✓ Built: ${graph.nodeCount} nodes, ${graph.edgeCount} edges`);
 }
 

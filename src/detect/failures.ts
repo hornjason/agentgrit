@@ -30,7 +30,6 @@ interface CorrectionGroup {
   tokens: Set<string>;
   signals: CorrectionSignal[];
   sessions: Set<string>;
-  maxSeverity: number;
 }
 
 function groupByKeywordSimilarity(
@@ -60,7 +59,6 @@ function groupByKeywordSimilarity(
         tokens,
         signals: [signal],
         sessions: new Set([signal.session_id]),
-        maxSeverity: 5,
       });
     }
   }
@@ -68,12 +66,64 @@ function groupByKeywordSimilarity(
   return groups;
 }
 
+/**
+ * Calculate severity from frequency, session spread, and recency.
+ * Base 3 + log2(frequency) + session spread bonus + recency bonus. Capped at 10.
+ */
+function calculateSeverity(group: CorrectionGroup): number {
+  const frequency = group.signals.length;
+  const sessionCount = group.sessions.size;
+
+  // Base severity + frequency contribution (log2 scale)
+  let severity = 3 + Math.log2(Math.max(1, frequency));
+
+  // Session spread: broad problems are more severe
+  if (sessionCount > 5) severity += 1;
+
+  // Recency: recent patterns more urgent
+  const timestamps = group.signals.map((s) => new Date(s.timestamp).getTime());
+  const mostRecent = Math.max(...timestamps);
+  const daysSinceLastSeen = (Date.now() - mostRecent) / (1000 * 60 * 60 * 24);
+  if (daysSinceLastSeen < 7) severity += 1;
+
+  return Math.min(10, Math.round(severity));
+}
+
 function buildCandidateRule(group: CorrectionGroup): string {
-  const triggers = group.signals
-    .slice(0, 3)
-    .map((s) => s.correction_phrase.slice(0, 80))
-    .join("; ");
-  return `Recurring correction (${group.signals.length}x): ${triggers}`;
+  // Extract unique correction phrases, deduplicate by content
+  const seen = new Set<string>();
+  const uniquePhrases: string[] = [];
+  for (const s of group.signals) {
+    const phrase = s.correction_phrase.trim().slice(0, 80);
+    const normalized = phrase.toLowerCase().replace(/[^a-z0-9\s]/g, "");
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      uniquePhrases.push(phrase);
+    }
+    if (uniquePhrases.length >= 3) break;
+  }
+
+  // Extract context hints from surrounding assistant responses
+  const contextHints: string[] = [];
+  for (const s of group.signals.slice(0, 5)) {
+    if (s.context) {
+      const assistantLine = s.context.split("\n").find((l) => l.startsWith("Assistant:"));
+      if (assistantLine) {
+        const snippet = assistantLine.slice(11, 80).trim();
+        if (snippet.length > 10 && !contextHints.includes(snippet)) {
+          contextHints.push(snippet);
+        }
+      }
+      if (contextHints.length >= 2) break;
+    }
+  }
+
+  const triggers = uniquePhrases.join("; ");
+  const contextSuffix = contextHints.length > 0
+    ? ` Context: ${contextHints[0]}`
+    : "";
+
+  return `Recurring correction (${group.signals.length}x across ${group.sessions.size} sessions): ${triggers}.${contextSuffix}`;
 }
 
 export async function detectFailurePatterns(
@@ -100,7 +150,7 @@ export async function detectFailurePatterns(
       type: "failure",
       frequency: group.signals.length,
       sessions,
-      severity: group.maxSeverity,
+      severity: calculateSeverity(group),
       candidateRule: buildCandidateRule(group),
       firstSeen: timestamps[0],
       lastSeen: timestamps[timestamps.length - 1],

@@ -17,6 +17,7 @@ const COMMANDS: Record<string, { description: string; module: string }> = {
   review: { description: "Run manual weekly learning review", module: "./commands/review" },
   export: { description: "Export graph + rules + rubrics", module: "./commands/export" },
   upgrade: { description: "Switch adoption speed (quick/standard/full)", module: "./commands/upgrade" },
+  daemon: { description: "Run, start, stop daemon cycle", module: "./commands/daemon" },
 };
 
 function printUsage(): void {

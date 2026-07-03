@@ -1,8 +1,13 @@
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
-import { getBaseDir } from "../../src/adapters/paths";
-import { Tier } from "../../src/adapters/types";
+import { getBaseDir, stateDir } from "../../src/adapters/paths";
+import { Tier, type Rule, SCHEMA_VERSION } from "../../src/adapters/types";
 import { checkBudget, type BudgetStatus } from "../../src/promote/budget";
+import { getInboxItems } from "./inbox";
+import { routeRule } from "../../src/promote/router";
+import { promoteRule } from "../../src/promote/bridge";
+import { recordPromotion } from "../../src/promote/ledger";
+import { randomUUID } from "crypto";
 
 function icon(status: BudgetStatus): string {
   if (status.level === "OK") return "✓";
@@ -84,6 +89,84 @@ function showList(base: string): void {
   }
 }
 
+async function doPromote(base: string, dryRun: boolean): Promise<void> {
+  const sigDir = join(base, "signals");
+
+  if (!existsSync(sigDir)) {
+    console.log("  No signals directory. Run 'agentgrit init' first.\n");
+    return;
+  }
+
+  const items = await getInboxItems(sigDir);
+
+  if (items.length === 0) {
+    console.log("  No pending candidates to promote.\n");
+    return;
+  }
+
+  console.log(`  ${items.length} candidate(s) found:\n`);
+
+  for (let i = 0; i < items.length; i++) {
+    const { pattern, route } = items[i];
+    console.log(`  ${i + 1}. [${route.tier}] severity=${pattern.severity}/10 freq=${pattern.frequency}`);
+    console.log(`     ${pattern.candidateRule?.slice(0, 120) ?? "(no text)"}`);
+    console.log(`     Reason: ${route.rationale}`);
+    console.log("");
+  }
+
+  if (dryRun) {
+    console.log("  Dry run — no changes made. Pass --yes to apply.\n");
+    return;
+  }
+
+  // Find CLAUDE.md for global tier promotions
+  const claudeMdPath = join(process.env.HOME ?? "", ".claude", "CLAUDE.md");
+  let promoted = 0;
+
+  for (const { pattern, route } of items) {
+    if (!pattern.candidateRule) continue;
+
+    const budgetStatus = checkBudget(route.tier, 0);
+    if (budgetStatus.level === "OVER_BUDGET") {
+      console.log(`  ⚠ Skipping (over budget for ${route.tier}): ${pattern.id}`);
+      continue;
+    }
+
+    const rule: Rule = {
+      id: `agentgrit-${pattern.id}`,
+      text: pattern.candidateRule,
+      tier: route.tier,
+      tags: [pattern.type],
+      created: new Date().toISOString(),
+      correlationScore: 0,
+      sourceSignals: pattern.sessions.slice(0, 5),
+      schemaVersion: SCHEMA_VERSION,
+    };
+
+    if (route.tier === Tier.Global && existsSync(claudeMdPath)) {
+      await promoteRule(rule, claudeMdPath);
+    }
+
+    await recordPromotion(
+      {
+        id: randomUUID(),
+        ruleId: rule.id,
+        tier: route.tier,
+        timestamp: new Date().toISOString(),
+        beforeSnapshot: "",
+        afterSnapshot: "",
+        approved: true,
+      },
+      stateDir(),
+    );
+
+    promoted++;
+    console.log(`  ✓ Promoted: ${rule.id} → ${route.tier}`);
+  }
+
+  console.log(`\n  ${promoted} rule(s) promoted. Use 'agentgrit undo' to reverse.\n`);
+}
+
 export async function rulesCommand(args: string[]): Promise<void> {
   const base = getBaseDir();
   const sub = args[0];
@@ -97,6 +180,9 @@ export async function rulesCommand(args: string[]): Promise<void> {
 
   if (sub === "status" || sub === "budget") {
     showBudget(base);
+  } else if (sub === "promote") {
+    const dryRun = !args.includes("--yes");
+    await doPromote(base, dryRun);
   } else if (sub === "rebalance") {
     console.log("  Rebalance: analyze rules and suggest tier re-routing.");
     console.log("  (Requires rules in graph — run 'agentgrit graph build' first)\n");

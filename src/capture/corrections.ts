@@ -46,6 +46,17 @@ const NOISE_PATTERNS: RegExp[] = [
   /\bstop\s+(?:by|at|for|to|in)\b/i,
   /\bdon'?t\s+worry\b/i,
   /\bdon'?t\s+(?:forget|mind)\b/i,
+  // Approval / positive feedback — not corrections
+  /\bperfect\b/i,
+  /\bnice\b/i,
+  /\bgreat\s+work\b/i,
+  /\byes\s+exactly\b/i,
+  /\bthat'?s\s+right\b/i,
+  /\bgood\s+job\b/i,
+  /\bwell\s+done\b/i,
+  /\bexactly\s+right\b/i,
+  /\blove\s+it\b/i,
+  /\bawesome\b/i,
 ];
 
 // ── Negative assertion audit patterns (from NegativeAssertionAudit) ──
