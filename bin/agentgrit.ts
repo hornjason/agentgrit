@@ -1,33 +1,68 @@
 #!/usr/bin/env bun
 export {};
 
+import { captureCommand } from "./commands/capture";
+import { daemonCommand } from "./commands/daemon";
+import { doctorCommand } from "./commands/doctor";
+import { evalCommand } from "./commands/eval";
+import { exportCommand } from "./commands/export";
+import { graphCommand } from "./commands/graph";
+import { inboxCommand } from "./commands/inbox";
+import { initCommand } from "./commands/init";
+import { optimizeCommand } from "./commands/optimize";
+import { reviewCommand } from "./commands/review";
+import { rulesCommand } from "./commands/rules";
+import { signalsCommand } from "./commands/signals";
+import { statusCommand } from "./commands/status";
+import { undoCommand } from "./commands/undo";
+import { upgradeCommand } from "./commands/upgrade";
+
 const VERSION = "0.1.0";
 
-const COMMANDS: Record<string, { description: string; module: string }> = {
-  capture: { description: "Capture signals from Claude Code hooks", module: "./commands/capture" },
-  init: { description: "Interactive setup wizard", module: "./commands/init" },
-  status: { description: "Signal counts, score trends, rule budget", module: "./commands/status" },
-  doctor: { description: "Health check — verify every link in the chain", module: "./commands/doctor" },
-  inbox: { description: "Review and approve pending rule candidates", module: "./commands/inbox" },
-  rules: { description: "List, rebalance, or compact rules", module: "./commands/rules" },
-  signals: { description: "Signal file sizes and rotation", module: "./commands/signals" },
-  undo: { description: "Undo recent rule promotions", module: "./commands/undo" },
-  optimize: { description: "Hill-climb optimize prompts or skills", module: "./commands/optimize" },
-  graph: { description: "Build, query, or inspect knowledge graph", module: "./commands/graph" },
-  eval: { description: "Evaluate traces, sessions, or recall", module: "./commands/eval" },
-  review: { description: "Run manual weekly learning review", module: "./commands/review" },
-  export: { description: "Export graph + rules + rubrics", module: "./commands/export" },
-  upgrade: { description: "Switch adoption speed (quick/standard/full)", module: "./commands/upgrade" },
-  daemon: { description: "Run, start, stop daemon cycle", module: "./commands/daemon" },
+const HANDLERS: Record<string, (args: string[]) => Promise<void>> = {
+  capture: captureCommand,
+  daemon: daemonCommand,
+  doctor: doctorCommand,
+  eval: evalCommand,
+  export: exportCommand,
+  graph: graphCommand,
+  inbox: inboxCommand,
+  init: initCommand,
+  optimize: optimizeCommand,
+  review: reviewCommand,
+  rules: rulesCommand,
+  signals: signalsCommand,
+  status: statusCommand,
+  undo: undoCommand,
+  upgrade: upgradeCommand,
+};
+
+const DESCRIPTIONS: Record<string, string> = {
+  capture: "Capture signals from Claude Code hooks",
+  daemon: "Run, start, stop daemon cycle",
+  doctor: "Health check — verify every link in the chain",
+  eval: "Evaluate traces, sessions, or recall",
+  export: "Export graph + rules + rubrics",
+  graph: "Build, query, or inspect knowledge graph",
+  inbox: "Review and approve pending rule candidates",
+  init: "Interactive setup wizard",
+  optimize: "Hill-climb optimize prompts or skills",
+  review: "Run manual weekly learning review",
+  rules: "List, rebalance, or compact rules",
+  signals: "Signal file sizes and rotation",
+  status: "Signal counts, score trends, rule budget",
+  undo: "Undo recent rule promotions",
+  upgrade: "Switch adoption speed (quick/standard/full)",
 };
 
 function printUsage(): void {
   console.log(`agentgrit v${VERSION} — self-learning engine for AI agents\n`);
   console.log("Usage: agentgrit <command> [options]\n");
   console.log("Commands:");
-  const maxLen = Math.max(...Object.keys(COMMANDS).map((k) => k.length));
-  for (const [name, { description }] of Object.entries(COMMANDS)) {
-    console.log(`  ${name.padEnd(maxLen + 2)}${description}`);
+  const names = Object.keys(DESCRIPTIONS);
+  const maxLen = Math.max(...names.map((k) => k.length));
+  for (const name of names) {
+    console.log(`  ${name.padEnd(maxLen + 2)}${DESCRIPTIONS[name]}`);
   }
   console.log(`\nOptions:`);
   console.log(`  --help, -h     Show this help message`);
@@ -50,19 +85,10 @@ async function main(): Promise<void> {
   const command = args[0];
   const commandArgs = args.slice(1);
 
-  const entry = COMMANDS[command];
-  if (!entry) {
+  const handler = HANDLERS[command];
+  if (!handler) {
     console.error(`Unknown command: ${command}\n`);
     printUsage();
-    process.exit(1);
-  }
-
-  const mod = await import(entry.module);
-  const handlerName = `${command}Command`;
-  const handler = mod[handlerName] ?? mod.default;
-
-  if (typeof handler !== "function") {
-    console.error(`Command "${command}" does not export a handler`);
     process.exit(1);
   }
 
