@@ -1,11 +1,11 @@
 import { existsSync } from "fs";
 import { join } from "path";
-import { getBaseDir } from "../../src/adapters/paths";
+import { getBaseDir, resolveSignalDir } from "../../src/adapters/paths";
 import { runReview } from "../../src/promote/review";
 
 export async function reviewCommand(args: string[]): Promise<void> {
   const base = getBaseDir();
-  const sigDir = join(base, "signals");
+  const sigDir = resolveSignalDir();
   const state = join(base, "state");
 
   console.log("\nagentgrit review\n");

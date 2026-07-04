@@ -1,6 +1,6 @@
 import { existsSync, statSync, readdirSync } from "fs";
 import { join } from "path";
-import { getBaseDir } from "../../src/adapters/paths";
+import { getBaseDir, resolveSignalDir } from "../../src/adapters/paths";
 import { readSignals, rotateFile } from "../../src/adapters/jsonl";
 import { relativeTime } from "../../src/adapters/time";
 
@@ -39,7 +39,7 @@ async function listSignalFiles(dir: string): Promise<SignalFileInfo[]> {
 
 export async function signalsCommand(args: string[]): Promise<void> {
   const base = getBaseDir();
-  const sigDir = join(base, "signals");
+  const sigDir = resolveSignalDir();
   const sub = args[0];
 
   console.log("\nagentgrit signals\n");

@@ -1,6 +1,6 @@
 import { existsSync, statSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
-import { getBaseDir, signalsDir, stateDir } from "../../src/adapters/paths";
+import { getBaseDir, resolveSignalDir, stateDir } from "../../src/adapters/paths";
 import { readSignals } from "../../src/adapters/jsonl";
 import { relativeTime } from "../../src/adapters/time";
 import { Tier } from "../../src/adapters/types";
@@ -104,7 +104,7 @@ export async function statusCommand(_args: string[]): Promise<void> {
   console.log("\nagentgrit status\n");
 
   // Signals
-  const sigDir = join(base, "signals");
+  const sigDir = resolveSignalDir();
   console.log("SIGNALS");
   if (existsSync(sigDir)) {
     const summaries = await getSignalSummaries(sigDir);

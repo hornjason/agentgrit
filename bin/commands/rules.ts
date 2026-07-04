@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
-import { getBaseDir, stateDir } from "../../src/adapters/paths";
+import { getBaseDir, resolveSignalDir, stateDir } from "../../src/adapters/paths";
 import { Tier, type Rule, SCHEMA_VERSION } from "../../src/adapters/types";
 import { checkBudget, type BudgetStatus } from "../../src/promote/budget";
 import { getInboxItems } from "./inbox";
@@ -90,7 +90,7 @@ function showList(base: string): void {
 }
 
 async function doPromote(base: string, dryRun: boolean): Promise<void> {
-  const sigDir = join(base, "signals");
+  const sigDir = resolveSignalDir();
 
   if (!existsSync(sigDir)) {
     console.log("  No signals directory. Run 'agentgrit init' first.\n");

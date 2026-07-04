@@ -1,6 +1,6 @@
 import { existsSync } from "fs";
 import { join } from "path";
-import { getBaseDir } from "../../src/adapters/paths";
+import { getBaseDir, resolveSignalDir } from "../../src/adapters/paths";
 
 export async function evalCommand(args: string[]): Promise<void> {
   const base = getBaseDir();
@@ -28,7 +28,7 @@ export async function evalCommand(args: string[]): Promise<void> {
     const backfill = args.includes("--backfill");
     const local = args.includes("--local");
     console.log(`  Mode: traces${backfill ? " (backfill)" : ""}${local ? " (local)" : ""}`);
-    console.log(`  Signals dir: ${join(base, "signals")}`);
+    console.log(`  Signals dir: ${resolveSignalDir()}`);
     console.log(`\n  Trace evaluation requires a configured judge.`);
     console.log(`  Run 'agentgrit doctor' to verify setup.\n`);
   } else if (sub === "session") {

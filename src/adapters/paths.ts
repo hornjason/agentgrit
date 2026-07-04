@@ -1,5 +1,7 @@
+import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
 import { join, resolve } from "path";
+import type { AgentGritConfig } from "./types";
 
 const ENV_KEY = "AGENTGRIT_DIR";
 
@@ -19,6 +21,20 @@ export function getBaseDir(): string {
 
 export function signalsDir(): string {
   return join(getBaseDir(), "signals");
+}
+
+export function loadConfig(): AgentGritConfig {
+  const configPath = join(getBaseDir(), "config.json");
+  if (!existsSync(configPath)) {
+    return { signalDir: join(getBaseDir(), "signals") } as AgentGritConfig;
+  }
+  const raw = JSON.parse(readFileSync(configPath, "utf-8"));
+  return raw as AgentGritConfig;
+}
+
+export function resolveSignalDir(): string {
+  const config = loadConfig();
+  return expandPath(config.signalDir ?? join(getBaseDir(), "signals"));
 }
 
 export function stateDir(): string {

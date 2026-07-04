@@ -4,6 +4,7 @@ export {};
 const VERSION = "0.1.0";
 
 const COMMANDS: Record<string, { description: string; module: string }> = {
+  capture: { description: "Capture signals from Claude Code hooks", module: "./commands/capture" },
   init: { description: "Interactive setup wizard", module: "./commands/init" },
   status: { description: "Signal counts, score trends, rule budget", module: "./commands/status" },
   doctor: { description: "Health check — verify every link in the chain", module: "./commands/doctor" },

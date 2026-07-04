@@ -1,6 +1,6 @@
 import { existsSync, statSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
-import { getBaseDir, signalsDir, stateDir, rubricsDir } from "../../src/adapters/paths";
+import { getBaseDir, resolveSignalDir, stateDir, rubricsDir } from "../../src/adapters/paths";
 import { relativeTime } from "../../src/adapters/time";
 import { Tier } from "../../src/adapters/types";
 import { checkBudget } from "../../src/promote/budget";
@@ -126,7 +126,7 @@ export function runDoctor(): DoctorReport {
   checks.push(checkConfig(base));
   checks.push(checkRubric(base));
 
-  const sigDir = join(base, "signals");
+  const sigDir = resolveSignalDir();
   for (const file of ["ratings.jsonl", "corrections.jsonl", "sentiment.jsonl", "skills.jsonl"]) {
     checks.push(checkSignalFile(sigDir, file));
   }

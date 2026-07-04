@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { getBaseDir, stateDir } from "../../src/adapters/paths";
+import { getBaseDir, resolveSignalDir, stateDir } from "../../src/adapters/paths";
 import { detectFailurePatterns } from "../../src/detect/failures";
 import { minePatterns } from "../../src/detect/patterns";
 import { routeRule, type RouteResult } from "../../src/promote/router";
@@ -54,7 +54,7 @@ function formatItem(item: InboxItem, index: number): string {
 
 export async function inboxCommand(args: string[]): Promise<void> {
   const base = getBaseDir();
-  const sigDir = join(base, "signals");
+  const sigDir = resolveSignalDir();
 
   if (!existsSync(sigDir)) {
     console.log("No signals directory. Run 'agentgrit init' first.");
