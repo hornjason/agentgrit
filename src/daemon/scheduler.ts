@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, unlinkSync, statSync as fsStatSync } from "fs";
+import { existsSync, mkdirSync, unlinkSync, writeFileSync, statSync as fsStatSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 
@@ -123,15 +123,15 @@ export async function installScheduler(config: SchedulerConfig): Promise<void> {
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
     const plist = generatePlist(config);
-    await Bun.write(plistPath(), plist);
+    writeFileSync(plistPath(), plist);
   } else if (platform === "linux") {
     const dir = systemdDir();
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
     const service = generateSystemdService(config);
     const timer = generateSystemdTimer(config);
-    await Bun.write(servicePath(), service);
-    await Bun.write(timerPath(), timer);
+    writeFileSync(servicePath(), service);
+    writeFileSync(timerPath(), timer);
   } else {
     throw new Error(`Unsupported platform: ${platform}`);
   }

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import type { Trajectory } from "../adapters/types";
 
@@ -16,7 +16,7 @@ function defaultStorePath(signalDir: string): string {
 async function loadStore(path: string): Promise<TrajectoryStore> {
   if (!existsSync(path)) return { trajectories: [] };
   try {
-    const content = await Bun.file(path).text();
+    const content = readFileSync(path, "utf-8");
     return JSON.parse(content) as TrajectoryStore;
   } catch {
     return { trajectories: [] };
@@ -26,7 +26,7 @@ async function loadStore(path: string): Promise<TrajectoryStore> {
 async function saveStore(path: string, store: TrajectoryStore): Promise<void> {
   const dir = dirname(path);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  await Bun.write(path, JSON.stringify(store, null, 2));
+  writeFileSync(path, JSON.stringify(store, null, 2));
 }
 
 function domainOverlap(query: string[], candidate: string[]): number {

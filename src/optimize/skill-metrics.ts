@@ -1,4 +1,4 @@
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 
 export interface SkillSequenceEntry {
@@ -76,7 +76,7 @@ const CONVERSION_WINDOW_MS = 30 * 60 * 1000;
 
 async function readJsonl<T>(filePath: string): Promise<T[]> {
   if (!existsSync(filePath)) return [];
-  const content = await Bun.file(filePath).text();
+  const content = readFileSync(filePath, "utf-8");
   const results: T[] = [];
   for (const line of content.split("\n")) {
     const trimmed = line.trim();

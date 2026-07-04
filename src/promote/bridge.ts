@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, renameSync, unlinkSync, readFileSync } from "fs";
+import { existsSync, mkdirSync, renameSync, unlinkSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import type { Rule } from "../adapters/types";
 
@@ -106,7 +106,7 @@ async function atomicWrite(filePath: string, content: string): Promise<void> {
 
   const tmpPath = filePath + ".tmp." + process.pid;
   try {
-    await Bun.write(tmpPath, content);
+    writeFileSync(tmpPath, content);
     renameSync(tmpPath, filePath);
   } catch (err) {
     try { unlinkSync(tmpPath); } catch { /* cleanup best-effort */ }

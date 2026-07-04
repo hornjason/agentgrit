@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname } from "path";
 import { createHash } from "crypto";
 
@@ -56,7 +56,7 @@ export async function buildBenchmark(
     };
   }
 
-  const content = await Bun.file(reflectionsPath).text();
+  const content = readFileSync(reflectionsPath, "utf-8");
   const lines = content.split("\n").filter((l) => l.trim());
   const minSentiment = opts?.minSentiment ?? 7;
 
@@ -113,5 +113,5 @@ export function loadBenchmark(path: string): Benchmark {
 export async function saveBenchmark(benchmark: Benchmark, path: string): Promise<void> {
   const dir = dirname(path);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  await Bun.write(path, JSON.stringify(benchmark, null, 2));
+  writeFileSync(path, JSON.stringify(benchmark, null, 2));
 }

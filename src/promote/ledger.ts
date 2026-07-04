@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from "fs";
 import { dirname, join } from "path";
 import type { PromotionRecord } from "../adapters/types";
 
@@ -20,7 +20,7 @@ export async function recordPromotion(
 
   const tmpPath = path + ".tmp." + process.pid;
   try {
-    await Bun.write(tmpPath, existing + line);
+    writeFileSync(tmpPath, existing + line);
     renameSync(tmpPath, path);
   } catch (err) {
     try { unlinkSync(tmpPath); } catch { /* cleanup best-effort */ }
@@ -62,7 +62,7 @@ export async function undoPromotions(
 
   const tmpPath = path + ".tmp." + process.pid;
   try {
-    await Bun.write(tmpPath, newContent);
+    writeFileSync(tmpPath, newContent);
     renameSync(tmpPath, path);
   } catch (err) {
     try { unlinkSync(tmpPath); } catch { /* cleanup best-effort */ }

@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, copyFileSync, writeFileSync } from "fs";
 import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 import { homedir } from "os";
 import { getBaseDir, signalsDir, stateDir, rubricsDir } from "../../src/adapters/paths";
 import type { AgentGritConfig } from "../../src/adapters/types";
@@ -27,8 +28,17 @@ function ensureDirectories(base: string): void {
   }
 }
 
+function findPackageRoot(): string {
+  let dir = dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 5; i++) {
+    if (existsSync(join(dir, "rubrics"))) return dir;
+    dir = dirname(dir);
+  }
+  return dir;
+}
+
 function copyStarterRubric(base: string): void {
-  const src = join(dirname(dirname(import.meta.dir)), "rubrics", "starter.json");
+  const src = join(findPackageRoot(), "rubrics", "starter.json");
   const dest = join(base, "rubrics", "starter.json");
   if (existsSync(src) && !existsSync(dest)) {
     copyFileSync(src, dest);
@@ -41,11 +51,18 @@ function writeConfig(base: string, config: AgentGritConfig): void {
 }
 
 async function promptLine(question: string): Promise<string> {
-  process.stdout.write(question);
-  for await (const line of console) {
-    return line.trim();
+  if (!process.stdin.isTTY) {
+    process.stdout.write(question);
+    return "";
   }
-  return "";
+  const { createInterface } = await import("readline");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise<string>((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
 }
 
 async function askSpeed(): Promise<AdoptionSpeed> {

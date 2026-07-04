@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Self-learning engine that makes AI coding agents improve over time",
   "bin": {
-    "agentgrit": "./dist/agentgrit"
+    "agentgrit": "./dist/agentgrit.mjs"
   },
   "files": [
     "dist/",
@@ -15,7 +15,7 @@
   ],
   "scripts": {
     "test": "bun test",
-    "build": "bun build --compile bin/agentgrit.ts --outfile dist/agentgrit",
+    "build": "bun build bin/agentgrit.ts --outfile dist/agentgrit.mjs --target=node --minify",
     "prepublishOnly": "bun run build",
     "lint": "bunx biome check .",
     "typecheck": "bunx tsc --noEmit"
@@ -26,7 +26,7 @@
     "typescript": "^5.7.0"
   },
   "engines": {
-    "bun": ">=1.1.0"
+    "node": ">=22.0.0"
   },
   "license": "MIT",
   "repository": {

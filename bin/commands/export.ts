@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { getBaseDir } from "../../src/adapters/paths";
 
@@ -49,7 +49,7 @@ export async function exportCommand(args: string[]): Promise<void> {
     console.log(output);
   } else {
     const outPath = args[0];
-    await Bun.write(outPath, output);
+    writeFileSync(outPath, output);
     console.error(`Exported to ${outPath}`);
   }
 }

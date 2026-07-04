@@ -1,4 +1,4 @@
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import type { Pattern, Rule } from "../adapters/types";
 import { SCHEMA_VERSION } from "../adapters/types";
@@ -80,7 +80,7 @@ export async function runReview(
 
   const entries: RatingEntry[] = [];
   if (existsSync(ratingsPath)) {
-    const content = await Bun.file(ratingsPath).text();
+    const content = readFileSync(ratingsPath, "utf-8");
     for (const line of content.split("\n")) {
       const trimmed = line.trim();
       if (!trimmed) continue;

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, statSync } from "fs";
+import { existsSync, mkdirSync, statSync, readFileSync, writeFileSync, renameSync, unlinkSync } from "fs";
 import { dirname, join } from "path";
 import type { AnySignal, SignalAdapter } from "./types";
 
@@ -14,11 +14,9 @@ export async function appendSignal(file: string, signal: AnySignal): Promise<voi
   const line = JSON.stringify(signal) + "\n";
   const tmpPath = file + ".tmp." + process.pid;
 
-  await Bun.write(tmpPath, "");
-  const existing = existsSync(file) ? await Bun.file(file).text() : "";
-  await Bun.write(tmpPath, existing + line);
-
-  const { renameSync, unlinkSync } = await import("fs");
+  writeFileSync(tmpPath, "");
+  const existing = existsSync(file) ? readFileSync(file, "utf-8") : "";
+  writeFileSync(tmpPath, existing + line);
   try {
     renameSync(tmpPath, file);
   } catch {
@@ -33,7 +31,7 @@ export async function readSignals(
 ): Promise<AnySignal[]> {
   if (!existsSync(file)) return [];
 
-  const content = await Bun.file(file).text();
+  const content = readFileSync(file, "utf-8");
   const lines = content.split("\n").filter((l) => l.trim());
 
   const start = opts?.offset ?? 0;
@@ -63,9 +61,8 @@ export async function rotateFile(
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   const archivePath = file + "." + ts + ".bak";
 
-  const { renameSync } = await import("fs");
   renameSync(file, archivePath);
-  await Bun.write(file, "");
+  writeFileSync(file, "");
 
   return { rotated: true, archivePath };
 }

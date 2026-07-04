@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 
 export interface HillClimbConfig {
@@ -47,9 +47,8 @@ async function appendExperimentLog(stateDir: string, entry: RoundResult): Promis
   const dir = dirname(logPath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const line = JSON.stringify(entry) + "\n";
-  const file = Bun.file(logPath);
-  const existing = existsSync(logPath) ? await file.text() : "";
-  await Bun.write(logPath, existing + line);
+  const existing = existsSync(logPath) ? readFileSync(logPath, "utf-8") : "";
+  writeFileSync(logPath, existing + line);
 }
 
 export async function hillClimb(config: HillClimbConfig): Promise<HillClimbResult> {
