@@ -207,8 +207,8 @@ async function bootstrapInit(args: string[]): Promise<void> {
 
   writeConfig(base, config);
 
-  // Install hooks
-  const hookResult = installHooks(settingsPath);
+  // Hook installation disabled until capture CLI subcommands are wired (#37)
+  // const hookResult = installHooks(settingsPath);
 
   console.log(`\n  ✓ Directory structure created`);
   console.log(`  ✓ Starter rubric copied`);
@@ -216,7 +216,7 @@ async function bootstrapInit(args: string[]): Promise<void> {
   if (signalSource.source === "pai") {
     console.log(`  ✓ Signal dir → PAI signals (in-place, no copy)`);
   }
-  console.log(`  ✓ Hooks: ${hookResult.installed} installed, ${hookResult.existing} already existed`);
+  console.log(`  ⏳ Hooks: skipped (capture CLI not yet wired — see #37)`);
 
   if (speed === "full") {
     console.log(`  ✓ Daemon config set (interval: ${config.daemon.interval})`);
