@@ -1,10 +1,10 @@
 {
   "name": "@agentgrit/core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Self-learning engine that makes AI coding agents improve over time",
   "bin": {
-    "agentgrit": "./dist/agentgrit.mjs"
+    "agentgrit": "dist/agentgrit.js"
   },
   "files": [
     "dist/",
@@ -15,7 +15,7 @@
   ],
   "scripts": {
     "test": "bun test",
-    "build": "bun build bin/agentgrit.ts --outfile dist/agentgrit.mjs --target=node --minify",
+    "build": "bun build bin/agentgrit.ts --outfile dist/agentgrit.js --target=node --minify",
     "prepublishOnly": "bun run build",
     "lint": "bunx biome check .",
     "typecheck": "bunx tsc --noEmit"
@@ -31,7 +31,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/hornjason/agentgrit"
+    "url": "git+https://github.com/hornjason/agentgrit.git"
   },
   "keywords": [
     "claude-code",
