@@ -14,7 +14,8 @@ import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { appendSignal } from "../adapters/jsonl";
-import { signalPath, statePath, resolveSignalDir } from "../adapters/paths";
+import { signalPath, resolveSignalDir } from "../adapters/paths";
+import { readSessionContext } from "../graph/context";
 import type { RatingSignal, SentimentSignal } from "../adapters/types";
 import { SCHEMA_VERSION } from "../adapters/types";
 
@@ -335,6 +336,8 @@ export async function captureRating(
   const composite = computeComposite(parsed.mode, parsed.scope, parsed.quality);
   const sentiment = scoreSentiment(parsed.comment ?? "");
 
+  const ruleIds = opts?.ruleIds ?? readSessionContext()?.ruleIds;
+
   const signal: RatingSignal = {
     id: randomUUID(),
     type: "rating",
@@ -349,7 +352,7 @@ export async function captureRating(
     response_preview: opts?.responsePreview
       ? truncatePreview(opts.responsePreview)
       : undefined,
-    rule_ids: opts?.ruleIds,
+    rule_ids: ruleIds,
   };
 
   await appendSignal(signalPath(RATINGS_FILE), signal);

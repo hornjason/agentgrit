@@ -123,10 +123,52 @@ export function getContextRules(
   return rules;
 }
 
-// ── Learning Readback ──
+// ── Session Context Attribution ──
 
-import { existsSync, readFileSync, readdirSync } from "fs";
-import { join } from "path";
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "fs";
+import { dirname, join } from "path";
+import { statePath } from "../adapters/paths";
+
+const SESSION_CONTEXT_FILE = "session-context.json";
+const SESSION_CONTEXT_TTL_MS = 24 * 60 * 60 * 1000;
+
+export interface SessionContext {
+  ruleIds: string[];
+  domains: string[];
+  timestamp: string;
+  ttl: number;
+}
+
+export function writeSessionContext(rules: Rule[], domains: string[]): void {
+  const filePath = statePath(SESSION_CONTEXT_FILE);
+  const dir = dirname(filePath);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+
+  const context: SessionContext = {
+    ruleIds: rules.map((r) => r.id),
+    domains,
+    timestamp: new Date().toISOString(),
+    ttl: SESSION_CONTEXT_TTL_MS,
+  };
+
+  writeFileSync(filePath, JSON.stringify(context, null, 2), "utf-8");
+}
+
+export function readSessionContext(): SessionContext | null {
+  const filePath = statePath(SESSION_CONTEXT_FILE);
+  if (!existsSync(filePath)) return null;
+
+  try {
+    const raw = JSON.parse(readFileSync(filePath, "utf-8")) as SessionContext;
+    const age = Date.now() - new Date(raw.timestamp).getTime();
+    if (age > raw.ttl) return null;
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
+// ── Learning Readback ──
 
 interface LearningDigest {
   recentSignals: string[];

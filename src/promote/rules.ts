@@ -63,6 +63,17 @@ export function getEvictionCandidates(
     .slice(0, topN);
 }
 
+export function trackAttributedRules(
+  rules: Rule[],
+  attributedRuleIds: string[],
+  sessionRating: number,
+): Rule[] {
+  const idSet = new Set(attributedRuleIds);
+  return rules.map((rule) =>
+    idSet.has(rule.id) ? trackRule(rule, sessionRating) : rule,
+  );
+}
+
 export function correlateRules(rules: Rule[]): RuleStats[] {
   return rules.map((r) => ({
     ruleId: r.id,
