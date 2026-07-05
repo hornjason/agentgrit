@@ -8,6 +8,8 @@ export interface CycleResult {
   promoted: number;
   synced: boolean;
   optimized: boolean;
+  feedbackGenerated: number;
+  successGenerated: number;
   errors: string[];
 }
 
@@ -40,6 +42,8 @@ export async function runDaemonCycle(
     promoted: 0,
     synced: false,
     optimized: false,
+    feedbackGenerated: 0,
+    successGenerated: 0,
     errors: [],
   };
 
@@ -101,7 +105,48 @@ export async function runDaemonCycle(
     result.errors.push(`detect-patterns: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // 3. Promote — route detected patterns to rules if they cross threshold
+  // 3. AutoFeedback + AutoSuccess — extract lessons from extreme sessions
+  try {
+    const { generateFeedback, generateSuccess } = await import("./feedback");
+    const { readSignals } = await import("../adapters/jsonl");
+    const { resolveMemoryDir } = await import("../adapters/paths");
+    const { join } = await import("path");
+
+    const ratingsPath = join(config.signalDir, "ratings.jsonl");
+    const allSignals = await readSignals(ratingsPath);
+    const ratingSignals = allSignals.filter(
+      (s): s is import("../adapters/types").RatingSignal => "type" in s && s.type === "rating",
+    );
+
+    if (ratingSignals.length > 0) {
+      const memoryDir = resolveMemoryDir();
+
+      const feedbackResult = await generateFeedback(ratingSignals, memoryDir);
+      result.feedbackGenerated = feedbackResult.filesWritten.length;
+      result.errors.push(...feedbackResult.errors);
+
+      const successResult = await generateSuccess(ratingSignals, memoryDir);
+      result.successGenerated = successResult.filesWritten.length;
+      result.errors.push(...successResult.errors);
+
+      // Rebuild graph if any feedback/success files were generated
+      if (feedbackResult.filesWritten.length > 0 || successResult.filesWritten.length > 0) {
+        try {
+          const { buildGraph } = await import("../graph/builder");
+          const { stateDir } = await import("../adapters/paths");
+          await buildGraph(memoryDir, stateDir());
+        } catch (err) {
+          result.errors.push(
+            `graph-rebuild-after-feedback: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+    }
+  } catch (err) {
+    result.errors.push(`auto-feedback: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // 4. Promote — route detected patterns to rules if they cross threshold
   try {
     const { routeRule } = await import("../promote/router");
     const { checkBudget } = await import("../promote/budget");
@@ -123,7 +168,7 @@ export async function runDaemonCycle(
     result.errors.push(`promote: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // 4. Sync — push scores to Langfuse if configured
+  // 5. Sync — push scores to Langfuse if configured
   if (config.adapter === "langfuse" || config.adapter === "both") {
     try {
       const modulePath = "../adapters/langfuse";
@@ -139,7 +184,7 @@ export async function runDaemonCycle(
     }
   }
 
-  // 5. Optimize — queue hill-climb if dimension below threshold
+  // 6. Optimize — queue hill-climb if dimension below threshold
   try {
     const lowScores = result.scores.filter((s) => s.value <= 2);
     if (lowScores.length > 0) {
