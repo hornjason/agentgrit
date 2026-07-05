@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { existsSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 
@@ -74,5 +75,81 @@ describe("paths", () => {
   test("expandPath handles ${HOME}", async () => {
     const mod = await import("../../src/adapters/paths");
     expect(mod.expandPath("${HOME}/test")).toBe(join(homedir(), "test"));
+  });
+
+  describe("resolveMemoryDir", () => {
+    test("defaults to <baseDir>/memory when no config memoryDir", async () => {
+      process.env.AGENTGRIT_DIR = "/tmp/agentgrit-test-no-config-" + Date.now();
+      const mod = await import("../../src/adapters/paths");
+      const expected = join(process.env.AGENTGRIT_DIR, "memory");
+      expect(mod.resolveMemoryDir()).toBe(expected);
+    });
+  });
+
+  describe("resolveSignalFile", () => {
+    const tmpDir = join(homedir(), ".agentgrit-test-signals-" + Date.now());
+
+    beforeEach(() => {
+      mkdirSync(tmpDir, { recursive: true });
+    });
+
+    afterEach(() => {
+      if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true });
+    });
+
+    test("returns primary path when file exists", async () => {
+      writeFileSync(join(tmpDir, "corrections.jsonl"), "");
+      const mod = await import("../../src/adapters/paths");
+      expect(mod.resolveSignalFile(tmpDir, "corrections.jsonl")).toBe(
+        join(tmpDir, "corrections.jsonl"),
+      );
+    });
+
+    test("falls back to alias when primary missing", async () => {
+      writeFileSync(join(tmpDir, "correction-captures.jsonl"), "");
+      const mod = await import("../../src/adapters/paths");
+      expect(mod.resolveSignalFile(tmpDir, "corrections.jsonl")).toBe(
+        join(tmpDir, "correction-captures.jsonl"),
+      );
+    });
+
+    test("falls back to alias for skills.jsonl", async () => {
+      writeFileSync(join(tmpDir, "skill-invocations.jsonl"), "");
+      const mod = await import("../../src/adapters/paths");
+      expect(mod.resolveSignalFile(tmpDir, "skills.jsonl")).toBe(
+        join(tmpDir, "skill-invocations.jsonl"),
+      );
+    });
+
+    test("falls back to alias for scores.jsonl", async () => {
+      writeFileSync(join(tmpDir, "quality-scores.jsonl"), "");
+      const mod = await import("../../src/adapters/paths");
+      expect(mod.resolveSignalFile(tmpDir, "scores.jsonl")).toBe(
+        join(tmpDir, "quality-scores.jsonl"),
+      );
+    });
+
+    test("returns primary path when neither exists (for new file creation)", async () => {
+      const mod = await import("../../src/adapters/paths");
+      expect(mod.resolveSignalFile(tmpDir, "corrections.jsonl")).toBe(
+        join(tmpDir, "corrections.jsonl"),
+      );
+    });
+
+    test("prefers primary over alias when both exist", async () => {
+      writeFileSync(join(tmpDir, "corrections.jsonl"), "primary");
+      writeFileSync(join(tmpDir, "correction-captures.jsonl"), "alias");
+      const mod = await import("../../src/adapters/paths");
+      expect(mod.resolveSignalFile(tmpDir, "corrections.jsonl")).toBe(
+        join(tmpDir, "corrections.jsonl"),
+      );
+    });
+
+    test("no alias for unknown files", async () => {
+      const mod = await import("../../src/adapters/paths");
+      expect(mod.resolveSignalFile(tmpDir, "unknown.jsonl")).toBe(
+        join(tmpDir, "unknown.jsonl"),
+      );
+    });
   });
 });

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { getBaseDir, stateDir } from "../../src/adapters/paths";
+import { getBaseDir, stateDir, resolveMemoryDir } from "../../src/adapters/paths";
 import { readGraph, buildGraph, writeGraphFile } from "../../src/graph/builder";
 import { queryGraph } from "../../src/graph/query";
 import { relativeTime } from "../../src/adapters/time";
@@ -37,7 +37,7 @@ function showStats(base: string): void {
 }
 
 async function doBuild(base: string, full: boolean): Promise<void> {
-  const memoryDir = join(base, "memory");
+  const memoryDir = resolveMemoryDir();
   console.log(`  Building graph${full ? " (full)" : " (incremental)"}...`);
   const graph = await buildGraph(memoryDir, join(base, "state"));
   console.log(`  ✓ Built: ${graph.nodeCount} nodes, ${graph.edgeCount} edges`);

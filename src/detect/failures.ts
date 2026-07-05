@@ -1,5 +1,6 @@
 import { join } from "path";
 import { readSignals } from "../adapters/jsonl";
+import { resolveSignalFile } from "../adapters/paths";
 import type { CorrectionSignal, Pattern } from "../adapters/types";
 
 const CORRECTIONS_FILE = "corrections.jsonl";
@@ -131,7 +132,7 @@ export async function detectFailurePatterns(
   threshold: number = DEFAULT_THRESHOLD,
 ): Promise<Pattern[]> {
   const corrections = (await readSignals(
-    join(signalDir, CORRECTIONS_FILE),
+    resolveSignalFile(signalDir, CORRECTIONS_FILE),
   )) as CorrectionSignal[];
 
   if (corrections.length === 0) return [];

@@ -1,5 +1,6 @@
 import { existsSync, statSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
+import { resolveSignalFile } from "../adapters/paths";
 import type { AgentGritConfig } from "../adapters/types";
 
 export type CheckStatus = "ok" | "warning" | "error";
@@ -56,7 +57,7 @@ function checkCapture(config: AgentGritConfig): DoctorSection {
   const signalFiles = ["ratings.jsonl", "corrections.jsonl", "sentiment.jsonl", "skills.jsonl"];
 
   for (const file of signalFiles) {
-    const path = join(config.signalDir, file);
+    const path = resolveSignalFile(config.signalDir, file);
     const info = fileAge(path);
 
     if (!info.exists) {
@@ -109,7 +110,7 @@ function checkScoring(config: AgentGritConfig): DoctorSection {
     });
   }
 
-  const scoresPath = join(config.signalDir, "scores.jsonl");
+  const scoresPath = resolveSignalFile(config.signalDir, "scores.jsonl");
   const info = fileAge(scoresPath);
 
   if (!info.exists) {

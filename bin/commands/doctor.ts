@@ -1,6 +1,6 @@
 import { existsSync, statSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
-import { getBaseDir, resolveSignalDir, stateDir, rubricsDir } from "../../src/adapters/paths";
+import { getBaseDir, resolveSignalDir, resolveSignalFile, stateDir, rubricsDir } from "../../src/adapters/paths";
 import { relativeTime } from "../../src/adapters/time";
 import { Tier } from "../../src/adapters/types";
 import { checkBudget } from "../../src/promote/budget";
@@ -33,7 +33,7 @@ function checkDirectory(path: string, name: string): DoctorCheck {
 }
 
 function checkSignalFile(dir: string, filename: string): DoctorCheck {
-  const path = join(dir, filename);
+  const path = resolveSignalFile(dir, filename);
   const name = `signal:${filename}`;
 
   if (!existsSync(path)) {

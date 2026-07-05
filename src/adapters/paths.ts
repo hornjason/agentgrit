@@ -37,6 +37,30 @@ export function resolveSignalDir(): string {
   return expandPath(config.signalDir ?? join(getBaseDir(), "signals"));
 }
 
+export function resolveMemoryDir(): string {
+  const config = loadConfig();
+  return expandPath(config.memoryDir ?? join(getBaseDir(), "memory"));
+}
+
+const SIGNAL_ALIASES: Record<string, string> = {
+  "corrections.jsonl": "correction-captures.jsonl",
+  "skills.jsonl": "skill-invocations.jsonl",
+  "scores.jsonl": "quality-scores.jsonl",
+};
+
+export function resolveSignalFile(dir: string, name: string): string {
+  const primary = join(dir, name);
+  if (existsSync(primary)) return primary;
+
+  const alias = SIGNAL_ALIASES[name];
+  if (alias) {
+    const aliasPath = join(dir, alias);
+    if (existsSync(aliasPath)) return aliasPath;
+  }
+
+  return primary;
+}
+
 export function stateDir(): string {
   return join(getBaseDir(), "state");
 }

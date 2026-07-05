@@ -1,6 +1,6 @@
 import { existsSync, statSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
-import { getBaseDir, resolveSignalDir, stateDir } from "../../src/adapters/paths";
+import { getBaseDir, resolveSignalDir, resolveSignalFile, stateDir } from "../../src/adapters/paths";
 import { readSignals } from "../../src/adapters/jsonl";
 import { relativeTime } from "../../src/adapters/time";
 import { Tier } from "../../src/adapters/types";
@@ -23,7 +23,7 @@ interface SignalSummary {
 async function getSignalSummaries(dir: string): Promise<SignalSummary[]> {
   const summaries: SignalSummary[] = [];
   for (const file of SIGNAL_FILES) {
-    const path = join(dir, file);
+    const path = resolveSignalFile(dir, file);
     if (!existsSync(path)) {
       summaries.push({ name: file, count: 0, sizeKb: 0 });
       continue;

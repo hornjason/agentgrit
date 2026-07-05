@@ -1,5 +1,6 @@
 import { join } from "path";
 import { readSignals } from "../adapters/jsonl";
+import { resolveSignalFile } from "../adapters/paths";
 import type {
   CorrectionSignal,
   RatingSignal,
@@ -169,9 +170,9 @@ function findScoreDrops(
 
 export async function minePatterns(signalDir: string): Promise<Pattern[]> {
   const [rawRatings, rawCorrections, rawSkills] = await Promise.all([
-    readSignals(join(signalDir, "ratings.jsonl")),
-    readSignals(join(signalDir, "corrections.jsonl")),
-    readSignals(join(signalDir, "skills.jsonl")),
+    readSignals(resolveSignalFile(signalDir, "ratings.jsonl")),
+    readSignals(resolveSignalFile(signalDir, "corrections.jsonl")),
+    readSignals(resolveSignalFile(signalDir, "skills.jsonl")),
   ]);
 
   const ratings = rawRatings.filter((s): s is RatingSignal => s.type === "rating");

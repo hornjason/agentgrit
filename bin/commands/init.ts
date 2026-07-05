@@ -215,6 +215,14 @@ async function bootstrapInit(args: string[]): Promise<void> {
     config.signalDir = join(getBaseDir(), "signals");
   }
 
+  if (memory.totalFiles > 0) {
+    const topProject = Object.entries(memory.byProject)
+      .sort((a, b) => b[1] - a[1])[0];
+    if (topProject) {
+      config.memoryDir = join(homedir(), ".claude", "projects", topProject[0], "memory");
+    }
+  }
+
   if (speed !== "quick") {
     const apiKey = await askApiKey(speed);
     if (apiKey && config.judge) {
@@ -231,6 +239,9 @@ async function bootstrapInit(args: string[]): Promise<void> {
   console.log(`  ✓ Config written (${speed} mode)`);
   if (signalSource.source === "pai") {
     console.log(`  ✓ Signal dir → PAI signals (in-place, no copy)`);
+  }
+  if (config.memoryDir) {
+    console.log(`  ✓ Memory dir → ${config.memoryDir}`);
   }
   console.log(`  ✓ Hooks installed (${hookResult.installed} new, ${hookResult.existing} existing, ${hookResult.skipped} skipped)`);
 
