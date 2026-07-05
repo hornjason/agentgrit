@@ -11,6 +11,7 @@ import type { Graph, BM25Index, RankedCluster } from "./types";
 import { Tier, type Rule } from "../adapters/types";
 import { queryGraph } from "./query";
 import { searchIndex } from "./bm25";
+import { queryTrajectoriesSync } from "../detect/trajectories";
 
 // ── Default Domains ──
 
@@ -46,6 +47,7 @@ export function getContextRules(
   index: BM25Index,
   currentDomains: string[],
   limit: number = 10,
+  signalDir?: string,
 ): Rule[] {
   const domains = currentDomains.length > 0 ? currentDomains : DEFAULT_DOMAINS;
 
@@ -95,6 +97,27 @@ export function getContextRules(
       sourceSignals: [],
       schemaVersion: 1,
     });
+  }
+
+  // Fill remaining slots with trajectory data
+  if (signalDir && rules.length < limit) {
+    const remaining = limit - rules.length;
+    const trajectories = queryTrajectoriesSync(domains, signalDir, remaining);
+    for (const t of trajectories) {
+      if (rules.length >= limit) break;
+      if (resultIds.has(t.id)) continue;
+      resultIds.add(t.id);
+      rules.push({
+        id: t.id,
+        text: `[trajectory] ${t.summary}`,
+        tier: Tier.Graph,
+        tags: t.domains,
+        created: t.timestamp,
+        correlationScore: t.rating / 10,
+        sourceSignals: [],
+        schemaVersion: 1,
+      });
+    }
   }
 
   return rules;

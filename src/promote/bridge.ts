@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, renameSync, unlinkSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import type { Rule } from "../adapters/types";
+import { checkBudget } from "./budget";
 
 const RULES_SECTION_MARKER = "### Rules";
 const FALLBACK_MARKER = "## Rules";
@@ -50,6 +51,15 @@ export async function promoteRule(
   }
 
   const content = readFileSync(claudeMdPath, "utf-8");
+
+  const ruleLineCount = (content.match(/^- \*\*/gm) || []).length;
+  const budget = checkBudget(rule.tier, ruleLineCount);
+  if (budget.level === "OVER_BUDGET") {
+    throw new Error(
+      `Budget exceeded for tier ${rule.tier}: ${budget.ruleCount}/${budget.cap} rules`,
+    );
+  }
+
   const bounds = findRulesSectionBounds(content);
 
   if (!bounds) {

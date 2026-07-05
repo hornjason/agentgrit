@@ -40,10 +40,21 @@ export function getEvictionCandidates(
   topN = 5,
 ): Rule[] {
   const MIN_INJECTION_COUNT = 5;
+  const STALE_DAYS = 60;
+  const now = Date.now();
+
+  function isStale(r: Rule): boolean {
+    if (!r.lastSeen) return false;
+    const daysSince = (now - new Date(r.lastSeen).getTime()) / (1000 * 60 * 60 * 24);
+    return daysSince > STALE_DAYS;
+  }
 
   return rules
     .filter((r) => (r.injectionCount ?? 0) > MIN_INJECTION_COUNT)
     .sort((a, b) => {
+      const aStale = isStale(a);
+      const bStale = isStale(b);
+      if (aStale !== bStale) return aStale ? -1 : 1;
       const ratingDiff =
         (a.avgCorrelatedRating ?? 0) - (b.avgCorrelatedRating ?? 0);
       if (ratingDiff !== 0) return ratingDiff;

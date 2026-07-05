@@ -108,6 +108,17 @@ describe("getEvictionCandidates", () => {
     ];
     expect(getEvictionCandidates(rules)).toEqual([]);
   });
+
+  test("stale rules (lastSeen > 60 days) get priority eviction", () => {
+    const recent = new Date().toISOString();
+    const stale = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+    const rules = [
+      makeRule("fresh", { injectionCount: 10, avgCorrelatedRating: 3.0, lastSeen: recent }),
+      makeRule("stale", { injectionCount: 10, avgCorrelatedRating: 7.0, lastSeen: stale }),
+    ];
+    const candidates = getEvictionCandidates(rules);
+    expect(candidates[0].id).toBe("stale");
+  });
 });
 
 describe("correlateRules", () => {

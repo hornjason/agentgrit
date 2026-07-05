@@ -174,4 +174,33 @@ describe("getContextRules", () => {
     const rules = getContextRules(graph, index, ["verification"]);
     expect(rules[0].text).toBe("Always verify before asserting anything");
   });
+
+  test("includes trajectory data when signalDir provided", () => {
+    const graph = makeGraph([]);
+    const index = buildIndex([]);
+
+    const trajDir = join(TMP_DIR, "traj-signals");
+    mkdirSync(trajDir, { recursive: true });
+    writeFileSync(
+      join(trajDir, "trajectories.json"),
+      JSON.stringify({
+        trajectories: [
+          {
+            id: "traj-1",
+            task: "fix auth",
+            domains: ["verification"],
+            summary: "Fixed auth flow with retry",
+            rating: 9,
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      }),
+    );
+
+    const rules = getContextRules(graph, index, ["verification"], 10, trajDir);
+    expect(rules.length).toBe(1);
+    expect(rules[0].id).toBe("traj-1");
+    expect(rules[0].text).toContain("[trajectory]");
+    expect(rules[0].text).toContain("Fixed auth flow with retry");
+  });
 });

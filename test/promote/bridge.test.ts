@@ -94,6 +94,17 @@ describe("promoteRule", () => {
     const content = readFileSync(CLAUDE_MD, "utf-8");
     expect(content).toContain("- **new:** New rule");
   });
+
+  test("rejects when budget is over for tier", async () => {
+    const lines = Array.from({ length: 30 }, (_, i) => `- **rule-${i}:** Rule ${i}`);
+    await Bun.write(
+      CLAUDE_MD,
+      `# Config\n\n### Rules\n\n${lines.join("\n")}\n\n---\n`,
+    );
+    expect(
+      promoteRule(makeRule("overflow", "Should not be written"), CLAUDE_MD),
+    ).rejects.toThrow("Budget exceeded");
+  });
 });
 
 describe("removeRule", () => {

@@ -8,6 +8,7 @@ import {
   computeComposite,
   truncatePreview,
   cacheLastResponse,
+  writeLastResponse,
   wordOverlapRatio,
   scoreSession,
   captureSessionSentiment,
@@ -133,6 +134,24 @@ describe("cacheLastResponse", () => {
   test("truncates to 2000 chars", () => {
     const long = "x".repeat(5000);
     expect(cacheLastResponse(long).length).toBe(2000);
+  });
+});
+
+describe("writeLastResponse", () => {
+  test("creates file in signal dir", () => {
+    const sigDir = join(TMP_DIR, "signals");
+    const filePath = writeLastResponse("hello world", sigDir);
+    expect(existsSync(filePath)).toBe(true);
+    const content = readFileSync(filePath, "utf-8");
+    expect(content).toBe("hello world");
+  });
+
+  test("truncates long responses before writing", () => {
+    const sigDir = join(TMP_DIR, "signals");
+    const long = "x".repeat(5000);
+    const filePath = writeLastResponse(long, sigDir);
+    const content = readFileSync(filePath, "utf-8");
+    expect(content.length).toBe(2000);
   });
 });
 

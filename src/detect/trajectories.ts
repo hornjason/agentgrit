@@ -64,8 +64,22 @@ export async function queryTrajectories(
   signalDir: string,
   limit: number = 5,
 ): Promise<Trajectory[]> {
+  return queryTrajectoriesSync(domains, signalDir, limit);
+}
+
+export function queryTrajectoriesSync(
+  domains: string[],
+  signalDir: string,
+  limit: number = 5,
+): Trajectory[] {
   const storePath = defaultStorePath(signalDir);
-  const store = await loadStore(storePath);
+  if (!existsSync(storePath)) return [];
+  let store: TrajectoryStore;
+  try {
+    store = JSON.parse(readFileSync(storePath, "utf-8")) as TrajectoryStore;
+  } catch {
+    return [];
+  }
 
   if (store.trajectories.length === 0) return [];
 

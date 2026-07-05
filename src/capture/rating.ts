@@ -11,8 +11,10 @@
  */
 
 import { randomUUID } from "crypto";
+import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { dirname, join } from "path";
 import { appendSignal } from "../adapters/jsonl";
-import { signalPath, statePath } from "../adapters/paths";
+import { signalPath, statePath, resolveSignalDir } from "../adapters/paths";
 import type { RatingSignal, SentimentSignal } from "../adapters/types";
 import { SCHEMA_VERSION } from "../adapters/types";
 
@@ -160,6 +162,15 @@ export function truncatePreview(response: string): string {
 
 export function cacheLastResponse(response: string): string {
   return response.slice(0, MAX_CACHE_SIZE);
+}
+
+export function writeLastResponse(response: string, targetDir?: string): string {
+  const dir = targetDir ?? resolveSignalDir();
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const cached = cacheLastResponse(response);
+  const filePath = join(dir, RESPONSE_CACHE_FILE);
+  writeFileSync(filePath, cached);
+  return filePath;
 }
 
 // ── Word overlap ratio for reprompt detection (from SentimentScorer) ──
