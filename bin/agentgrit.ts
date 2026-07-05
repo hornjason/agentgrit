@@ -18,7 +18,7 @@ import { statusCommand } from "./commands/status";
 import { undoCommand } from "./commands/undo";
 import { upgradeCommand } from "./commands/upgrade";
 
-const VERSION = "0.1.3";
+const VERSION = "0.1.4";
 
 const HANDLERS: Record<string, (args: string[]) => Promise<void>> = {
   backfill: backfillCommand,

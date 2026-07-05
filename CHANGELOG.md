@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.1.4] — 2026-07-05
+
+Phase 1b complete — 11 capability gaps closed for PAI learning loop migration.
+
+### New Capabilities (LLM-powered, via inference.ts)
+- **Implicit LLM sentiment** — `capture sentiment` subcommand scores every user message via Haiku, writes to `sentiment.jsonl`. Keyword fallback when inference unavailable. (#41)
+- **AutoFeedback generation** — daemon extracts behavioral lessons from sessions rated <=4, writes `feedback_*.md` to memory dir (#42)
+- **AutoSuccess capture** — daemon captures positive patterns from sessions rated >=8, writes `success_*.md` (#43)
+- **Contradiction check** — LLM-based duplicate/conflict detection before rule promotion. Blocks conflicting rules. (#44)
+- **Session-context attribution** — writes `session-context.json` at session start with loaded rule IDs; ratings attributed to specific rules for correlation (#45)
+- **LLM-powered pattern mining** — opt-in semantic clustering alongside rule-based detection. Falls back to deterministic. (#46)
+- **Work completion LLM insights** — enriched learnings from work completions, wired into daemon cycle (#47)
+
+### Pipeline Fixes
+- **Budget enforcement blocking** — `promoteRule()` now calls `checkBudget()` and throws on OVER_BUDGET (#40)
+- **Eviction staleness check** — rules with `lastSeen > 60 days` get priority eviction (#40)
+- **Trajectory context injection** — `queryTrajectories()` wired into context rule assembly (#40)
+- **Last response cache persistence** — `writeLastResponse()` persists to signal dir (#40)
+
+### Stats
+- 665 tests, 1,351 assertions, 0 failures (up from 596)
+- 69 new tests across 11 test files
+
+## [0.1.3] — 2026-07-04
+
+- Bumped version for npm republish
+
 ## [0.1.2] — 2026-07-04
 
 - Updated description: "Self-learning engine that makes AI agents smarter over time" (not just coding agents)
