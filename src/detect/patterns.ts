@@ -1,12 +1,20 @@
 import { join } from "path";
 import { readSignals } from "../adapters/jsonl";
 import { resolveSignalFile } from "../adapters/paths";
+import { inference, type InferenceOptions, type InferenceResult } from "../adapters/inference";
 import type {
   CorrectionSignal,
   RatingSignal,
   SkillInvocationSignal,
   Pattern,
 } from "../adapters/types";
+
+export type InferenceFn = (opts: InferenceOptions) => Promise<InferenceResult>;
+
+export interface MinePatternsOptions {
+  llm?: boolean;
+  infer?: InferenceFn;
+}
 
 const RATING_LOW_THRESHOLD = 4;
 
@@ -168,7 +176,72 @@ function findScoreDrops(
   return patterns;
 }
 
-export async function minePatterns(signalDir: string): Promise<Pattern[]> {
+async function llmClusterCorrections(
+  corrections: CorrectionSignal[],
+  infer: InferenceFn,
+): Promise<Pattern[]> {
+  if (corrections.length < 3) return [];
+
+  const sample = corrections.slice(-50);
+  const phrases = sample
+    .map((c) => c.correction_phrase.slice(0, 150))
+    .join("\n");
+
+  try {
+    const result = await infer({
+      systemPrompt:
+        "Analyze these correction phrases and identify 1-5 semantic clusters (recurring themes). " +
+        "Output a JSON array of objects: " +
+        '[{"theme": "kebab-case-id", "description": "one sentence", "severity": 1-10, "phrases": ["phrase1", "phrase2"]}]',
+      userPrompt: phrases,
+      level: "fast",
+      expectJson: true,
+    });
+
+    if (!result.success || !result.parsed) return [];
+
+    const clusters = (Array.isArray(result.parsed) ? result.parsed : []) as Array<{
+      theme?: string;
+      description?: string;
+      severity?: number;
+      phrases?: string[];
+    }>;
+
+    return clusters
+      .filter((c) => c.theme && c.description)
+      .map((c) => ({
+        id: `llm-cluster-${c.theme}`,
+        type: "llm-semantic-cluster",
+        frequency: c.phrases?.length ?? 1,
+        sessions: [],
+        severity: Math.min(Math.max(c.severity ?? 5, 1), 10),
+        candidateRule: c.description!,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function dedup(patterns: Pattern[]): Pattern[] {
+  const seen = new Map<string, Pattern>();
+  for (const p of patterns) {
+    const key = p.id;
+    if (!seen.has(key)) {
+      seen.set(key, p);
+      continue;
+    }
+    const existing = seen.get(key)!;
+    if (p.severity > existing.severity) {
+      seen.set(key, p);
+    }
+  }
+  return [...seen.values()];
+}
+
+export async function minePatterns(
+  signalDir: string,
+  options?: MinePatternsOptions,
+): Promise<Pattern[]> {
   const [rawRatings, rawCorrections, rawSkills] = await Promise.all([
     readSignals(resolveSignalFile(signalDir, "ratings.jsonl")),
     readSignals(resolveSignalFile(signalDir, "corrections.jsonl")),
@@ -191,5 +264,11 @@ export async function minePatterns(signalDir: string): Promise<Pattern[]> {
     ...findScoreDrops(sessions),
   ];
 
-  return patterns.sort((a, b) => b.severity - a.severity);
+  if (options?.llm) {
+    const infer = options.infer ?? inference;
+    const llmPatterns = await llmClusterCorrections(corrections, infer);
+    patterns.push(...llmPatterns);
+  }
+
+  return dedup(patterns).sort((a, b) => b.severity - a.severity);
 }
