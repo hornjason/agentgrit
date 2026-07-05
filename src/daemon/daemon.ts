@@ -10,6 +10,7 @@ export interface CycleResult {
   optimized: boolean;
   feedbackGenerated: number;
   successGenerated: number;
+  workInsightsGenerated: number;
   errors: string[];
 }
 
@@ -44,6 +45,7 @@ export async function runDaemonCycle(
     optimized: false,
     feedbackGenerated: 0,
     successGenerated: 0,
+    workInsightsGenerated: 0,
     errors: [],
   };
 
@@ -144,6 +146,60 @@ export async function runDaemonCycle(
     }
   } catch (err) {
     result.errors.push(`auto-feedback: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // 3b. Work insights — enrich work completion learnings via LLM
+  try {
+    const { extractWorkLearnings } = await import("../capture/corrections");
+    const { generateWorkInsights } = await import("../capture/work");
+    const { readSignals } = await import("../adapters/jsonl");
+    const { resolveMemoryDir } = await import("../adapters/paths");
+    const { join } = await import("path");
+
+    const toolAuditPath = join(config.signalDir, "tool-audit.jsonl");
+    const toolSignals = await readSignals(toolAuditPath, { limit: 200 });
+
+    const sessionTools = new Map<string, string[]>();
+    for (const sig of toolSignals) {
+      if ("session_id" in sig && "tool_name" in sig) {
+        const tools = sessionTools.get(sig.session_id as string) || [];
+        tools.push((sig as Record<string, unknown>).tool_name as string);
+        sessionTools.set(sig.session_id as string, tools);
+      }
+    }
+
+    const learnings = [];
+    for (const [sessionId, tools] of sessionTools) {
+      const learning = extractWorkLearnings({
+        title: `Session ${sessionId}`,
+        filesChanged: [],
+        toolsUsed: tools,
+        agentsSpawned: [],
+        sessionId,
+      });
+      if (learning) learnings.push(learning);
+    }
+
+    if (learnings.length > 0) {
+      const memoryDir = resolveMemoryDir();
+      const workResult = await generateWorkInsights(learnings, memoryDir);
+      result.workInsightsGenerated = workResult.filesWritten.length;
+      result.errors.push(...workResult.errors);
+
+      if (workResult.filesWritten.length > 0) {
+        try {
+          const { buildGraph } = await import("../graph/builder");
+          const { stateDir } = await import("../adapters/paths");
+          await buildGraph(memoryDir, stateDir());
+        } catch (err) {
+          result.errors.push(
+            `graph-rebuild-after-work-insights: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+    }
+  } catch (err) {
+    result.errors.push(`work-insights: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // 4. Promote — route detected patterns to rules if they cross threshold
