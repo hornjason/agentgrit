@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, renameSync, unlinkSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import type { Rule } from "../adapters/types";
+import { checkContradiction, extractExistingRules, type InferenceFn } from "./contradiction";
 
 const RULES_SECTION_MARKER = "### Rules";
 const FALLBACK_MARKER = "## Rules";
@@ -44,12 +45,20 @@ function findLastRuleLineOffset(sectionContent: string): number {
 export async function promoteRule(
   rule: Rule,
   claudeMdPath: string,
+  inferenceFn?: InferenceFn,
 ): Promise<void> {
   if (!existsSync(claudeMdPath)) {
     throw new Error(`CLAUDE.md not found at ${claudeMdPath}`);
   }
 
   const content = readFileSync(claudeMdPath, "utf-8");
+
+  const existingRules = extractExistingRules(content);
+  const contradiction = await checkContradiction(rule.text, existingRules, inferenceFn);
+  if (contradiction.hasConflict) {
+    throw new Error(`Contradiction detected: ${contradiction.details}`);
+  }
+
   const bounds = findRulesSectionBounds(content);
 
   if (!bounds) {

@@ -3,6 +3,15 @@ import { existsSync, mkdirSync, rmSync, readFileSync } from "fs";
 import { join } from "path";
 import { promoteRule, removeRule } from "../../src/promote/bridge";
 import { Tier, SCHEMA_VERSION, type Rule } from "../../src/adapters/types";
+import type { InferenceFn } from "../../src/promote/contradiction";
+
+const noopInference: InferenceFn = async () => ({
+  success: true,
+  output: "NO_CONFLICT",
+  latencyMs: 0,
+  level: "fast",
+  provider: "claude",
+});
 
 const TMP_DIR = join(import.meta.dir, ".tmp-bridge-test");
 const CLAUDE_MD = join(TMP_DIR, "CLAUDE.md");
@@ -47,7 +56,7 @@ afterEach(() => {
 
 describe("promoteRule", () => {
   test("inserts rule after existing rules in section", async () => {
-    await promoteRule(makeRule("new-rule", "A new behavioral rule"), CLAUDE_MD);
+    await promoteRule(makeRule("new-rule", "A new behavioral rule"), CLAUDE_MD, noopInference);
     const content = readFileSync(CLAUDE_MD, "utf-8");
     expect(content).toContain("- **new-rule:** A new behavioral rule");
     expect(content).toContain("- **existing-rule:");
@@ -57,7 +66,7 @@ describe("promoteRule", () => {
   });
 
   test("preserves content before and after rules section", async () => {
-    await promoteRule(makeRule("r1", "Test rule"), CLAUDE_MD);
+    await promoteRule(makeRule("r1", "Test rule"), CLAUDE_MD, noopInference);
     const content = readFileSync(CLAUDE_MD, "utf-8");
     expect(content).toContain("Some preamble text.");
     expect(content).toContain("## Other Section");
@@ -65,7 +74,7 @@ describe("promoteRule", () => {
   });
 
   test("uses atomic write (temp file then rename)", async () => {
-    await promoteRule(makeRule("r1", "Test"), CLAUDE_MD);
+    await promoteRule(makeRule("r1", "Test"), CLAUDE_MD, noopInference);
     const tmpFiles = readFileSync(CLAUDE_MD, "utf-8");
     expect(tmpFiles).not.toContain(".tmp.");
     expect(existsSync(CLAUDE_MD)).toBe(true);
@@ -74,14 +83,14 @@ describe("promoteRule", () => {
   test("throws when CLAUDE.md does not exist", async () => {
     const badPath = join(TMP_DIR, "nonexistent", "CLAUDE.md");
     expect(
-      promoteRule(makeRule("r1", "Test"), badPath),
+      promoteRule(makeRule("r1", "Test"), badPath, noopInference),
     ).rejects.toThrow("not found");
   });
 
   test("throws when rules section marker is missing", async () => {
     await Bun.write(CLAUDE_MD, "# No rules section here\n\nJust text.");
     expect(
-      promoteRule(makeRule("r1", "Test"), CLAUDE_MD),
+      promoteRule(makeRule("r1", "Test"), CLAUDE_MD, noopInference),
     ).rejects.toThrow("rules section");
   });
 
@@ -90,7 +99,7 @@ describe("promoteRule", () => {
       CLAUDE_MD,
       "# Config\n\n## Rules\n\n- **old:** Old rule\n\n## End\n",
     );
-    await promoteRule(makeRule("new", "New rule"), CLAUDE_MD);
+    await promoteRule(makeRule("new", "New rule"), CLAUDE_MD, noopInference);
     const content = readFileSync(CLAUDE_MD, "utf-8");
     expect(content).toContain("- **new:** New rule");
   });
@@ -104,7 +113,7 @@ describe("removeRule", () => {
   });
 
   test("preserves other content when removing", async () => {
-    await promoteRule(makeRule("keep-me", "Kept rule"), CLAUDE_MD);
+    await promoteRule(makeRule("keep-me", "Kept rule"), CLAUDE_MD, noopInference);
     await removeRule("existing-rule", CLAUDE_MD);
     const content = readFileSync(CLAUDE_MD, "utf-8");
     expect(content).toContain("keep-me");
