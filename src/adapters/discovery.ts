@@ -410,6 +410,7 @@ export function installHooks(settingsPath: string): {
   }> = [
     { event: "UserPromptSubmit", matcher: "", command: "npx agentgrit capture rating", timeout: 5000 },
     { event: "UserPromptSubmit", matcher: "", command: "npx agentgrit capture correction", timeout: 5000 },
+    { event: "UserPromptSubmit", matcher: "", command: "npx agentgrit capture sentiment", timeout: 5000 },
     { event: "PostToolUse", matcher: "", command: "npx agentgrit capture tool", timeout: 5000 },
     { event: "PostToolUse", matcher: "Skill", command: "npx agentgrit capture skill", timeout: 5000 },
     { event: "Stop", matcher: "", command: "npx agentgrit capture assertions", timeout: 5000 },

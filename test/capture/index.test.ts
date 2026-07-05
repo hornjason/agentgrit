@@ -10,7 +10,7 @@ import {
 import type { FileChange } from "../../src/capture/index";
 
 describe("generateHookConfig", () => {
-  test("returns valid hook config with 5 hooks", () => {
+  test("returns valid hook config with 6 hooks", () => {
     const config = generateHookConfig();
 
     expect(config).toBeDefined();
@@ -23,13 +23,13 @@ describe("generateHookConfig", () => {
       }
     }
 
-    expect(allHooks).toHaveLength(5);
+    expect(allHooks).toHaveLength(6);
   });
 
   test("has UserPromptSubmit hooks", () => {
     const config = generateHookConfig();
     expect(config.hooks.UserPromptSubmit).toBeDefined();
-    expect(config.hooks.UserPromptSubmit).toHaveLength(2);
+    expect(config.hooks.UserPromptSubmit).toHaveLength(3);
   });
 
   test("has PostToolUse hooks", () => {

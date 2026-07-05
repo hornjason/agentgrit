@@ -233,6 +233,10 @@ export function generateHookConfig(): HookConfig {
           matcher: "",
           command: `${prefix} correction`,
         },
+        {
+          matcher: "",
+          command: `${prefix} sentiment`,
+        },
       ],
       PostToolUse: [
         {
