@@ -8,27 +8,25 @@ It targets Claude Code initially but is designed to be runtime-agnostic. The sco
 
 ## How It Works
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    AI Agent Session                      │
-│             (Claude Code, or any LLM runtime)           │
-├─────────────────────────────────────────────────────────┤
-│                       agentgrit                         │
-│                                                         │
-│  ┌─────────┐  ┌──────────┐  ┌─────────┐  ┌─────────┐  │
-│  │ CAPTURE │─→│ EVALUATE │─→│ DETECT  │─→│ PROMOTE │  │
-│  │ signals │  │ LLM judge│  │ patterns│  │  rules  │  │
-│  └─────────┘  └──────────┘  └─────────┘  └────┬────┘  │
-│       ↑                                        │       │
-│       │              ┌──────────┐              │       │
-│       │              │ OPTIMIZE │←─────────────┤       │
-│       │              │hill-climb│              │       │
-│       │              └──────────┘              │       │
-│       │              ┌──────────┐              │       │
-│       └──────────────│  GRAPH   │←─────────────┘       │
-│                      │ retrieval│                       │
-│                      └──────────┘                       │
-└─────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    subgraph session [" "]
+        direction LR
+        A["🔄 AI Agent Session<br/>(Claude Code, or any LLM runtime)"]
+    end
+
+    subgraph loop ["agentgrit learning loop"]
+        direction LR
+        C["📡 CAPTURE<br/>signals"] --> E["⚖️ EVALUATE<br/>LLM judge"]
+        E --> D["🔍 DETECT<br/>patterns"]
+        D --> P["📋 PROMOTE<br/>rules"]
+        P --> O["📈 OPTIMIZE<br/>hill-climb"]
+        P --> G["🧠 GRAPH<br/>retrieval"]
+    end
+
+    A -->|hooks capture signals| C
+    O -->|improved prompts| A
+    G -->|right rules injected| A
 ```
 
 Signals flow in from every session. The daemon scores, detects patterns, and promotes rules. The graph injects the right rules into the next session. The loop tightens over time.
