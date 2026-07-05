@@ -1,8 +1,23 @@
 # Changelog
 
+## [0.1.2] — 2026-07-04
+
+- Updated description: "Self-learning engine that makes AI agents smarter over time" (not just coding agents)
+- README updated to reflect broader AI agent scope
+
+## [0.1.1] — 2026-07-04
+
+- Fixed npm bin field — `.mjs` extension was stripped by npm, changed to `.js`
+- Added Claude Code discovery and signal backfill (`agentgrit init --bootstrap`)
+- Added capture CLI subcommands for hook signal capture (`agentgrit capture rating|correction|tool|skill`)
+- All CLI commands now read `signalDir` from config (PAI integration works end-to-end)
+- Switched from compiled Bun binary (59MB) to transpiled Node bundle (75KB)
+- Replaced 28 Bun-specific APIs with Node equivalents
+- Re-enabled hook installation in init
+
 ## [0.1.0] — 2026-07-03
 
-Initial release. Self-learning loop for AI coding agents that makes them improve over time.
+Initial release. Self-learning engine that makes AI agents smarter over time.
 
 ### Core Features
 

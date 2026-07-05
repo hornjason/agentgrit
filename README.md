@@ -1,8 +1,8 @@
 # AgentGrit
 
-> Self-learning engine that makes AI coding agents improve over time.
+> Self-learning engine that makes AI agents smarter over time.
 
-AgentGrit closes a feedback loop around AI coding agents: it captures signals from your sessions (ratings, corrections, sentiment), scores output quality against configurable rubrics, detects recurring failure patterns, promotes learnings into durable rules, optimizes prompts via hill-climbing, and builds a knowledge graph for contextual recall. One install, one package. You choose how much to turn on.
+AgentGrit closes a feedback loop around AI agents: it captures signals from your sessions (ratings, corrections, sentiment), scores output quality against configurable rubrics, detects recurring failure patterns, promotes learnings into durable rules, optimizes prompts via hill-climbing, and builds a knowledge graph for contextual recall. One install, one package. You choose how much to turn on.
 
 It targets Claude Code initially but is designed to be runtime-agnostic. The scoring, pattern detection, and optimization layers work with any LLM trace source.
 
