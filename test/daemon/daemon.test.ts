@@ -24,6 +24,8 @@ describe("daemon cycle", () => {
     expect(result).toHaveProperty("promoted");
     expect(result).toHaveProperty("synced");
     expect(result).toHaveProperty("optimized");
+    expect(result).toHaveProperty("feedbackGenerated");
+    expect(result).toHaveProperty("successGenerated");
     expect(result).toHaveProperty("errors");
     expect(Array.isArray(result.scores)).toBe(true);
     expect(Array.isArray(result.patterns)).toBe(true);
