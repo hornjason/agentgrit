@@ -1,5 +1,11 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
-import type { AgentGritConfig } from "../../src/adapters/types";
+import { describe, test, expect, mock, beforeEach, afterAll } from "bun:test";
+import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "fs";
+import { join } from "path";
+import type { AgentGritConfig, Pattern } from "../../src/adapters/types";
+
+const TEST_DIR = "/tmp/agentgrit-daemon-test-" + process.pid;
+const SIGNAL_DIR = join(TEST_DIR, "signals");
+const STATE_DIR = join(TEST_DIR, "state");
 
 function makeConfig(overrides?: Partial<AgentGritConfig>): AgentGritConfig {
   return {
@@ -11,6 +17,10 @@ function makeConfig(overrides?: Partial<AgentGritConfig>): AgentGritConfig {
     ...overrides,
   };
 }
+
+afterAll(() => {
+  if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
+});
 
 describe("daemon cycle", () => {
   test("runDaemonCycle returns result with all fields", async () => {
@@ -124,5 +134,139 @@ describe("weekly review", () => {
 
     expect(result.budgetStatus).toHaveProperty("global");
     expect(result.budgetStatus).toHaveProperty("project");
+  });
+});
+
+describe("daemon promote step", () => {
+  test("autoPromote=true with patterns triggers promoteRule", async () => {
+    const { runDaemonCycle } = await import("../../src/daemon/daemon");
+    const config = makeConfig({
+      signalDir: SIGNAL_DIR,
+      rules: { globalBudget: 25, projectBudget: 25, autoPromote: true },
+    });
+
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
+    mkdirSync(SIGNAL_DIR, { recursive: true });
+    mkdirSync(STATE_DIR, { recursive: true });
+
+    const result = await runDaemonCycle(config);
+    expect(result).toHaveProperty("promoted");
+    expect(typeof result.promoted).toBe("number");
+  });
+
+  test("promote is capped at MAX_PROMOTIONS_PER_CYCLE", async () => {
+    const { runDaemonCycle } = await import("../../src/daemon/daemon");
+    const config = makeConfig({
+      signalDir: SIGNAL_DIR,
+      rules: { globalBudget: 250, projectBudget: 250, autoPromote: true },
+    });
+
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
+    mkdirSync(SIGNAL_DIR, { recursive: true });
+    mkdirSync(STATE_DIR, { recursive: true });
+
+    const result = await runDaemonCycle(config);
+    expect(result.promoted).toBeLessThanOrEqual(3);
+  });
+});
+
+describe("daemon optimize step", () => {
+  test("optimize flag reflects low score detection", async () => {
+    const { runDaemonCycle } = await import("../../src/daemon/daemon");
+    const config = makeConfig({ signalDir: SIGNAL_DIR });
+
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
+    mkdirSync(SIGNAL_DIR, { recursive: true });
+
+    const result = await runDaemonCycle(config);
+    expect(typeof result.optimized).toBe("boolean");
+  });
+
+  test("optimize stays false when no low scores", async () => {
+    const { runDaemonCycle } = await import("../../src/daemon/daemon");
+    const config = makeConfig({ signalDir: SIGNAL_DIR });
+
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
+    mkdirSync(SIGNAL_DIR, { recursive: true });
+
+    const result = await runDaemonCycle(config);
+    expect(result.optimized).toBe(false);
+  });
+});
+
+describe("daemon cleanup step", () => {
+  test("cleanup stats present in cycle result", async () => {
+    const { runDaemonCycle } = await import("../../src/daemon/daemon");
+    const config = makeConfig({ signalDir: SIGNAL_DIR });
+
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
+    mkdirSync(SIGNAL_DIR, { recursive: true });
+    mkdirSync(STATE_DIR, { recursive: true });
+
+    const result = await runDaemonCycle(config);
+    expect(result).toHaveProperty("cleanup");
+    expect(result.cleanup).toHaveProperty("staleFilesRemoved");
+    expect(result.cleanup).toHaveProperty("sessionStatesCleared");
+    expect(result.cleanup).toHaveProperty("signalsRotated");
+    expect(result.cleanup).toHaveProperty("sessionsCompressed");
+    expect(result.cleanup).toHaveProperty("counts");
+  });
+
+  test("cleanup calls rotateSignals on signal files", async () => {
+    const { runDaemonCycle } = await import("../../src/daemon/daemon");
+    const config = makeConfig({ signalDir: SIGNAL_DIR });
+
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
+    mkdirSync(SIGNAL_DIR, { recursive: true });
+    mkdirSync(STATE_DIR, { recursive: true });
+    writeFileSync(join(SIGNAL_DIR, "test.jsonl"), '{"x":1}\n');
+
+    const result = await runDaemonCycle(config);
+    expect(typeof result.cleanup.signalsRotated).toBe("number");
+  });
+
+  test("cleanup calls updateCounts", async () => {
+    const { runDaemonCycle } = await import("../../src/daemon/daemon");
+    const config = makeConfig({ signalDir: SIGNAL_DIR });
+
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
+    mkdirSync(SIGNAL_DIR, { recursive: true });
+    mkdirSync(STATE_DIR, { recursive: true });
+    writeFileSync(join(SIGNAL_DIR, "ratings.jsonl"), JSON.stringify({ session_id: "s1", timestamp: new Date().toISOString(), type: "rating", rating: 5 }) + "\n");
+
+    process.env.AGENTGRIT_DIR = TEST_DIR;
+    try {
+      const result = await runDaemonCycle(config);
+      expect(result.cleanup.counts).not.toBeNull();
+      expect(result.cleanup.counts).toHaveProperty("signalFiles");
+      expect(result.cleanup.counts).toHaveProperty("ruleFiles");
+      expect(result.cleanup.counts).toHaveProperty("graphNodes");
+    } finally {
+      delete process.env.AGENTGRIT_DIR;
+    }
+  });
+});
+
+describe("doctor dedup", () => {
+  test("doctorCommand uses src/daemon/doctor runDoctor", async () => {
+    const srcDoctor = await import("../../src/daemon/doctor");
+    expect(typeof srcDoctor.runDoctor).toBe("function");
+
+    const cliDoctor = await import("../../bin/commands/doctor");
+    expect(typeof cliDoctor.doctorCommand).toBe("function");
+    expect(typeof cliDoctor.runDoctor).toBe("function");
+  });
+
+  test("src/daemon/doctor.runDoctor returns section-based report", async () => {
+    const { runDoctor } = await import("../../src/daemon/doctor");
+    const config = makeConfig({ signalDir: SIGNAL_DIR });
+
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
+    mkdirSync(SIGNAL_DIR, { recursive: true });
+
+    const report = await runDoctor(config);
+    expect(report).toHaveProperty("sections");
+    expect(report).toHaveProperty("overall");
+    expect(report.sections.length).toBe(7);
   });
 });

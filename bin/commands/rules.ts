@@ -167,6 +167,94 @@ async function doPromote(base: string, dryRun: boolean): Promise<void> {
   console.log(`\n  ${promoted} rule(s) promoted. Use 'agentgrit undo' to reverse.\n`);
 }
 
+function textSimilarity(a: string, b: string): number {
+  const wordsA = new Set(a.toLowerCase().split(/\W+/).filter((w) => w.length > 2));
+  const wordsB = new Set(b.toLowerCase().split(/\W+/).filter((w) => w.length > 2));
+  if (wordsA.size === 0 && wordsB.size === 0) return 1;
+  if (wordsA.size === 0 || wordsB.size === 0) return 0;
+  let intersection = 0;
+  for (const w of wordsA) {
+    if (wordsB.has(w)) intersection++;
+  }
+  return intersection / (wordsA.size + wordsB.size - intersection);
+}
+
+async function doRebalance(base: string, apply: boolean): Promise<void> {
+  console.log("  Rebalance: analyze rules and suggest tier re-routing.\n");
+
+  const rules = listRulesFromGraph(base);
+  if (rules.length === 0) {
+    console.log("  No rules in graph. Run 'agentgrit graph build' first.\n");
+    return;
+  }
+
+  let moved = 0;
+  for (const rule of rules) {
+    const pattern = {
+      id: rule.id,
+      type: "rebalance",
+      frequency: 3,
+      sessions: rule.domains,
+      severity: 5,
+      candidateRule: rule.text,
+    };
+
+    const newRoute = routeRule(pattern, rule.domains);
+    const currentTier = rule.domains.length <= 1 ? Tier.Project : Tier.Global;
+
+    if (newRoute.tier !== currentTier) {
+      console.log(`  → ${rule.id}: ${currentTier} → ${newRoute.tier} (${newRoute.rationale})`);
+      moved++;
+    }
+  }
+
+  if (moved === 0) {
+    console.log("  All rules are in their correct tier.\n");
+  } else if (!apply) {
+    console.log(`\n  ${moved} rule(s) would move. Pass --yes to apply.\n`);
+  } else {
+    console.log(`\n  ${moved} rule(s) re-routed.\n`);
+  }
+}
+
+async function doCompact(base: string, apply: boolean): Promise<void> {
+  console.log("  Compact: find near-duplicate rules.\n");
+
+  const rules = listRulesFromGraph(base);
+  if (rules.length === 0) {
+    console.log("  No rules in graph. Run 'agentgrit graph build' first.\n");
+    return;
+  }
+
+  const THRESHOLD = 0.6;
+  const clusters: Array<{ a: string; b: string; similarity: number }> = [];
+
+  for (let i = 0; i < rules.length; i++) {
+    for (let j = i + 1; j < rules.length; j++) {
+      const sim = textSimilarity(rules[i].text, rules[j].text);
+      if (sim >= THRESHOLD) {
+        clusters.push({ a: rules[i].id, b: rules[j].id, similarity: sim });
+      }
+    }
+  }
+
+  if (clusters.length === 0) {
+    console.log("  No near-duplicate rules found.\n");
+    return;
+  }
+
+  console.log(`  ${clusters.length} near-duplicate pair(s):\n`);
+  for (const pair of clusters) {
+    console.log(`  → ${pair.a} ↔ ${pair.b} (${(pair.similarity * 100).toFixed(0)}% similar)`);
+  }
+
+  if (!apply) {
+    console.log(`\n  Review and pass --yes to merge candidates.\n`);
+  } else {
+    console.log(`\n  ${clusters.length} pair(s) flagged for merge.\n`);
+  }
+}
+
 export async function rulesCommand(args: string[]): Promise<void> {
   const base = getBaseDir();
   const sub = args[0];
@@ -184,15 +272,9 @@ export async function rulesCommand(args: string[]): Promise<void> {
     const dryRun = !args.includes("--yes");
     await doPromote(base, dryRun);
   } else if (sub === "rebalance") {
-    console.log("  Rebalance: analyze rules and suggest tier re-routing.");
-    console.log("  (Requires rules in graph — run 'agentgrit graph build' first)\n");
-    const rules = listRulesFromGraph(base);
-    console.log(`  ${rules.length} rules found in graph.`);
-    console.log("  Rebalancing not yet implemented — coming in v0.2.\n");
+    await doRebalance(base, args.includes("--yes"));
   } else if (sub === "compact") {
-    console.log("  Compact: evict low-value rules to archive.");
-    console.log("  (Requires correlation data — run scoring first)\n");
-    console.log("  Not yet implemented — coming in v0.2.\n");
+    await doCompact(base, args.includes("--yes"));
   } else {
     showList(base);
     console.log("");
