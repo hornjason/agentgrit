@@ -1,10 +1,18 @@
 import { existsSync, mkdirSync, statSync, readFileSync, writeFileSync, renameSync, unlinkSync } from "fs";
 import { dirname, join } from "path";
-import type { AnySignal, SignalAdapter } from "./types";
+import type { AnySignal, RatingSignal, SignalAdapter } from "./types";
 
 export interface ReadOptions {
   offset?: number;
   limit?: number;
+}
+
+export function normalizeRating(entry: Record<string, unknown>): Record<string, unknown> {
+  if (entry.M != null && entry.mode == null) entry.mode = entry.M;
+  if (entry.S != null && entry.scope == null) entry.scope = entry.S;
+  if (entry.Q != null && entry.quality == null) entry.quality = entry.Q;
+  if (entry.avg != null && entry.rating == null) entry.rating = entry.avg;
+  return entry;
 }
 
 export async function appendSignal(file: string, signal: AnySignal): Promise<void> {
@@ -41,7 +49,11 @@ export async function readSignals(
   const signals: AnySignal[] = [];
   for (const line of slice) {
     try {
-      signals.push(JSON.parse(line) as AnySignal);
+      const parsed = JSON.parse(line);
+      if (parsed.type === "rating") {
+        normalizeRating(parsed);
+      }
+      signals.push(parsed as AnySignal);
     } catch {
       // skip malformed lines
     }

@@ -26,6 +26,9 @@ export interface RatingSignal extends Signal {
   confidence?: number;
   response_preview?: string;
   rule_ids?: string[];
+  mode?: number;
+  scope?: number;
+  quality?: number;
 }
 
 export interface CorrectionSignal extends Signal {

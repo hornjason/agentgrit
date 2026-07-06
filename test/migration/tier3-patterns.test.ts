@@ -44,16 +44,12 @@ describe("Tier 3: Pattern Detection", () => {
     }
   });
 
-  test.skip("T16 — Pattern mining finds low-rating patterns (ratings lack type field)", async () => {
-    // PAI rating signals don't include a `type: "rating"` field, so minePatterns()
-    // filters them all out. This is a known data-shape gap tracked for Phase 3
-    // schema migration. The test is structurally correct — skip until ratings
-    // include the type discriminator.
+  test("T16 — Pattern mining finds low-rating patterns", async () => {
     if (!hasSignals) return expect().pass();
     const patterns = await minePatterns(signalDir);
     expect(patterns.length).toBeGreaterThan(0);
 
-    const lowRated = patterns.filter((p) => p.type === "low-rated-with-corrections");
+    const lowRated = patterns.filter((p) => p.type === "low-rating-with-corrections");
     expect(lowRated.length).toBeGreaterThanOrEqual(1);
   });
 

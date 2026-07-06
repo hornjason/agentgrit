@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { existsSync, mkdirSync, rmSync, readFileSync } from "fs";
 import { join } from "path";
-import { appendSignal, readSignals, rotateFile } from "../../src/adapters/jsonl";
+import { appendSignal, normalizeRating, readSignals, rotateFile } from "../../src/adapters/jsonl";
 import type { RatingSignal } from "../../src/adapters/types";
 import { SCHEMA_VERSION } from "../../src/adapters/types";
 
@@ -91,6 +91,58 @@ describe("readSignals", () => {
 
     const result = await readSignals(TEST_FILE);
     expect(result).toHaveLength(2);
+  });
+});
+
+describe("normalizeRating", () => {
+  test("maps PAI M/S/Q/avg fields to mode/scope/quality/rating", () => {
+    const entry = { M: 4, S: 5, Q: 3, avg: 4.0, type: "rating" };
+    const result = normalizeRating(entry);
+    expect(result.mode).toBe(4);
+    expect(result.scope).toBe(5);
+    expect(result.quality).toBe(3);
+    expect(result.rating).toBe(4.0);
+  });
+
+  test("does not overwrite existing mode/scope/quality/rating", () => {
+    const entry = { M: 4, S: 5, Q: 3, avg: 4.0, mode: 7, scope: 8, quality: 9, rating: 6.5 };
+    const result = normalizeRating(entry);
+    expect(result.mode).toBe(7);
+    expect(result.scope).toBe(8);
+    expect(result.quality).toBe(9);
+    expect(result.rating).toBe(6.5);
+  });
+
+  test("handles entries with no PAI fields", () => {
+    const entry = { type: "rating", rating: 5, mode: 6, scope: 7, quality: 8 };
+    const result = normalizeRating(entry);
+    expect(result.mode).toBe(6);
+    expect(result.scope).toBe(7);
+    expect(result.quality).toBe(8);
+    expect(result.rating).toBe(5);
+  });
+});
+
+describe("readSignals — PAI normalization", () => {
+  test("normalizes PAI M/S/Q fields on read", async () => {
+    const paiEntry = JSON.stringify({
+      type: "rating",
+      M: 4,
+      S: 5,
+      Q: 3,
+      avg: 4.0,
+      timestamp: "2026-03-21T19:41:03Z",
+      session_id: "test-session",
+    });
+    await Bun.write(TEST_FILE, paiEntry + "\n");
+
+    const result = await readSignals(TEST_FILE);
+    expect(result).toHaveLength(1);
+    const rating = result[0] as RatingSignal;
+    expect(rating.mode).toBe(4);
+    expect(rating.scope).toBe(5);
+    expect(rating.quality).toBe(3);
+    expect(rating.rating).toBe(4.0);
   });
 });
 

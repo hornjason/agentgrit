@@ -353,6 +353,9 @@ export async function captureRating(
       ? truncatePreview(opts.responsePreview)
       : undefined,
     rule_ids: ruleIds,
+    mode: parsed.mode,
+    scope: parsed.scope,
+    quality: parsed.quality,
   };
 
   await appendSignal(signalPath(RATINGS_FILE), signal);
