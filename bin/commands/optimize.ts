@@ -8,6 +8,7 @@ import { tuneSkill } from "../../src/optimize/skill-tuner";
 import type { SkillEvaluator, SkillProposer, SkillEvalResult } from "../../src/optimize/skill-tuner";
 import { fastEvaluate, getCriteriaForSkill } from "../../src/optimize/skill-tuner";
 import { inference } from "../../src/adapters/inference";
+import { loadBenchmark } from "../../src/optimize/benchmark";
 import type { JudgeConfig } from "../../src/evaluate/judge";
 import type { RubricConfig, Score } from "../../src/adapters/types";
 
@@ -90,15 +91,27 @@ function createContentGenerator(): ContentGenerator {
   };
 }
 
-function createSkillEvaluator(skillName?: string): SkillEvaluator {
+function loadBenchmarkTasks(benchmarkPath?: string): Array<{ id: string; task: string; rating: number }> {
+  const defaultPath = join(getBaseDir(), "state", "skill-benchmark.json");
+  const pathToTry = benchmarkPath ?? defaultPath;
+
+  try {
+    const benchmark = loadBenchmark(pathToTry);
+    return benchmark.tasks.map((t) => ({ id: t.id, task: t.task, rating: t.rating }));
+  } catch {
+    return [
+      { id: "debug-1", task: "A container is returning 502 errors after a deploy. Diagnose and fix.", rating: 8 },
+      { id: "debug-2", task: "Tests pass locally but fail in CI with a timeout error.", rating: 7 },
+      { id: "debug-3", task: "The API endpoint returns stale data even after a database update.", rating: 6 },
+    ];
+  }
+}
+
+function createSkillEvaluator(skillName?: string, benchmarkPath?: string): SkillEvaluator {
   const criteria = getCriteriaForSkill(skillName);
+  const tasks = loadBenchmarkTasks(benchmarkPath);
   return {
     async evaluate(skillText: string): Promise<SkillEvalResult> {
-      const tasks = [
-        { id: "debug-1", task: "A container is returning 502 errors after a deploy. Diagnose and fix.", rating: 8 },
-        { id: "debug-2", task: "Tests pass locally but fail in CI with a timeout error.", rating: 7 },
-        { id: "debug-3", task: "The API endpoint returns stale data even after a database update.", rating: 6 },
-      ];
       return fastEvaluate(skillText, {
         criteria,
         simulate: async (skill: string, taskPrompt: string) => {
@@ -172,7 +185,7 @@ export async function optimizeCommand(args: string[]): Promise<void> {
   if (!sub || sub === "--help") {
     console.log("  Usage:");
     console.log("    agentgrit optimize prompts [--dimension <name>] [--rounds <n>]");
-    console.log("    agentgrit optimize skills [--skill <name>] [--rounds <n>]");
+    console.log("    agentgrit optimize skills [--skill <name>] [--rounds <n>] [--benchmark <path>]");
     console.log("    agentgrit optimize prompts --auto");
     console.log("");
     console.log("  Runs hill-climbing optimization on the specified target.");
@@ -243,6 +256,8 @@ export async function optimizeCommand(args: string[]): Promise<void> {
   } else if (sub === "skills") {
     const skillIdx = args.indexOf("--skill");
     const skillName = skillIdx !== -1 ? args[skillIdx + 1] : undefined;
+    const benchIdx = args.indexOf("--benchmark");
+    const benchmarkPath = benchIdx !== -1 ? args[benchIdx + 1] : undefined;
 
     let skillText: string;
     if (skillName) {
@@ -268,16 +283,18 @@ export async function optimizeCommand(args: string[]): Promise<void> {
     }
 
     const stateDir = join(base, "state", "optimize");
+    const benchmarkTasks = loadBenchmarkTasks(benchmarkPath);
 
     console.log(`  Target: skills`);
     console.log(`  Rounds: ${rounds}`);
     if (skillName) console.log(`  Skill: ${skillName}`);
+    console.log(`  Tasks: ${benchmarkTasks.length} (${benchmarkPath ? "custom" : existsSync(join(base, "state", "skill-benchmark.json")) ? "benchmark" : "default"})`);
     console.log(`  State: ${stateDir}\n`);
 
     try {
       const result = await tuneSkill({
         skillText,
-        evaluator: createSkillEvaluator(skillName),
+        evaluator: createSkillEvaluator(skillName, benchmarkPath),
         proposer: createSkillProposer(),
         rounds,
         stateDir,
