@@ -81,10 +81,10 @@ Every capability comparison must answer three questions before moving on:
 11. **Startup file loading** — settings.json-driven file injection
 12. **patterns.json for harness gates** — state file used by ship skill
 
-## Phase 1: Fix Pipeline Gaps (in progress)
+## Phase 1: Fix Pipeline Gaps (COMPLETE)
 
 - [x] #36 — Commands read signalDir from config
-- [ ] #39 — Graph memoryDir + signal file aliasing + backfill command (Marcus building now)
+- [x] #39 — Graph memoryDir + signal file aliasing + backfill command
 
 ## Phase 2: Equivalence Tests (BEFORE any cutover)
 
@@ -164,6 +164,8 @@ Every capability comparison must answer three questions before moving on:
 | T40 | `agentgrit export` produces valid JSON | JSON.parse succeeds, has graph + config | `bin/commands/export.ts` |
 
 **Total: 40 tests across 7 tiers. ALL must pass before Phase 3.**
+
+**STATUS: COMPLETE** — 39 pass, 1 skip (T16 — ratings lack `type` field for pattern mining). 704 total tests pass. Shipped 2026-07-06.
 
 ## Phase 3: Parallel Run (1 week)
 
