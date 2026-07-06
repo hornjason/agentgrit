@@ -1,13 +1,16 @@
-import { existsSync, readFileSync, readdirSync } from "fs";
-import { join } from "path";
-import { getBaseDir, loadConfig, resolveSignalDir, resolveSignalFile } from "../../src/adapters/paths";
+import { existsSync, readFileSync, readdirSync, createReadStream } from "fs";
+import { join, basename } from "path";
+import { createInterface } from "readline";
+import { getBaseDir, loadConfig, resolveSignalDir, resolveSignalFile, resolveTranscriptDir } from "../../src/adapters/paths";
 import { loadRubric } from "../../src/evaluate/rubric";
 import { judgeTrace, judgeBatch } from "../../src/evaluate/judge";
 import type { JudgeConfig, Trace } from "../../src/evaluate/judge";
 import { scoresToJsonl } from "../../src/evaluate/judge";
 import { evaluateRecall, aggregateRecallScores, evaluateSessionRecall } from "../../src/evaluate/recall";
 import type { RecallResult, SessionRecallScore } from "../../src/evaluate/recall";
-import type { RubricConfig, Score, Rule } from "../../src/adapters/types";
+import { inferDomains, domainFallback } from "../../src/evaluate/gold";
+import type { GoldSet, GoldSession } from "../../src/evaluate/gold";
+import type { RubricConfig, Score, Rule, GraphNode } from "../../src/adapters/types";
 import { writeFileSync, mkdirSync } from "fs";
 
 function getJudgeConfig(): JudgeConfig | null {
@@ -45,6 +48,61 @@ function findRubric(base: string): RubricConfig | null {
   return null;
 }
 
+function extractTextContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    for (const block of content) {
+      if (block && typeof block === "object" && "type" in block && block.type === "text" && "text" in block) {
+        return String(block.text);
+      }
+    }
+  }
+  return "";
+}
+
+function truncate(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max) : s;
+}
+
+async function loadTraceFromTranscript(filePath: string): Promise<Trace | null> {
+  let userMsg = "";
+  let assistantMsg = "";
+  let found = 0;
+
+  const rl = createInterface({ input: createReadStream(filePath), crlfDelay: Infinity });
+  for await (const line of rl) {
+    if (found >= 2) break;
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line);
+      if (!userMsg && entry.type === "user" && entry.message?.content) {
+        const text = extractTextContent(entry.message.content);
+        if (text) { userMsg = truncate(text, 2000); found++; }
+      } else if (!assistantMsg && entry.type === "assistant" && entry.message?.content) {
+        const text = extractTextContent(entry.message.content);
+        if (text) { assistantMsg = truncate(text, 2000); found++; }
+      }
+    } catch {}
+  }
+  rl.close();
+
+  if (!userMsg && !assistantMsg) return null;
+  const id = basename(filePath, ".jsonl");
+  return { id, input: userMsg || "(no user message)", output: assistantMsg || "(no assistant message)" };
+}
+
+async function loadTracesFromTranscripts(transcriptDir: string): Promise<Trace[]> {
+  if (!existsSync(transcriptDir)) return [];
+  const files = readdirSync(transcriptDir).filter((f) => f.endsWith(".jsonl"));
+  const subset = files.slice(-50);
+  const traces: Trace[] = [];
+  for (const file of subset) {
+    const trace = await loadTraceFromTranscript(join(transcriptDir, file));
+    if (trace) traces.push(trace);
+  }
+  return traces;
+}
+
 function loadTracesFromSignals(signalDir: string): Trace[] {
   const reflFile = resolveSignalFile(signalDir, "algorithm-reflections.jsonl");
   if (!existsSync(reflFile)) return [];
@@ -63,13 +121,107 @@ function loadTracesFromSignals(signalDir: string): Trace[] {
   return traces;
 }
 
-function loadGoldSet(base: string): Record<string, { relevantRules: string[]; description: string }> | null {
+async function loadAllTraces(signalDir: string): Promise<Trace[]> {
+  const signalTraces = loadTracesFromSignals(signalDir);
+  if (signalTraces.length > 0) return signalTraces;
+
+  const transcriptDir = resolveTranscriptDir();
+  if (!transcriptDir) return [];
+  return loadTracesFromTranscripts(transcriptDir);
+}
+
+function loadGoldSet(base: string): Record<string, GoldSession> | null {
   const goldPath = join(base, "state", "gold-set.json");
   if (!existsSync(goldPath)) return null;
   try {
     const raw = JSON.parse(readFileSync(goldPath, "utf-8"));
     return raw.labeled ?? null;
   } catch { return null; }
+}
+
+function loadGraphNodes(base: string): Record<string, GraphNode> | null {
+  const graphPath = join(base, "state", "knowledge-graph.json");
+  if (!existsSync(graphPath)) return null;
+  try {
+    const graph = JSON.parse(readFileSync(graphPath, "utf-8"));
+    return graph.nodes ?? null;
+  } catch { return null; }
+}
+
+async function generateGoldSet(base: string): Promise<Record<string, GoldSession> | null> {
+  const nodes = loadGraphNodes(base);
+  if (!nodes || Object.keys(nodes).length === 0) {
+    console.log("  No knowledge graph found. Run 'agentgrit graph build' first.");
+    return null;
+  }
+
+  const transcriptDir = resolveTranscriptDir();
+  const signalDir = resolveSignalDir();
+  const recallScoresPath = join(base, "state", "recall-scores.json");
+
+  let sessionIds: string[] = [];
+
+  if (existsSync(recallScoresPath)) {
+    try {
+      const raw = JSON.parse(readFileSync(recallScoresPath, "utf-8"));
+      sessionIds = Object.keys(raw.injected ?? {});
+    } catch {}
+  }
+
+  if (sessionIds.length === 0 && transcriptDir && existsSync(transcriptDir)) {
+    sessionIds = readdirSync(transcriptDir)
+      .filter((f) => f.endsWith(".jsonl"))
+      .slice(-30)
+      .map((f) => basename(f, ".jsonl"));
+  }
+
+  if (sessionIds.length === 0) {
+    console.log("  No sessions found for gold set generation.");
+    return null;
+  }
+
+  console.log(`  Generating gold set from ${sessionIds.length} sessions and ${Object.keys(nodes).length} graph nodes...`);
+
+  const labeled: Record<string, GoldSession> = {};
+  const ruleFreq = new Map<string, number>();
+
+  for (const sessionId of sessionIds) {
+    let description = sessionId;
+
+    if (transcriptDir) {
+      const transcriptPath = join(transcriptDir, `${sessionId}.jsonl`);
+      if (existsSync(transcriptPath)) {
+        const trace = await loadTraceFromTranscript(transcriptPath);
+        if (trace) description = trace.input;
+      }
+    }
+
+    const domains = inferDomains(description);
+    const relevantRules = domainFallback(domains, nodes, ruleFreq, 15);
+
+    for (const r of relevantRules) ruleFreq.set(r, (ruleFreq.get(r) ?? 0) + 1);
+
+    labeled[sessionId] = {
+      sessionId,
+      description,
+      relevantRules,
+      domains,
+      autoLabeled: true,
+    };
+  }
+
+  const goldSet: GoldSet = {
+    labeled,
+    totalLabeled: Object.keys(labeled).length,
+    updated: new Date().toISOString(),
+  };
+
+  const stateDir = join(base, "state");
+  if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true });
+  writeFileSync(join(stateDir, "gold-set.json"), JSON.stringify(goldSet, null, 2));
+  console.log(`  Gold set written: ${goldSet.totalLabeled} sessions labeled.\n`);
+
+  return labeled;
 }
 
 function loadGraphRules(base: string): Rule[] {
@@ -110,10 +262,11 @@ export async function evalCommand(args: string[]): Promise<void> {
     console.log("  Usage:");
     console.log("    agentgrit eval traces [--backfill] [--local]");
     console.log("    agentgrit eval session");
-    console.log("    agentgrit eval recall");
+    console.log("    agentgrit eval recall [--generate]");
     console.log("");
     console.log("  Evaluates traces, sessions, or recall against rubrics.");
-    console.log("  Requires judge API key (standard or full mode).\n");
+    console.log("  Traces loads from algorithm-reflections.jsonl or session transcripts.");
+    console.log("  --generate builds a gold set from the knowledge graph + transcripts.\n");
     return;
   }
 
@@ -139,10 +292,14 @@ export async function evalCommand(args: string[]): Promise<void> {
       return;
     }
 
-    const traces = loadTracesFromSignals(signalDir);
+    const traces = await loadAllTraces(signalDir);
     if (traces.length === 0) {
-      console.log("  No traces found in signals directory.");
-      console.log(`  Looking in: ${signalDir}\n`);
+      const transcriptDir = resolveTranscriptDir();
+      console.log("  No traces found.");
+      console.log(`  Checked signals: ${signalDir}`);
+      if (transcriptDir) console.log(`  Checked transcripts: ${transcriptDir}`);
+      else console.log("  No transcriptDir configured. Set transcriptDir in config.json.");
+      console.log("");
       return;
     }
 
@@ -236,12 +393,16 @@ export async function evalCommand(args: string[]): Promise<void> {
     }
     console.log("");
   } else if (sub === "recall") {
+    const generate = args.includes("--generate");
     console.log(`  Mode: recall accuracy\n`);
 
-    const goldSet = loadGoldSet(base);
+    let goldSet = loadGoldSet(base);
+    if (!goldSet && generate) {
+      goldSet = await generateGoldSet(base);
+    }
     if (!goldSet) {
       console.log("  No gold set found at state/gold-set.json.");
-      console.log("  Run 'agentgrit graph build' and label sessions first.\n");
+      console.log("  Use --generate to build one from the knowledge graph and transcripts.\n");
       return;
     }
 
