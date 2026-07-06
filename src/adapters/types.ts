@@ -186,6 +186,7 @@ export interface PromotionRecord {
 export interface AgentGritConfig {
   signalDir: string;
   memoryDir?: string;
+  transcriptDir?: string;
   adapter: "local" | "langfuse" | "both";
   langfuse?: {
     publicKey: string;

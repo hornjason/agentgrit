@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, readdirSync } from "fs";
 import { homedir } from "os";
 import { join, resolve } from "path";
 import type { AgentGritConfig } from "./types";
@@ -40,6 +40,21 @@ export function resolveSignalDir(): string {
 export function resolveMemoryDir(): string {
   const config = loadConfig();
   return expandPath(config.memoryDir ?? join(getBaseDir(), "memory"));
+}
+
+export function resolveTranscriptDir(): string | null {
+  const config = loadConfig();
+  if (config.transcriptDir) return expandPath(config.transcriptDir);
+  if (config.memoryDir) {
+    const memDir = expandPath(config.memoryDir);
+    const parent = join(memDir, "..");
+    const candidate = resolve(parent);
+    if (existsSync(candidate)) {
+      const hasJsonl = readdirSync(candidate).some((f) => f.endsWith(".jsonl"));
+      if (hasJsonl) return candidate;
+    }
+  }
+  return null;
 }
 
 const SIGNAL_ALIASES: Record<string, string> = {

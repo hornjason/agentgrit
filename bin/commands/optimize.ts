@@ -1,6 +1,7 @@
-import { existsSync, readFileSync, readdirSync } from "fs";
-import { join } from "path";
-import { getBaseDir, loadConfig, resolveSignalDir, resolveSignalFile } from "../../src/adapters/paths";
+import { existsSync, readFileSync, readdirSync, createReadStream } from "fs";
+import { join, basename } from "path";
+import { createInterface } from "readline";
+import { getBaseDir, loadConfig, resolveSignalDir, resolveSignalFile, resolveTranscriptDir } from "../../src/adapters/paths";
 import { loadRubric } from "../../src/evaluate/rubric";
 import { tunePrompt } from "../../src/optimize/prompt-tuner";
 import type { TraceFetcher, PromptProposer, ContentGenerator, TraceWithScore } from "../../src/optimize/prompt-tuner";
@@ -10,24 +11,103 @@ import { fastEvaluate, getCriteriaForSkill } from "../../src/optimize/skill-tune
 import { inference } from "../../src/adapters/inference";
 import { loadBenchmark } from "../../src/optimize/benchmark";
 import type { JudgeConfig } from "../../src/evaluate/judge";
-import type { RubricConfig, Score } from "../../src/adapters/types";
+import type { RubricConfig } from "../../src/adapters/types";
 
-function loadScoresFromSignals(signalDir: string): Score[] {
+interface QualityScore {
+  session_file: string;
+  scores: Record<string, number>;
+}
+
+function loadQualityScores(signalDir: string): QualityScore[] {
   const scoresFile = resolveSignalFile(signalDir, "quality-scores.jsonl");
   if (!existsSync(scoresFile)) return [];
   const lines = readFileSync(scoresFile, "utf-8").split("\n").filter((l) => l.trim());
-  const scores: Score[] = [];
+  const results: QualityScore[] = [];
   for (const line of lines) {
-    try { scores.push(JSON.parse(line) as Score); } catch {}
+    try {
+      const entry = JSON.parse(line);
+      if (entry.session_file && entry.scores) {
+        results.push({ session_file: entry.session_file, scores: entry.scores });
+      }
+    } catch {}
   }
-  return scores;
+  return results;
 }
 
-function loadTracesFromSignals(signalDir: string): Array<{ id: string; input: string; output: string; systemPrompt: string }> {
+type TraceEntry = { id: string; input: string; output: string; systemPrompt: string };
+
+function truncate(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max) : s;
+}
+
+function extractTextContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    for (const block of content) {
+      if (block && typeof block === "object" && "type" in block && block.type === "text" && "text" in block) {
+        return String(block.text);
+      }
+    }
+  }
+  return "";
+}
+
+async function loadTraceFromTranscript(filePath: string): Promise<TraceEntry | null> {
+  let userMsg = "";
+  let assistantMsg = "";
+  let systemMsg = "";
+  let found = 0;
+
+  const rl = createInterface({ input: createReadStream(filePath), crlfDelay: Infinity });
+  for await (const line of rl) {
+    if (found >= 3) break;
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line);
+      if (!userMsg && entry.type === "user" && entry.message?.content) {
+        const text = extractTextContent(entry.message.content);
+        if (text) { userMsg = truncate(text, 2000); found++; }
+      } else if (!assistantMsg && entry.type === "assistant" && entry.message?.content) {
+        const text = extractTextContent(entry.message.content);
+        if (text) { assistantMsg = truncate(text, 2000); found++; }
+      } else if (!systemMsg && entry.type === "system" && entry.message?.content) {
+        const text = extractTextContent(entry.message.content);
+        if (text) { systemMsg = truncate(text, 2000); found++; }
+      }
+    } catch {}
+  }
+  rl.close();
+
+  if (!userMsg && !assistantMsg) return null;
+  const id = basename(filePath, ".jsonl");
+  return {
+    id,
+    input: userMsg || "(no user message)",
+    output: assistantMsg || "(no assistant message)",
+    systemPrompt: systemMsg || "You are a helpful assistant.",
+  };
+}
+
+async function loadTracesFromTranscripts(transcriptDir: string, sessionFiles?: Set<string>): Promise<TraceEntry[]> {
+  if (!existsSync(transcriptDir)) return [];
+  const files = readdirSync(transcriptDir).filter((f) => f.endsWith(".jsonl"));
+  const subset = sessionFiles
+    ? files.filter((f) => sessionFiles.has(f))
+    : files.slice(-50);
+
+  const traces: TraceEntry[] = [];
+  for (const file of subset) {
+    const trace = await loadTraceFromTranscript(join(transcriptDir, file));
+    if (trace) traces.push(trace);
+  }
+  return traces;
+}
+
+function loadTracesFromReflections(signalDir: string): TraceEntry[] {
   const reflFile = resolveSignalFile(signalDir, "algorithm-reflections.jsonl");
   if (!existsSync(reflFile)) return [];
   const lines = readFileSync(reflFile, "utf-8").split("\n").filter((l) => l.trim());
-  const traces: Array<{ id: string; input: string; output: string; systemPrompt: string }> = [];
+  const traces: TraceEntry[] = [];
   for (const line of lines) {
     try {
       const entry = JSON.parse(line);
@@ -45,20 +125,37 @@ function loadTracesFromSignals(signalDir: string): Array<{ id: string; input: st
 function createTraceFetcher(signalDir: string): TraceFetcher {
   return {
     async fetchLowestScoring(dimension: string, count: number): Promise<TraceWithScore[]> {
-      const scores = loadScoresFromSignals(signalDir);
-      const traces = loadTracesFromSignals(signalDir);
+      const qualityScores = loadQualityScores(signalDir);
+
+      const reflTraces = loadTracesFromReflections(signalDir);
+      let traces: TraceEntry[];
+
+      if (reflTraces.length > 0) {
+        traces = reflTraces;
+      } else {
+        const transcriptDir = resolveTranscriptDir();
+        if (!transcriptDir) {
+          console.log("  No transcript directory found. Set transcriptDir in config.json.");
+          return [];
+        }
+        const scoredFiles = new Set(qualityScores.map((s) => s.session_file));
+        traces = await loadTracesFromTranscripts(transcriptDir, scoredFiles.size > 0 ? scoredFiles : undefined);
+      }
+
       if (traces.length === 0) return [];
 
-      const scoresByTrace = new Map<string, number>();
-      for (const s of scores) {
-        if (s.dimension === dimension) {
-          scoresByTrace.set(s.traceId, s.value);
-        }
+      console.log(`  Traces loaded: ${traces.length}`);
+
+      const scoreMap = new Map<string, number>();
+      for (const qs of qualityScores) {
+        const sessionId = qs.session_file.replace(/\.jsonl$/, "");
+        const dimScore = qs.scores[dimension] ?? qs.scores["overall"];
+        if (dimScore !== undefined) scoreMap.set(sessionId, dimScore);
       }
 
       const withScores: TraceWithScore[] = traces.map((t) => ({
         trace: { input: t.input, output: t.output, id: t.id },
-        score: scoresByTrace.get(t.id) ?? 2.5,
+        score: scoreMap.get(t.id) ?? 2.5,
         systemPrompt: t.systemPrompt,
         userPrompt: t.input,
       }));
