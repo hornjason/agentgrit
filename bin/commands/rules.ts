@@ -255,6 +255,43 @@ async function doCompact(base: string, apply: boolean): Promise<void> {
   }
 }
 
+async function doPrune(apply: boolean): Promise<void> {
+  const { pruneTobudget } = await import("../../src/promote/prune");
+
+  const claudeMdPath = join(process.env.HOME ?? "", ".claude", "CLAUDE.md");
+  if (!existsSync(claudeMdPath)) {
+    console.log("  CLAUDE.md not found at " + claudeMdPath + "\n");
+    return;
+  }
+
+  const result = await pruneTobudget(claudeMdPath, Tier.Global, {
+    dryRun: !apply,
+    stateDir: stateDir(),
+  });
+
+  if (!result.wasOverBudget) {
+    console.log("  Budget OK — no pruning needed.\n");
+    return;
+  }
+
+  if (result.removed.length === 0) {
+    console.log("  Over budget but no eviction candidates (rules need 5+ injections).\n");
+    return;
+  }
+
+  console.log(`  ${result.removed.length} rule(s) ${apply ? "pruned" : "would be pruned"}:\n`);
+  for (const id of result.removed) {
+    console.log(`  ${apply ? "✓" : "→"} ${id}`);
+  }
+  console.log(`\n  Remaining: ${result.remaining} rules`);
+
+  if (!apply) {
+    console.log("  Dry run — pass --yes to apply.\n");
+  } else {
+    console.log("  Done. Use 'agentgrit undo' to reverse.\n");
+  }
+}
+
 export async function rulesCommand(args: string[]): Promise<void> {
   const base = getBaseDir();
   const sub = args[0];
@@ -275,6 +312,8 @@ export async function rulesCommand(args: string[]): Promise<void> {
     await doRebalance(base, args.includes("--yes"));
   } else if (sub === "compact") {
     await doCompact(base, args.includes("--yes"));
+  } else if (sub === "prune") {
+    await doPrune(args.includes("--yes"));
   } else {
     showList(base);
     console.log("");

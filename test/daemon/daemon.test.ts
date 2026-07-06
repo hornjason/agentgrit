@@ -32,6 +32,7 @@ describe("daemon cycle", () => {
     expect(result).toHaveProperty("scores");
     expect(result).toHaveProperty("patterns");
     expect(result).toHaveProperty("promoted");
+    expect(result).toHaveProperty("pruned");
     expect(result).toHaveProperty("synced");
     expect(result).toHaveProperty("optimized");
     expect(result).toHaveProperty("feedbackGenerated");
@@ -73,6 +74,14 @@ describe("daemon cycle", () => {
     const result = await runDaemonCycle(config);
 
     expect(result.promoted).toBe(0);
+  });
+
+  test("autoPromote=false yields zero pruning", async () => {
+    const { runDaemonCycle } = await import("../../src/daemon/daemon");
+    const config = makeConfig({ rules: { globalBudget: 25, projectBudget: 25, autoPromote: false } });
+    const result = await runDaemonCycle(config);
+
+    expect(result.pruned).toBe(0);
   });
 
   test("timestamp is valid ISO string", async () => {

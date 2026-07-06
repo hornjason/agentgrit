@@ -14,6 +14,7 @@ export interface CycleResult {
   scores: Score[];
   patterns: Pattern[];
   promoted: number;
+  pruned: number;
   synced: boolean;
   optimized: boolean;
   feedbackGenerated: number;
@@ -50,6 +51,7 @@ export async function runDaemonCycle(
     scores: [],
     patterns: [],
     promoted: 0,
+    pruned: 0,
     synced: false,
     optimized: false,
     feedbackGenerated: 0,
@@ -301,6 +303,29 @@ export async function runDaemonCycle(
     result.promoted = promoted;
   } catch (err) {
     result.errors.push(`promote: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // 4b. Prune — remove weakest rules if over budget
+  if (config.rules.autoPromote) {
+    try {
+      const { pruneTobudget } = await import("../promote/prune");
+      const { stateDir } = await import("../adapters/paths");
+      const { Tier } = await import("../adapters/types");
+      const { join } = await import("path");
+      const { existsSync } = await import("fs");
+
+      const claudeMdPath = join(process.env.HOME ?? "", ".claude", "CLAUDE.md");
+      if (existsSync(claudeMdPath)) {
+        for (const tier of [Tier.Global, Tier.Project]) {
+          const pruneResult = await pruneTobudget(claudeMdPath, tier, {
+            stateDir: stateDir(),
+          });
+          result.pruned += pruneResult.removed.length;
+        }
+      }
+    } catch (err) {
+      result.errors.push(`prune: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   // 5. Sync — push scores to Langfuse if configured
