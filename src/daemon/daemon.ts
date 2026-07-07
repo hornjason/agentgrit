@@ -571,6 +571,36 @@ export async function runDaemonCycle(
     }
 
     result.cleanup.counts = updateCounts(baseDir);
+
+    // Convert NEW GAP patterns from reports to feedback files
+    try {
+      const { convertPatternReports } = await import("../detect/pattern-converter");
+      const { resolveMemoryDir } = await import("../adapters/paths");
+      const { existsSync: exists } = await import("fs");
+
+      const reportsDir = join(baseDir, "learning", "reports");
+      if (exists(reportsDir)) {
+        const memoryDir = resolveMemoryDir();
+        const processedState = join(state, "processed-reports.json");
+        convertPatternReports(reportsDir, memoryDir, processedState);
+      }
+    } catch (err) {
+      result.errors.push(`pattern-converter: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // Analyze session incident patterns
+    try {
+      const { analyzeSessionPatterns } = await import("../capture/incidents");
+      const { existsSync: exists } = await import("fs");
+
+      const incidentsPath = join(config.signalDir, "incidents.jsonl");
+      const pendingPath = join(baseDir, "learning", "PENDING-RULES.md");
+      if (exists(incidentsPath)) {
+        analyzeSessionPatterns(incidentsPath, pendingPath, "daemon-cycle");
+      }
+    } catch (err) {
+      result.errors.push(`incident-analysis: ${err instanceof Error ? err.message : String(err)}`);
+    }
   } catch (err) {
     result.errors.push(`cleanup: ${err instanceof Error ? err.message : String(err)}`);
   }

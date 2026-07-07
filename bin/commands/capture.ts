@@ -263,12 +263,58 @@ async function captureSentimentCommand(infer: InferenceFn = inference): Promise<
   appendJsonl(join(dir, "sentiment.jsonl"), record);
 }
 
+async function captureHarvestCommand(): Promise<void> {
+  const { harvest } = await import("../../src/capture/harvester");
+  const { resolveSignalDir } = await import("../../src/adapters/paths");
+  const { join } = await import("path");
+  const { homedir } = await import("os");
+
+  const claudeDir = join(homedir(), ".claude");
+  const cwdSlug = claudeDir.replace(/[\/\.]/g, "-");
+  const projectsDir = join(claudeDir, "projects", cwdSlug);
+  const learningDir = join(resolveSignalDir(), "..", "learning");
+
+  const result = harvest(projectsDir, learningDir, { recent: 10 });
+  if (result.learnings.length > 0) {
+    process.stderr.write(
+      `[harvest] ${result.learnings.length} learning(s) from ${result.sessionsScanned} session(s)\n`,
+    );
+  }
+}
+
+async function captureIncidentCommand(): Promise<void> {
+  const raw = readStdin();
+  if (!raw) return;
+
+  let input: { session_id?: string; tool_response?: { output?: string }; tool_input?: { command?: string } };
+  try {
+    input = JSON.parse(raw);
+  } catch {
+    return;
+  }
+
+  const output = input.tool_response?.output ?? "";
+  const command = input.tool_input?.command ?? "";
+  const sessionId = input.session_id ?? "";
+
+  if (!output) return;
+
+  const { monitorToolOutput } = await import("../../src/capture/incidents");
+  const { resolveSignalDir } = await import("../../src/adapters/paths");
+  const { join } = await import("path");
+
+  const incidentsPath = join(resolveSignalDir(), "incidents.jsonl");
+  monitorToolOutput(output, command, sessionId, incidentsPath);
+}
+
 const SUBCOMMANDS: Record<string, () => Promise<void>> = {
   rating: captureRatingCommand,
   correction: captureCorrectionCommand,
   tool: captureToolCommand,
   skill: captureSkillCommand,
   sentiment: captureSentimentCommand,
+  harvest: captureHarvestCommand,
+  incident: captureIncidentCommand,
 };
 
 export async function captureCommand(args: string[]): Promise<void> {
