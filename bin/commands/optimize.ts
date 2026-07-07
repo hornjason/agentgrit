@@ -283,10 +283,13 @@ export async function optimizeCommand(args: string[]): Promise<void> {
     console.log("  Usage:");
     console.log("    agentgrit optimize prompts [--dimension <name>] [--rounds <n>]");
     console.log("    agentgrit optimize skills [--skill <name>] [--rounds <n>] [--benchmark <path>]");
+    console.log("    agentgrit optimize forge [--limit <n>]");
+    console.log("    agentgrit optimize synthesize --skill <name> [--skill <name2>]");
     console.log("    agentgrit optimize prompts --auto");
     console.log("");
     console.log("  Runs hill-climbing optimization on the specified target.");
-    console.log("  Requires judge API key (standard or full mode).\n");
+    console.log("  forge: Auto-propose skill scaffolds from recurring reflection themes.");
+    console.log("  synthesize: Synthesize SKILL.md content from algorithm reflections.\n");
     return;
   }
 
@@ -409,8 +412,99 @@ export async function optimizeCommand(args: string[]): Promise<void> {
     } catch (err) {
       console.error(`  Error: ${err instanceof Error ? err.message : String(err)}\n`);
     }
+  } else if (sub === "forge") {
+    const limitIdx = args.indexOf("--limit");
+    const limit = limitIdx !== -1 && args[limitIdx + 1] ? parseInt(args[limitIdx + 1], 10) : 60;
+
+    const skillsDir = join(base, "skills");
+    const proposedDir = join(skillsDir, "_PROPOSED");
+    const stateDir = join(base, "state");
+    const reflectionsFile = resolveSignalFile(resolveSignalDir(), "algorithm-reflections.jsonl");
+    const suggestionsFile = resolveSignalFile(resolveSignalDir(), "skill-router-suggestions.jsonl");
+
+    console.log(`  Target: forge`);
+    console.log(`  Limit: ${limit} most recent reflections`);
+    console.log(`  Skills dir: ${skillsDir}\n`);
+
+    try {
+      const { forge } = await import("../../src/optimize/skill-forge");
+      const result = await forge({
+        reflectionsFile,
+        skillsDir,
+        proposedDir,
+        stateDir,
+        suggestionsFile,
+        limit,
+      });
+
+      console.log(`  Clusters found:    ${result.totalClusters}`);
+      console.log(`  Suppressed:        ${result.suppressed}`);
+      console.log(`  Written:           ${result.written}`);
+      console.log(`  Already existed:   ${result.alreadyExisted}`);
+      console.log(`\n  Proposals written to ${proposedDir}\n`);
+    } catch (err) {
+      console.error(`  Error: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
+  } else if (sub === "synthesize") {
+    const skillIdx = args.indexOf("--skill");
+    if (skillIdx === -1 || !args[skillIdx + 1]) {
+      console.error("  Usage: agentgrit optimize synthesize --skill <name> [--skill <name2>]");
+      return;
+    }
+
+    const slugs: string[] = [];
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === "--skill" && args[i + 1]) {
+        slugs.push(args[i + 1]);
+        i++;
+      }
+    }
+
+    const skillsDir = join(base, "skills");
+    const proposedDir = join(skillsDir, "_PROPOSED");
+    const reflectionsFile = resolveSignalFile(resolveSignalDir(), "algorithm-reflections.jsonl");
+
+    const formatRefPath = join(skillsDir, "dev-loop", "SKILL.md");
+    let formatReference = "## What it does\n[description]\n\n## Trigger conditions\n\n## Workflow\n### Step 1\n\n## Anti-patterns\n\n## Scoring criteria\n";
+    if (existsSync(formatRefPath)) {
+      formatReference = readFileSync(formatRefPath, "utf-8");
+    }
+
+    console.log(`  Target: synthesize`);
+    console.log(`  Skills: ${slugs.join(", ")}\n`);
+
+    try {
+      const { loadReflections, synthesizeSkill } = await import("../../src/optimize/skill-synthesizer");
+      const reflections = loadReflections(reflectionsFile);
+
+      if (reflections.length === 0) {
+        console.log("  No reflections found.\n");
+        return;
+      }
+
+      console.log(`  Reflections loaded: ${reflections.length}\n`);
+      const today = new Date().toISOString().slice(0, 10);
+
+      for (const slug of slugs) {
+        const result = await synthesizeSkill({
+          slug,
+          reflections,
+          formatReference,
+          proposedDir,
+          skillsDir,
+          today,
+        });
+
+        const statusIcon = result.status === "promoted" ? "+" : result.status === "error" ? "x" : "-";
+        console.log(`  ${statusIcon} ${result.skill}: ${result.status} (${result.trigger_count} reflections, ${result.workflow_steps} steps, ${result.antipatterns} anti-patterns)${result.error ? ` -- ${result.error}` : ""}`);
+      }
+
+      console.log("");
+    } catch (err) {
+      console.error(`  Error: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
   } else {
     console.log(`  Unknown optimize target: ${sub}`);
-    console.log(`  Valid targets: prompts, skills\n`);
+    console.log(`  Valid targets: prompts, skills, forge, synthesize\n`);
   }
 }

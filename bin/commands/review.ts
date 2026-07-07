@@ -1,7 +1,8 @@
 import { existsSync } from "fs";
 import { join } from "path";
-import { getBaseDir, resolveSignalDir } from "../../src/adapters/paths";
+import { getBaseDir, resolveSignalDir, statePath } from "../../src/adapters/paths";
 import { runReview } from "../../src/promote/review";
+import { getFailurePatterns } from "../../src/capture/failure-surfacing";
 
 export async function reviewCommand(args: string[]): Promise<void> {
   const base = getBaseDir();
@@ -9,6 +10,26 @@ export async function reviewCommand(args: string[]): Promise<void> {
   const state = join(base, "state");
 
   console.log("\nagentgrit review\n");
+
+  const sub = args[0];
+
+  if (sub === "failures") {
+    const skillName = args[1] ?? "ship";
+    const patternsPath = statePath("patterns.json");
+
+    console.log(`  Failure patterns for skill: ${skillName}\n`);
+
+    const result = getFailurePatterns(skillName, patternsPath);
+
+    if (result.sections.length === 0) {
+      console.log("  No failure patterns found.\n");
+      return;
+    }
+
+    console.log(result.text);
+    console.log("");
+    return;
+  }
 
   if (!existsSync(sigDir)) {
     console.log("  No signals directory. Run 'agentgrit init' first.\n");
