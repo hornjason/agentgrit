@@ -58,6 +58,9 @@ export function getEvictionCandidates(
       const ratingDiff =
         (a.avgCorrelatedRating ?? 0) - (b.avgCorrelatedRating ?? 0);
       if (ratingDiff !== 0) return ratingDiff;
+      const lowDiff =
+        (b.lowRatingActivations ?? 0) - (a.lowRatingActivations ?? 0);
+      if (lowDiff !== 0) return lowDiff;
       return (b.injectionCount ?? 0) - (a.injectionCount ?? 0);
     })
     .slice(0, topN);

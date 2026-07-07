@@ -312,6 +312,73 @@ export async function compressSession(
   return result;
 }
 
+// ── Pending Rules Expiry ──
+
+export interface PendingExpiryResult {
+  archived: number;
+  remaining: number;
+}
+
+export function expirePendingRules(
+  pendingPath: string,
+  archivePath: string,
+  expiryDays: number = 30,
+): PendingExpiryResult {
+  if (!existsSync(pendingPath)) {
+    return { archived: 0, remaining: 0 };
+  }
+
+  const content = readFileSync(pendingPath, "utf-8");
+  const lines = content.split("\n");
+  const now = Date.now();
+  const expiryMs = expiryDays * MS_PER_DAY;
+
+  const keep: string[] = [];
+  const archive: string[] = [];
+  let currentBlock: string[] = [];
+  let currentDate: Date | null = null;
+
+  function flushBlock() {
+    if (currentBlock.length === 0) return;
+    if (currentDate && (now - currentDate.getTime()) > expiryMs) {
+      archive.push(...currentBlock);
+    } else {
+      keep.push(...currentBlock);
+    }
+    currentBlock = [];
+    currentDate = null;
+  }
+
+  for (const line of lines) {
+    const dateMatch = line.match(/^## \[(?:PROPOSED|PROMOTED) - (\d{4}-\d{2}-\d{2})\]/);
+    if (dateMatch) {
+      flushBlock();
+      currentDate = new Date(dateMatch[1]);
+      currentBlock.push(line);
+    } else {
+      currentBlock.push(line);
+    }
+  }
+  flushBlock();
+
+  if (archive.length === 0) {
+    return { archived: 0, remaining: keep.length };
+  }
+
+  // Append to archive file
+  const archiveContent = existsSync(archivePath)
+    ? readFileSync(archivePath, "utf-8")
+    : "";
+  const archiveDir = dirname(archivePath);
+  if (!existsSync(archiveDir)) mkdirSync(archiveDir, { recursive: true });
+  writeFileSync(archivePath, archiveContent + (archiveContent ? "\n" : "") + archive.join("\n") + "\n");
+
+  // Write remaining to pending file
+  writeFileSync(pendingPath, keep.join("\n"));
+
+  return { archived: archive.length, remaining: keep.length };
+}
+
 // ── System Counts ──
 
 export function updateCounts(baseDir: string): CountsResult {

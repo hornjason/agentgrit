@@ -39,14 +39,14 @@ function extractRulesWithIds(content: string): Rule[] {
 export async function pruneTobudget(
   claudeMdPath: string,
   tier: Tier,
-  options?: { dryRun?: boolean; maxPrune?: number; stateDir?: string },
+  options?: { dryRun?: boolean; maxPrune?: number; stateDir?: string; budgetOverride?: number },
 ): Promise<PruneResult> {
   const maxPrune = options?.maxPrune ?? 10;
   const dryRun = options?.dryRun ?? false;
 
   const content = readFileSync(claudeMdPath, "utf-8");
   const ruleCount = countRules(content);
-  const budget = checkBudget(tier, ruleCount);
+  const budget = checkBudget(tier, ruleCount, options?.budgetOverride);
 
   if (budget.level !== "OVER_BUDGET") {
     return { removed: [], remaining: ruleCount, wasOverBudget: false };
@@ -64,7 +64,7 @@ export async function pruneTobudget(
   for (const candidate of candidates) {
     if (removed.length >= maxPrune) break;
 
-    const afterRemoval = checkBudget(tier, current - 1);
+    const afterRemoval = checkBudget(tier, current - 1, options?.budgetOverride);
     if (dryRun) {
       removed.push(candidate.id);
       current--;

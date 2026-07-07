@@ -305,27 +305,57 @@ export async function runDaemonCycle(
     result.errors.push(`promote: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // 4b. Prune — remove weakest rules if over budget
-  if (config.rules.autoPromote) {
-    try {
-      const { pruneTobudget } = await import("../promote/prune");
-      const { stateDir } = await import("../adapters/paths");
-      const { Tier } = await import("../adapters/types");
-      const { join } = await import("path");
-      const { existsSync } = await import("fs");
+  // 4b. Prune — remove weakest rules if over budget (always runs, regardless of autoPromote)
+  try {
+    const { pruneTobudget } = await import("../promote/prune");
+    const { stateDir } = await import("../adapters/paths");
+    const { Tier } = await import("../adapters/types");
+    const { join } = await import("path");
+    const { existsSync, readdirSync } = await import("fs");
 
-      const claudeMdPath = join(process.env.HOME ?? "", ".claude", "CLAUDE.md");
-      if (existsSync(claudeMdPath)) {
-        for (const tier of [Tier.Global, Tier.Project]) {
-          const pruneResult = await pruneTobudget(claudeMdPath, tier, {
-            stateDir: stateDir(),
+    const state = stateDir();
+    const home = process.env.HOME ?? "";
+
+    // Prune ~/.claude/CLAUDE.md (global + project tiers)
+    const claudeMdPath = join(home, ".claude", "CLAUDE.md");
+    if (existsSync(claudeMdPath)) {
+      for (const tier of [Tier.Global, Tier.Project]) {
+        const pruneResult = await pruneTobudget(claudeMdPath, tier, {
+          stateDir: state,
+        });
+        result.pruned += pruneResult.removed.length;
+      }
+    }
+
+    // Prune ~/.claude/CLAUDE-LEARNED.md (learned rules budget)
+    const learnedPath = join(home, ".claude", "CLAUDE-LEARNED.md");
+    if (existsSync(learnedPath)) {
+      const learnedBudget = config.rules.learnedBudget ?? 50;
+      const pruneResult = await pruneTobudget(learnedPath, Tier.Global, {
+        stateDir: state,
+        budgetOverride: learnedBudget,
+      });
+      result.pruned += pruneResult.removed.length;
+    }
+
+    // Discover and prune project CLAUDE.md files
+    const projectsDir = join(home, ".claude", "projects");
+    if (existsSync(projectsDir)) {
+      const projectDirs = readdirSync(projectsDir, { withFileTypes: true })
+        .filter((d: import("fs").Dirent) => d.isDirectory());
+      for (const dir of projectDirs) {
+        const projectClaudeMd = join(projectsDir, dir.name, "CLAUDE.md");
+        if (existsSync(projectClaudeMd)) {
+          const pruneResult = await pruneTobudget(projectClaudeMd, Tier.Project, {
+            stateDir: state,
+            budgetOverride: config.rules.projectBudget,
           });
           result.pruned += pruneResult.removed.length;
         }
       }
-    } catch (err) {
-      result.errors.push(`prune: ${err instanceof Error ? err.message : String(err)}`);
     }
+  } catch (err) {
+    result.errors.push(`prune: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // 5. Sync — push scores to Langfuse if configured
@@ -490,7 +520,7 @@ export async function runDaemonCycle(
 
   // 7. Cleanup — session cleanup, signal rotation, compression, counts
   try {
-    const { cleanupSession, rotateSignals, compressSession, updateCounts } = await import("./cleanup");
+    const { cleanupSession, rotateSignals, compressSession, updateCounts, expirePendingRules } = await import("./cleanup");
     const { stateDir } = await import("../adapters/paths");
     const { join } = await import("path");
 
@@ -519,6 +549,18 @@ export async function runDaemonCycle(
       result.cleanup.sessionsCompressed = compressResult.sessionsCompressed;
     } catch (err) {
       result.errors.push(`cleanup-compress: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // Expire old PENDING-RULES.md entries
+    try {
+      const { existsSync: exists } = await import("fs");
+      const pendingPath = join(process.env.HOME ?? "", ".claude", "MEMORY", "LEARNING", "PENDING-RULES.md");
+      const archivePath = join(process.env.HOME ?? "", ".claude", "MEMORY", "LEARNING", "PENDING-RULES-ARCHIVE.md");
+      if (exists(pendingPath)) {
+        expirePendingRules(pendingPath, archivePath, config.rules.pendingExpiryDays ?? 30);
+      }
+    } catch (err) {
+      result.errors.push(`cleanup-pending-expiry: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     result.cleanup.counts = updateCounts(baseDir);

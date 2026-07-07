@@ -202,6 +202,8 @@ export interface AgentGritConfig {
   rules: {
     globalBudget: number;
     projectBudget: number;
+    learnedBudget?: number;
+    pendingExpiryDays?: number;
     autoPromote: boolean;
   };
   daemon: {

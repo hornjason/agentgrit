@@ -42,24 +42,87 @@ function listRulesFromGraph(base: string): Array<{ id: string; domains: string[]
   }
 }
 
+function countRulesInFile(filePath: string): number {
+  if (!existsSync(filePath)) return 0;
+  const content = readFileSync(filePath, "utf-8");
+  return (content.match(/^- \*\*/gm) || []).length;
+}
+
 function showBudget(base: string): void {
   console.log("RULE BUDGET\n");
 
-  const globalCount = 0;
-  const projectCount = 0;
+  const home = process.env.HOME ?? "";
+  const claudeMdPath = join(home, ".claude", "CLAUDE.md");
+  const learnedPath = join(home, ".claude", "CLAUDE-LEARNED.md");
+  const projectsDir = join(home, ".claude", "projects");
+
+  const globalCount = countRulesInFile(claudeMdPath);
+  const learnedCount = countRulesInFile(learnedPath);
   const graphCount = getGraphRuleCount(base);
 
-  const tiers: Array<{ name: string; tier: Tier; count: number }> = [
-    { name: "Global", tier: Tier.Global, count: globalCount },
-    { name: "Project", tier: Tier.Project, count: projectCount },
+  // Load config for custom budgets
+  let learnedBudget = 50;
+  let projectBudgetCap = 25;
+  try {
+    const configPath = join(home, ".agentgrit", "config.json");
+    if (existsSync(configPath)) {
+      const cfg = JSON.parse(readFileSync(configPath, "utf-8"));
+      learnedBudget = cfg.rules?.learnedBudget ?? 50;
+      projectBudgetCap = cfg.rules?.projectBudget ?? 25;
+    }
+  } catch { /* use defaults */ }
+
+  const entries: Array<{ name: string; tier: Tier; count: number; cap?: number }> = [
+    { name: "Global (CLAUDE.md)", tier: Tier.Global, count: globalCount },
+    { name: "Learned (CLAUDE-LEARNED.md)", tier: Tier.Global, count: learnedCount, cap: learnedBudget },
     { name: "Graph", tier: Tier.Graph, count: graphCount },
   ];
 
-  for (const { name, tier, count } of tiers) {
-    const budget = checkBudget(tier, count);
-    const cap = Number.isFinite(budget.cap) ? `/ ${budget.cap}` : "(no cap)";
-    console.log(`  ${icon(budget)} ${name.padEnd(10)} ${count} ${cap}`);
+  // Discover project CLAUDE.md files
+  if (existsSync(projectsDir)) {
+    try {
+      const dirs = readdirSync(projectsDir, { withFileTypes: true })
+        .filter((d) => d.isDirectory());
+      for (const dir of dirs) {
+        const projectClaudeMd = join(projectsDir, dir.name, "CLAUDE.md");
+        if (existsSync(projectClaudeMd)) {
+          const count = countRulesInFile(projectClaudeMd);
+          const shortName = dir.name.length > 30 ? dir.name.slice(0, 27) + "..." : dir.name;
+          entries.push({
+            name: `Project (${shortName})`,
+            tier: Tier.Project,
+            count,
+            cap: projectBudgetCap,
+          });
+        }
+      }
+    } catch { /* skip */ }
   }
+
+  let totalSize = 0;
+  for (const { name, tier, count, cap } of entries) {
+    const budget = checkBudget(tier, count, cap);
+    const capStr = Number.isFinite(budget.cap) ? `/ ${budget.cap}` : "(no cap)";
+    console.log(`  ${icon(budget)} ${name.padEnd(36)} ${String(count).padStart(3)} ${capStr}`);
+  }
+
+  // Total context load
+  const filesToMeasure = [claudeMdPath, learnedPath];
+  if (existsSync(projectsDir)) {
+    try {
+      const dirs = readdirSync(projectsDir, { withFileTypes: true })
+        .filter((d) => d.isDirectory());
+      for (const dir of dirs) {
+        filesToMeasure.push(join(projectsDir, dir.name, "CLAUDE.md"));
+      }
+    } catch { /* skip */ }
+  }
+  for (const f of filesToMeasure) {
+    if (existsSync(f)) {
+      totalSize += readFileSync(f, "utf-8").length;
+    }
+  }
+  console.log(`\n  Total context load: ${(totalSize / 1024).toFixed(1)}KB across ${entries.length} file(s)`);
 }
 
 function showList(base: string): void {
