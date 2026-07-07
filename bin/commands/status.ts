@@ -5,6 +5,7 @@ import { readSignals } from "../../src/adapters/jsonl";
 import { relativeTime } from "../../src/adapters/time";
 import { Tier } from "../../src/adapters/types";
 import { checkBudget } from "../../src/promote/budget";
+import { readSessionContext, readSessionHistory } from "../../src/graph/context";
 
 const SIGNAL_FILES = [
   "ratings.jsonl",
@@ -135,6 +136,26 @@ export async function statusCommand(_args: string[]): Promise<void> {
     const cap = Number.isFinite(budget.cap) ? `/ ${budget.cap}` : "(no cap)";
     const indicator = budget.level === "OK" ? "✓" : budget.level === "WARNING" ? "⚠" : "✗";
     console.log(`  ${indicator} ${tier.padEnd(10)} ${count} ${cap}`);
+  }
+
+  // Rule Load
+  console.log("\nRULE LOAD");
+  const currentCtx = readSessionContext();
+  if (currentCtx) {
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    const history = readSessionHistory(100);
+    const recentSessions = history.filter(
+      (s) => Date.now() - new Date(s.timestamp).getTime() < sevenDaysMs,
+    );
+    let avgLine = "";
+    if (recentSessions.length > 0) {
+      const avgCount = recentSessions.reduce((s, e) => s + (e.rulesInjectedCount ?? 0), 0) / recentSessions.length;
+      const avgKB = recentSessions.reduce((s, e) => s + (e.rulesInjectedKB ?? 0), 0) / recentSessions.length;
+      avgLine = ` | 7-day avg: ${Math.round(avgCount)} (${avgKB.toFixed(1)} KB)`;
+    }
+    console.log(`  Rules loaded: ${currentCtx.rulesInjectedCount ?? 0} (${(currentCtx.rulesInjectedKB ?? 0).toFixed(1)} KB)${avgLine}`);
+  } else {
+    console.log("  No session context");
   }
 
   // Timestamps

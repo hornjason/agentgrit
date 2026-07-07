@@ -125,11 +125,12 @@ export function getContextRules(
 
 // ── Session Context Attribution ──
 
-import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "fs";
+import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "fs";
 import { dirname, join } from "path";
 import { statePath } from "../adapters/paths";
 
 const SESSION_CONTEXT_FILE = "session-context.json";
+const SESSION_HISTORY_FILE = "session-context-history.jsonl";
 const SESSION_CONTEXT_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface SessionContext {
@@ -137,6 +138,8 @@ export interface SessionContext {
   domains: string[];
   timestamp: string;
   ttl: number;
+  rulesInjectedCount: number;
+  rulesInjectedKB: number;
 }
 
 export function writeSessionContext(rules: Rule[], domains: string[]): void {
@@ -144,14 +147,22 @@ export function writeSessionContext(rules: Rule[], domains: string[]): void {
   const dir = dirname(filePath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
+  const rulesInjectedCount = rules.length;
+  const rulesInjectedKB = Math.round((JSON.stringify(rules).length / 1024) * 10) / 10;
+
   const context: SessionContext = {
     ruleIds: rules.map((r) => r.id),
     domains,
     timestamp: new Date().toISOString(),
     ttl: SESSION_CONTEXT_TTL_MS,
+    rulesInjectedCount,
+    rulesInjectedKB,
   };
 
   writeFileSync(filePath, JSON.stringify(context, null, 2), "utf-8");
+
+  const historyPath = statePath(SESSION_HISTORY_FILE);
+  appendFileSync(historyPath, JSON.stringify(context) + "\n", "utf-8");
 }
 
 export function readSessionContext(): SessionContext | null {
@@ -165,6 +176,24 @@ export function readSessionContext(): SessionContext | null {
     return raw;
   } catch {
     return null;
+  }
+}
+
+export function readSessionHistory(limit: number = 10): SessionContext[] {
+  const filePath = statePath(SESSION_HISTORY_FILE);
+  if (!existsSync(filePath)) return [];
+
+  try {
+    const lines = readFileSync(filePath, "utf-8").split("\n").filter((l) => l.trim());
+    const entries: SessionContext[] = [];
+    for (const line of lines) {
+      try {
+        entries.push(JSON.parse(line) as SessionContext);
+      } catch { /* skip malformed */ }
+    }
+    return entries.slice(-limit);
+  } catch {
+    return [];
   }
 }
 
