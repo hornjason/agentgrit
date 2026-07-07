@@ -6,6 +6,7 @@ import { relativeTime } from "../../src/adapters/time";
 import { Tier } from "../../src/adapters/types";
 import { checkBudget } from "../../src/promote/budget";
 import { readSessionContext, readSessionHistory } from "../../src/graph/context";
+import { loadRuleStats } from "../../src/promote/rules";
 
 const SIGNAL_FILES = [
   "ratings.jsonl",
@@ -156,6 +157,27 @@ export async function statusCommand(_args: string[]): Promise<void> {
     console.log(`  Rules loaded: ${currentCtx.rulesInjectedCount ?? 0} (${(currentCtx.rulesInjectedKB ?? 0).toFixed(1)} KB)${avgLine}`);
   } else {
     console.log("  No session context");
+  }
+
+  // Rule Correlation
+  console.log("\nRULE CORRELATION");
+  const statsMap = loadRuleStats();
+  const allStats = Array.from(statsMap.values()).filter((s) => s.injectionCount >= 5);
+  if (allStats.length > 0) {
+    const sorted = [...allStats].sort((a, b) => b.avgCorrelatedRating - a.avgCorrelatedRating);
+    const top5 = sorted.slice(0, 5);
+    const bottom5 = sorted.slice(-5).reverse();
+
+    console.log("  Highest Correlated:");
+    for (const s of top5) {
+      console.log(`    ${s.ruleId.padEnd(40)} ${s.avgCorrelatedRating.toFixed(1)}`);
+    }
+    console.log("  Lowest Correlated:");
+    for (const s of bottom5) {
+      console.log(`    ${s.ruleId.padEnd(40)} ${s.avgCorrelatedRating.toFixed(1)}`);
+    }
+  } else {
+    console.log("  Not enough data (rules need 5+ injections)");
   }
 
   // Timestamps

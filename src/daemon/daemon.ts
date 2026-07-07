@@ -30,11 +30,18 @@ export interface CycleResult {
   errors: string[];
 }
 
+export interface EvictionCandidate {
+  ruleId: string;
+  avgCorrelatedRating: number;
+  injectionCount: number;
+}
+
 export interface WeeklyReviewResult {
   timestamp: string;
   review: ReviewResult;
   graphRebuilt: boolean;
   budgetStatus: { global: string; project: string };
+  evictionCandidates: EvictionCandidate[];
   errors: string[];
 }
 
@@ -638,6 +645,7 @@ export async function runWeeklyReview(
     },
     graphRebuilt: false,
     budgetStatus: { global: "OK", project: "OK" },
+    evictionCandidates: [],
     errors: [],
   };
 
@@ -676,6 +684,38 @@ export async function runWeeklyReview(
     };
   } catch (err) {
     result.errors.push(`budget: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // 4. Eviction candidates — low-correlation rules with sufficient data
+  try {
+    const { loadRuleStats } = await import("../promote/rules");
+    const { writeFileSync, mkdirSync } = await import("fs");
+    const { stateDir } = await import("../adapters/paths");
+    const { join } = await import("path");
+
+    const statsMap = loadRuleStats();
+    const candidates: EvictionCandidate[] = [];
+    for (const stats of statsMap.values()) {
+      if (stats.injectionCount > 10 && stats.avgCorrelatedRating < 4) {
+        candidates.push({
+          ruleId: stats.ruleId,
+          avgCorrelatedRating: stats.avgCorrelatedRating,
+          injectionCount: stats.injectionCount,
+        });
+      }
+    }
+    candidates.sort((a, b) => a.avgCorrelatedRating - b.avgCorrelatedRating);
+    result.evictionCandidates = candidates;
+
+    const state = stateDir();
+    if (!existsSync(state)) mkdirSync(state, { recursive: true });
+    writeFileSync(
+      join(state, "eviction-candidates.json"),
+      JSON.stringify(candidates, null, 2),
+      "utf-8",
+    );
+  } catch (err) {
+    result.errors.push(`eviction: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   return result;

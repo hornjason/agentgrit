@@ -5,6 +5,7 @@ import { detectFailurePatterns } from "../../src/detect/failures";
 import { minePatterns } from "../../src/detect/patterns";
 import { routeRule, type RouteResult } from "../../src/promote/router";
 import type { Pattern } from "../../src/adapters/types";
+import type { EvictionCandidate } from "../../src/daemon/daemon";
 
 export interface InboxItem {
   pattern: Pattern;
@@ -75,6 +76,25 @@ export async function inboxCommand(args: string[]): Promise<void> {
   for (let i = 0; i < items.length; i++) {
     console.log(formatItem(items[i], i));
     console.log("");
+  }
+
+  // Eviction candidates
+  const evictionPath = join(stateDir(), "eviction-candidates.json");
+  if (existsSync(evictionPath)) {
+    try {
+      const evictions: EvictionCandidate[] = JSON.parse(readFileSync(evictionPath, "utf-8"));
+      if (evictions.length > 0) {
+        console.log(`  ${evictions.length} eviction candidate(s):\n`);
+        for (let i = 0; i < evictions.length; i++) {
+          const e = evictions[i];
+          console.log(`─── [EVICTION] Candidate ${i + 1} ───`);
+          console.log(`  Rule:        ${e.ruleId}`);
+          console.log(`  Correlation: ${e.avgCorrelatedRating.toFixed(1)}`);
+          console.log(`  Injections:  ${e.injectionCount}`);
+          console.log("");
+        }
+      }
+    } catch { /* skip malformed file */ }
   }
 
   console.log(`Use 'agentgrit rules promote' to promote candidates.`);
