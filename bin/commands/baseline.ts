@@ -125,6 +125,78 @@ function findClosestMatch(map: Map<string, number>, timestamp: string): number {
   return minDist < 24 * 60 * 60 * 1000 ? closest : 0;
 }
 
+function backfillBaseline(): void {
+  const sigDir = resolveSignalDir();
+
+  const ratingsEntries = loadJsonlEntries(join(sigDir, "ratings.jsonl"));
+  const correctionsEntries = loadJsonlEntries(join(sigDir, "corrections.jsonl"))
+    .concat(loadJsonlEntries(join(sigDir, "correction-captures.jsonl")));
+
+  const sessionRatings = new Map<string, { rating: number; timestamp: string }>();
+  for (const e of ratingsEntries) {
+    const sid = (e.session_id as string) ?? "";
+    const rating = e.rating as number;
+    if (sid && typeof rating === "number") {
+      const existing = sessionRatings.get(sid);
+      if (!existing || rating > existing.rating) {
+        sessionRatings.set(sid, { rating, timestamp: (e.timestamp as string) ?? "" });
+      }
+    }
+  }
+
+  const correctionsBySession = new Map<string, number>();
+  for (const e of correctionsEntries) {
+    const sid = (e.session_id as string) ?? "";
+    const type = (e.type as string) ?? "";
+    if (sid && type === "correction") {
+      correctionsBySession.set(sid, (correctionsBySession.get(sid) ?? 0) + 1);
+    }
+  }
+
+  const recentSessions = [...sessionRatings.entries()]
+    .sort((a, b) => b[1].timestamp.localeCompare(a[1].timestamp))
+    .slice(0, 10);
+
+  if (recentSessions.length === 0) {
+    console.log("No rated sessions found in ratings.jsonl.");
+    return;
+  }
+
+  const BACKFILL_RULES_COUNT = 117;
+  const BACKFILL_RULES_KB = 44.0;
+
+  const baselineSessions: SessionBaseline[] = recentSessions.map(([sid, info]) => ({
+    id: sid,
+    rulesCount: BACKFILL_RULES_COUNT,
+    rulesKB: BACKFILL_RULES_KB,
+    corrections: correctionsBySession.get(sid) ?? 0,
+    rating: info.rating,
+    iterationCount: 0,
+  }));
+
+  const avg = (arr: number[]) => arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+  const snapshot: BaselineSnapshot = {
+    capturedAt: new Date().toISOString(),
+    sessions: baselineSessions,
+    averages: {
+      rulesCount: Math.round(avg(baselineSessions.map((s) => s.rulesCount)) * 10) / 10,
+      rulesKB: Math.round(avg(baselineSessions.map((s) => s.rulesKB)) * 10) / 10,
+      corrections: Math.round(avg(baselineSessions.map((s) => s.corrections)) * 10) / 10,
+      rating: Math.round(avg(baselineSessions.map((s) => s.rating)) * 10) / 10,
+    },
+  };
+
+  const outPath = statePath(SNAPSHOT_FILE);
+  const dir = dirname(outPath);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  writeFileSync(outPath, JSON.stringify(snapshot, null, 2), "utf-8");
+  console.log(`Baseline backfilled from historical data → ${outPath}`);
+  console.log(`  Sessions: ${snapshot.sessions.length}`);
+  console.log(`  Avg rules: ${snapshot.averages.rulesCount} (${snapshot.averages.rulesKB} KB) [backfill constant]`);
+  console.log(`  Avg corrections: ${snapshot.averages.corrections}`);
+  console.log(`  Avg rating: ${snapshot.averages.rating}`);
+}
+
 function showBaseline(): void {
   const snapshotPath = statePath(SNAPSHOT_FILE);
   if (!existsSync(snapshotPath)) {
@@ -160,10 +232,13 @@ export async function baselineCommand(args: string[]): Promise<void> {
     captureBaseline();
   } else if (sub === "show") {
     showBaseline();
+  } else if (sub === "backfill") {
+    backfillBaseline();
   } else {
-    console.log("Usage: agentgrit baseline <capture|show>");
+    console.log("Usage: agentgrit baseline <capture|show|backfill>");
     console.log("");
     console.log("  capture    Capture baseline from recent sessions");
     console.log("  show       Display the last captured baseline");
+    console.log("  backfill   Create baseline from historical ratings/corrections data");
   }
 }
