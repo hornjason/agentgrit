@@ -356,6 +356,39 @@ export async function captureRating(
   };
 
   await appendSignal(signalPath(RATINGS_FILE), signal);
+
+  if (ruleIds && ruleIds.length > 0) {
+    try {
+      const { trackAttributedRules, loadRuleStats, persistRuleStats, correlateRules } = await import("../promote/rules");
+      const statsMap = loadRuleStats();
+      const pseudoRules: import("../adapters/types").Rule[] = ruleIds.map((id) => {
+        const existing = statsMap.get(id);
+        return {
+          id,
+          text: "",
+          tier: "global" as import("../adapters/types").Tier,
+          tags: [],
+          created: "",
+          correlationScore: 0,
+          sourceSignals: [],
+          schemaVersion: 1,
+          injectionCount: existing?.injectionCount,
+          avgCorrelatedRating: existing?.avgCorrelatedRating,
+          sessionRatings: existing?.sessionRatings,
+          highRatingActivations: existing?.highRatingActivations,
+          lowRatingActivations: existing?.lowRatingActivations,
+          lastSeen: existing?.lastSeen,
+        };
+      });
+      const updated = trackAttributedRules(pseudoRules, ruleIds, composite);
+      const allStats = correlateRules(updated);
+      for (const stat of allStats) {
+        statsMap.set(stat.ruleId, stat);
+      }
+      persistRuleStats(Array.from(statsMap.values()));
+    } catch { /* non-critical — don't fail the rating capture */ }
+  }
+
   return signal;
 }
 

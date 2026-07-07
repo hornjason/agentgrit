@@ -3,6 +3,7 @@ import { join } from "path";
 import { getBaseDir, resolveSignalDir, stateDir } from "../../src/adapters/paths";
 import { Tier, type Rule, SCHEMA_VERSION } from "../../src/adapters/types";
 import { checkBudget, type BudgetStatus } from "../../src/promote/budget";
+import { loadRuleStats } from "../../src/promote/rules";
 import { getInboxItems } from "./inbox";
 import { routeRule } from "../../src/promote/router";
 import { promoteRule } from "../../src/promote/bridge";
@@ -46,6 +47,37 @@ function countRulesInFile(filePath: string): number {
   if (!existsSync(filePath)) return 0;
   const content = readFileSync(filePath, "utf-8");
   return (content.match(/^- \*\*/gm) || []).length;
+}
+
+function showCorrelationStats(): void {
+  try {
+    const statsMap = loadRuleStats();
+    if (statsMap.size === 0) return;
+
+    const stats = Array.from(statsMap.values())
+      .filter((s) => s.injectionCount > 0);
+    if (stats.length === 0) return;
+
+    stats.sort((a, b) => b.avgCorrelatedRating - a.avgCorrelatedRating);
+
+    console.log("\nRULE CORRELATION STATS\n");
+
+    const top = stats.slice(0, 5);
+    if (top.length > 0) {
+      console.log("  Highest correlated:");
+      for (const s of top) {
+        console.log(`    ${s.ruleId} — avg: ${s.avgCorrelatedRating.toFixed(1)}, injections: ${s.injectionCount}, high: ${s.highRatingActivations}, low: ${s.lowRatingActivations}`);
+      }
+    }
+
+    const bottom = stats.slice().sort((a, b) => a.avgCorrelatedRating - b.avgCorrelatedRating).slice(0, 5);
+    if (bottom.length > 0) {
+      console.log("  Lowest correlated:");
+      for (const s of bottom) {
+        console.log(`    ${s.ruleId} — avg: ${s.avgCorrelatedRating.toFixed(1)}, injections: ${s.injectionCount}, high: ${s.highRatingActivations}, low: ${s.lowRatingActivations}`);
+      }
+    }
+  } catch { /* no stats yet */ }
 }
 
 function showBudget(base: string): void {
@@ -368,6 +400,7 @@ export async function rulesCommand(args: string[]): Promise<void> {
 
   if (sub === "status" || sub === "budget") {
     showBudget(base);
+    showCorrelationStats();
   } else if (sub === "promote") {
     const dryRun = !args.includes("--yes");
     await doPromote(base, dryRun);
@@ -381,6 +414,7 @@ export async function rulesCommand(args: string[]): Promise<void> {
     showList(base);
     console.log("");
     showBudget(base);
+    showCorrelationStats();
   }
 
   console.log("");

@@ -1,6 +1,10 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { dirname, join } from "path";
+import { stateDir } from "../adapters/paths";
 import type { Rule } from "../adapters/types";
 
 const MAX_SESSION_RATINGS = 20;
+const RULE_STATS_FILE = "rule-stats.json";
 
 export interface RuleStats {
   ruleId: string;
@@ -87,4 +91,26 @@ export function correlateRules(rules: Rule[]): RuleStats[] {
     lowRatingActivations: r.lowRatingActivations ?? 0,
     lastSeen: r.lastSeen ?? "",
   }));
+}
+
+export function ruleStatsPath(dir?: string): string {
+  return join(dir ?? stateDir(), RULE_STATS_FILE);
+}
+
+export function loadRuleStats(dir?: string): Map<string, RuleStats> {
+  const filePath = ruleStatsPath(dir);
+  if (!existsSync(filePath)) return new Map();
+  try {
+    const entries = JSON.parse(readFileSync(filePath, "utf-8")) as RuleStats[];
+    return new Map(entries.map((s) => [s.ruleId, s]));
+  } catch {
+    return new Map();
+  }
+}
+
+export function persistRuleStats(stats: RuleStats[], dir?: string): void {
+  const filePath = ruleStatsPath(dir);
+  const parent = dirname(filePath);
+  if (!existsSync(parent)) mkdirSync(parent, { recursive: true });
+  writeFileSync(filePath, JSON.stringify(stats, null, 2), "utf-8");
 }

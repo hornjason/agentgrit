@@ -9,6 +9,11 @@ export interface CleanupStats {
   counts: { signalFiles: number; ruleFiles: number; graphNodes: number } | null;
 }
 
+export interface CorrelationStats {
+  rulesTracked: number;
+  avgCorrelation: number;
+}
+
 export interface CycleResult {
   timestamp: string;
   scores: Score[];
@@ -21,6 +26,7 @@ export interface CycleResult {
   successGenerated: number;
   workInsightsGenerated: number;
   cleanup: CleanupStats;
+  correlationStats: CorrelationStats;
   errors: string[];
 }
 
@@ -64,6 +70,7 @@ export async function runDaemonCycle(
       sessionsCompressed: 0,
       counts: null,
     },
+    correlationStats: { rulesTracked: 0, avgCorrelation: 0 },
     errors: [],
   };
 
@@ -566,6 +573,22 @@ export async function runDaemonCycle(
     result.cleanup.counts = updateCounts(baseDir);
   } catch (err) {
     result.errors.push(`cleanup: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // 8. Rule correlation — summarize rule effectiveness stats
+  try {
+    const { loadRuleStats } = await import("../promote/rules");
+    const statsMap = loadRuleStats();
+    const stats = Array.from(statsMap.values()).filter((s) => s.injectionCount > 0);
+    if (stats.length > 0) {
+      const totalAvg = stats.reduce((sum, s) => sum + s.avgCorrelatedRating, 0) / stats.length;
+      result.correlationStats = {
+        rulesTracked: stats.length,
+        avgCorrelation: Math.round(totalAvg * 10) / 10,
+      };
+    }
+  } catch (err) {
+    result.errors.push(`correlation: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   return result;
