@@ -3,6 +3,7 @@ import { join } from "path";
 import { getBaseDir, stateDir, resolveMemoryDir } from "../../src/adapters/paths";
 import { readGraph, buildGraph, writeGraphFile } from "../../src/graph/builder";
 import { queryGraph } from "../../src/graph/query";
+import { generateReport, formatReportMarkdown } from "../../src/graph/report";
 import { relativeTime } from "../../src/adapters/time";
 
 function showStats(base: string): void {
@@ -70,6 +71,16 @@ function doQuery(base: string, queryStr: string): void {
   }
 }
 
+function doReport(): void {
+  const graph = readGraph();
+  if (graph.nodeCount === 0) {
+    console.log("  Empty graph. Run 'agentgrit graph build' first.\n");
+    return;
+  }
+  const report = generateReport(graph);
+  console.log(formatReportMarkdown(report));
+}
+
 export async function graphCommand(args: string[]): Promise<void> {
   const base = getBaseDir();
   const sub = args[0];
@@ -90,6 +101,8 @@ export async function graphCommand(args: string[]): Promise<void> {
       return;
     }
     doQuery(base, query);
+  } else if (sub === "report") {
+    doReport();
   } else if (sub === "stats") {
     showStats(base);
   } else {
