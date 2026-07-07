@@ -387,6 +387,54 @@ async function doPrune(apply: boolean): Promise<void> {
   }
 }
 
+interface RuleClassification {
+  id: string;
+  text: string;
+  source: string;
+  tier: "UNIVERSAL" | "GRAPH_TIER";
+  domains: string[];
+  justification: string;
+}
+
+function showClassify(detail: boolean): void {
+  const classificationPath = join(process.env.HOME ?? "", ".agentgrit", "state", "rule-classification.json");
+  if (!existsSync(classificationPath)) {
+    console.log("  No rule-classification.json found. Run the classification task first.\n");
+    return;
+  }
+
+  let rules: RuleClassification[];
+  try {
+    rules = JSON.parse(readFileSync(classificationPath, "utf-8"));
+  } catch {
+    console.log("  Failed to parse rule-classification.json.\n");
+    return;
+  }
+
+  const universal = rules.filter((r) => r.tier === "UNIVERSAL");
+  const graphTier = rules.filter((r) => r.tier === "GRAPH_TIER");
+
+  console.log(`  Universal: ${universal.length} | Graph-tier: ${graphTier.length} | Total: ${rules.length}\n`);
+
+  if (detail) {
+    console.log("  UNIVERSAL RULES:\n");
+    for (const rule of universal) {
+      console.log(`    ${rule.id} (${rule.source})`);
+    }
+
+    console.log(`\n  GRAPH_TIER by domain:\n`);
+    const byDomain: Record<string, number> = {};
+    for (const rule of graphTier) {
+      for (const d of rule.domains) {
+        byDomain[d] = (byDomain[d] ?? 0) + 1;
+      }
+    }
+    for (const [domain, count] of Object.entries(byDomain).sort((a, b) => b[1] - a[1])) {
+      console.log(`    ${domain}: ${count}`);
+    }
+  }
+}
+
 export async function rulesCommand(args: string[]): Promise<void> {
   const base = getBaseDir();
   const sub = args[0];
@@ -410,6 +458,8 @@ export async function rulesCommand(args: string[]): Promise<void> {
     await doCompact(base, args.includes("--yes"));
   } else if (sub === "prune") {
     await doPrune(args.includes("--yes"));
+  } else if (sub === "classify") {
+    showClassify(args.includes("--detail"));
   } else {
     showList(base);
     console.log("");
