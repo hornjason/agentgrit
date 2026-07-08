@@ -16,4 +16,4 @@ export { queryGraph } from "./query";
 export { buildIndex, buildIndexFromDir, searchIndex, tokenize } from "./bm25";
 export { hybridRetrieve } from "./retrieval";
 export { embedRules, semanticSearch, cosine, findEmbeddingEdges } from "./embedder";
-export { getContextRules, detectDomains } from "./context";
+export { getContextRules, detectDomains, bm25InferDomains } from "./context";

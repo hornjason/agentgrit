@@ -40,6 +40,44 @@ export function detectDomains(text: string): string[] {
   return domains.size > 0 ? Array.from(domains) : [];
 }
 
+// ── BM25-Driven Domain Inference ──
+
+export function bm25InferDomains(
+  text: string,
+  index: BM25Index,
+  ruleDomains: Record<string, { domains: string[] }>,
+  options?: { maxDomains?: number; topK?: number },
+): string[] {
+  const topK = options?.topK ?? 8;
+  const maxDomains = options?.maxDomains ?? 4;
+
+  const matches = searchIndex(index, text, topK);
+
+  const domainCounts: Record<string, number> = {};
+  for (const match of matches) {
+    const entry = ruleDomains[match.id];
+    if (!entry) continue;
+    for (const domain of entry.domains) {
+      domainCounts[domain] = (domainCounts[domain] || 0) + 1;
+    }
+  }
+
+  const ranked = Object.entries(domainCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, maxDomains)
+    .map(([domain]) => domain);
+
+  if (ranked.length < 2) {
+    const fallback = detectDomains(text);
+    if (fallback.length >= 2) return fallback.slice(0, maxDomains);
+    // Merge BM25 result with fallback, deduplicate
+    const merged = [...new Set([...ranked, ...fallback])];
+    return merged.slice(0, maxDomains);
+  }
+
+  return ranked;
+}
+
 // ── Get Context Rules ──
 
 export function getContextRules(
