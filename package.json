@@ -3,6 +3,22 @@
   "version": "0.1.4",
   "type": "module",
   "description": "Self-learning engine that makes AI agents smarter over time",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "import": "./src/index.ts",
+      "types": "./src/index.ts"
+    },
+    "./graph": {
+      "import": "./src/graph/index.ts",
+      "types": "./src/graph/index.ts"
+    },
+    "./capture": {
+      "import": "./src/capture/index.ts",
+      "types": "./src/capture/index.ts"
+    }
+  },
   "bin": {
     "agentgrit": "dist/agentgrit.js"
   },
