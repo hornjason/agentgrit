@@ -15,6 +15,7 @@ updated: 2026-07-06
 
 | I need to... | Read |
 |---|---|
+| Understand the full learning loop system | `docs/SYSTEM-SPEC.md` |
 | Understand what AgentGrit is and how to use it | `docs/README.md` |
 | See the full PAI → AgentGrit file mapping | `docs/migration-spec.md` |
 | Check migration progress and phase status | `docs/migration-plan.md` |
@@ -34,6 +35,7 @@ updated: 2026-07-06
 
 | Doc | Type | What it covers |
 |---|---|---|
+| `docs/SYSTEM-SPEC.md` | spec | Full learning loop: capture→detect→promote→inject→measure→evict |
 | `docs/migration-spec.md` | spec | 221-file mapping from PAI to AgentGrit modules |
 | `docs/migration-plan.md` | spec | 8-phase migration plan with equivalence tests |
 | `docs/consolidation-plan.md` | spec | How 145 keep/merge files consolidate into ~50 modules |
