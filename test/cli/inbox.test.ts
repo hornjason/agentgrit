@@ -54,4 +54,37 @@ describe("inbox command", () => {
     const { inboxCommand } = await import("../../bin/commands/inbox");
     await inboxCommand([]);
   });
+
+  test("displays eviction candidates from state file", async () => {
+    const candidates = [
+      { ruleId: "stale-rule", avgCorrelatedRating: 2.5, injectionCount: 15, lastSeen: "2026-06-01T00:00:00Z" },
+    ];
+    writeFileSync(join(TEST_DIR, "state", "eviction-candidates.json"), JSON.stringify(candidates));
+
+    const lines: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => lines.push(args.join(" "));
+
+    const { inboxCommand } = await import("../../bin/commands/inbox");
+    await inboxCommand([]);
+
+    console.log = origLog;
+
+    expect(lines.some((l) => l.includes("EVICTION"))).toBe(true);
+    expect(lines.some((l) => l.includes("stale-rule"))).toBe(true);
+    expect(lines.some((l) => l.includes("Last seen:"))).toBe(true);
+  });
+
+  test("shows no eviction section when file missing", async () => {
+    const lines: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => lines.push(args.join(" "));
+
+    const { inboxCommand } = await import("../../bin/commands/inbox");
+    await inboxCommand([]);
+
+    console.log = origLog;
+
+    expect(lines.some((l) => l.includes("EVICTION"))).toBe(false);
+  });
 });

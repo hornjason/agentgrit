@@ -27,6 +27,7 @@ export interface CycleResult {
   workInsightsGenerated: number;
   cleanup: CleanupStats;
   correlationStats: CorrelationStats;
+  evictionCandidatesCount: number;
   errors: string[];
 }
 
@@ -34,6 +35,7 @@ export interface EvictionCandidate {
   ruleId: string;
   avgCorrelatedRating: number;
   injectionCount: number;
+  lastSeen: string;
 }
 
 export interface WeeklyReviewResult {
@@ -78,6 +80,7 @@ export async function runDaemonCycle(
       counts: null,
     },
     correlationStats: { rulesTracked: 0, avgCorrelation: 0 },
+    evictionCandidatesCount: 0,
     errors: [],
   };
 
@@ -370,6 +373,40 @@ export async function runDaemonCycle(
     }
   } catch (err) {
     result.errors.push(`prune: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // 4c. Eviction review — identify low-correlation rules independently of budget
+  try {
+    const { loadRuleStats } = await import("../promote/rules");
+    const { writeFileSync: writeEviction, mkdirSync: mkEviction, existsSync: evictionExists } = await import("fs");
+    const { stateDir: evictionStateDir } = await import("../adapters/paths");
+    const { join: evictionJoin } = await import("path");
+
+    const statsMap = loadRuleStats();
+    const candidates: EvictionCandidate[] = [];
+    for (const stats of statsMap.values()) {
+      if (stats.injectionCount < 5) continue;
+      if (stats.injectionCount > 10 && stats.avgCorrelatedRating < 4) {
+        candidates.push({
+          ruleId: stats.ruleId,
+          avgCorrelatedRating: stats.avgCorrelatedRating,
+          injectionCount: stats.injectionCount,
+          lastSeen: stats.lastSeen,
+        });
+      }
+    }
+    candidates.sort((a, b) => a.avgCorrelatedRating - b.avgCorrelatedRating);
+
+    const evState = evictionStateDir();
+    if (!evictionExists(evState)) mkEviction(evState, { recursive: true });
+    writeEviction(
+      evictionJoin(evState, "eviction-candidates.json"),
+      JSON.stringify(candidates, null, 2),
+      "utf-8",
+    );
+    result.evictionCandidatesCount = candidates.length;
+  } catch (err) {
+    result.errors.push(`eviction-review: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // 5. Sync — push scores to Langfuse if configured
@@ -701,6 +738,7 @@ export async function runWeeklyReview(
           ruleId: stats.ruleId,
           avgCorrelatedRating: stats.avgCorrelatedRating,
           injectionCount: stats.injectionCount,
+          lastSeen: stats.lastSeen,
         });
       }
     }

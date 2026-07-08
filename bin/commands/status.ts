@@ -162,22 +162,32 @@ export async function statusCommand(_args: string[]): Promise<void> {
   // Rule Correlation
   console.log("\nRULE CORRELATION");
   const statsMap = loadRuleStats();
-  const allStats = Array.from(statsMap.values()).filter((s) => s.injectionCount >= 5);
-  if (allStats.length > 0) {
-    const sorted = [...allStats].sort((a, b) => b.avgCorrelatedRating - a.avgCorrelatedRating);
-    const top5 = sorted.slice(0, 5);
-    const bottom5 = sorted.slice(-5).reverse();
+  const highStats = Array.from(statsMap.values()).filter((s) => s.injectionCount >= 5);
+  const lowStats = Array.from(statsMap.values()).filter((s) => s.injectionCount >= 10);
+  if (highStats.length > 0) {
+    const sortedHigh = [...highStats].sort((a, b) => b.avgCorrelatedRating - a.avgCorrelatedRating);
+    const top5 = sortedHigh.slice(0, 5);
 
-    console.log("  Highest Correlated:");
-    for (const s of top5) {
-      console.log(`    ${s.ruleId.padEnd(40)} ${s.avgCorrelatedRating.toFixed(1)}`);
+    console.log("  Highest:");
+    for (let i = 0; i < top5.length; i++) {
+      const s = top5[i];
+      console.log(`    ${i + 1}. ${s.ruleId} (avg: ${s.avgCorrelatedRating.toFixed(1)}, injections: ${s.injectionCount})`);
     }
-    console.log("  Lowest Correlated:");
-    for (const s of bottom5) {
-      console.log(`    ${s.ruleId.padEnd(40)} ${s.avgCorrelatedRating.toFixed(1)}`);
+
+    if (lowStats.length > 0) {
+      const sortedLow = [...lowStats].sort((a, b) => a.avgCorrelatedRating - b.avgCorrelatedRating);
+      const bottom5 = sortedLow.slice(0, 5);
+      console.log("  Lowest:");
+      for (let i = 0; i < bottom5.length; i++) {
+        const s = bottom5[i];
+        console.log(`    ${i + 1}. ${s.ruleId} (avg: ${s.avgCorrelatedRating.toFixed(1)}, injections: ${s.injectionCount})`);
+      }
+    } else {
+      console.log("  Lowest:");
+      console.log("    Insufficient data (need 10+ injections per rule)");
     }
   } else {
-    console.log("  Not enough data (rules need 5+ injections)");
+    console.log("  Insufficient data (need 5+ rated sessions per rule)");
   }
 
   // Timestamps

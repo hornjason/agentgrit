@@ -68,14 +68,13 @@ export async function inboxCommand(args: string[]): Promise<void> {
 
   if (items.length === 0) {
     console.log("  No pending rule candidates.\n");
-    return;
-  }
+  } else {
+    console.log(`  ${items.length} pending candidate(s):\n`);
 
-  console.log(`  ${items.length} pending candidate(s):\n`);
-
-  for (let i = 0; i < items.length; i++) {
-    console.log(formatItem(items[i], i));
-    console.log("");
+    for (let i = 0; i < items.length; i++) {
+      console.log(formatItem(items[i], i));
+      console.log("");
+    }
   }
 
   // Eviction candidates
@@ -91,6 +90,7 @@ export async function inboxCommand(args: string[]): Promise<void> {
           console.log(`  Rule:        ${e.ruleId}`);
           console.log(`  Correlation: ${e.avgCorrelatedRating.toFixed(1)}`);
           console.log(`  Injections:  ${e.injectionCount}`);
+          console.log(`  Last seen:   ${e.lastSeen || "unknown"}`);
           console.log("");
         }
       }

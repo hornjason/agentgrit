@@ -256,6 +256,79 @@ describe("daemon cleanup step", () => {
   });
 });
 
+describe("daemon eviction review step", () => {
+  test("cycle result includes evictionCandidatesCount", async () => {
+    const { runDaemonCycle } = await import("../../src/daemon/daemon");
+    const config = makeConfig({ signalDir: SIGNAL_DIR });
+
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
+    mkdirSync(SIGNAL_DIR, { recursive: true });
+    mkdirSync(STATE_DIR, { recursive: true });
+
+    const result = await runDaemonCycle(config);
+    expect(typeof result.evictionCandidatesCount).toBe("number");
+  });
+
+  test("writes eviction-candidates.json to state dir", async () => {
+    const { runDaemonCycle } = await import("../../src/daemon/daemon");
+    const { persistRuleStats } = await import("../../src/promote/rules");
+    const config = makeConfig({ signalDir: SIGNAL_DIR });
+
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
+    mkdirSync(SIGNAL_DIR, { recursive: true });
+    mkdirSync(STATE_DIR, { recursive: true });
+
+    process.env.AGENTGRIT_DIR = TEST_DIR;
+    try {
+      persistRuleStats([
+        { ruleId: "low-corr", injectionCount: 15, avgCorrelatedRating: 2.5, sessionRatings: [2, 3], highRatingActivations: 0, lowRatingActivations: 10, lastSeen: "2026-01-01" },
+        { ruleId: "high-corr", injectionCount: 20, avgCorrelatedRating: 8.0, sessionRatings: [8, 8], highRatingActivations: 15, lowRatingActivations: 0, lastSeen: "2026-01-01" },
+      ]);
+
+      const result = await runDaemonCycle(config);
+
+      const evPath = join(STATE_DIR, "eviction-candidates.json");
+      expect(existsSync(evPath)).toBe(true);
+
+      const candidates = JSON.parse(readFileSync(evPath, "utf-8"));
+      expect(candidates.some((c: { ruleId: string }) => c.ruleId === "low-corr")).toBe(true);
+      expect(candidates.some((c: { ruleId: string }) => c.ruleId === "high-corr")).toBe(false);
+    } finally {
+      delete process.env.AGENTGRIT_DIR;
+    }
+  });
+
+  test("anti-criterion: rules with <5 injections excluded from eviction", async () => {
+    const { runDaemonCycle } = await import("../../src/daemon/daemon");
+    const { persistRuleStats } = await import("../../src/promote/rules");
+    const config = makeConfig({ signalDir: SIGNAL_DIR });
+
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
+    mkdirSync(SIGNAL_DIR, { recursive: true });
+    mkdirSync(STATE_DIR, { recursive: true });
+
+    process.env.AGENTGRIT_DIR = TEST_DIR;
+    try {
+      persistRuleStats([
+        { ruleId: "too-few", injectionCount: 3, avgCorrelatedRating: 1.0, sessionRatings: [1], highRatingActivations: 0, lowRatingActivations: 3, lastSeen: "2026-01-01" },
+        { ruleId: "borderline", injectionCount: 5, avgCorrelatedRating: 2.0, sessionRatings: [2, 2], highRatingActivations: 0, lowRatingActivations: 5, lastSeen: "2026-01-01" },
+      ]);
+
+      await runDaemonCycle(config);
+
+      const evPath = join(STATE_DIR, "eviction-candidates.json");
+      expect(existsSync(evPath)).toBe(true);
+
+      const candidates = JSON.parse(readFileSync(evPath, "utf-8"));
+      expect(candidates.some((c: { ruleId: string }) => c.ruleId === "too-few")).toBe(false);
+      // borderline has 5 injections but needs >10 for eviction
+      expect(candidates.some((c: { ruleId: string }) => c.ruleId === "borderline")).toBe(false);
+    } finally {
+      delete process.env.AGENTGRIT_DIR;
+    }
+  });
+});
+
 describe("doctor dedup", () => {
   test("doctorCommand uses src/daemon/doctor runDoctor", async () => {
     const srcDoctor = await import("../../src/daemon/doctor");
