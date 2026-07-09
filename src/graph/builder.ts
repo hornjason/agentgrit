@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync } from "fs";
 import { join, dirname } from "path";
+import { homedir } from "os";
 import { createHash } from "crypto";
 import { getBaseDir, stateDir } from "../adapters/paths";
 import type { GraphNode, GraphEdge, Rule } from "../adapters/types";
@@ -14,6 +15,51 @@ export const DOMAINS = [
 ] as const;
 
 type Domain = (typeof DOMAINS)[number];
+
+// ── Rule-Domains Override ──
+
+interface RuleDomainEntry {
+  domains: string[];
+  source: string;
+}
+
+interface RuleDomainsFile {
+  version: number;
+  reviewed: boolean;
+  rules: Record<string, RuleDomainEntry>;
+}
+
+export function defaultRuleDomainsPath(): string {
+  return join(homedir(), ".claude", "MEMORY", "LEARNING", "STATE", "rule-domains.json");
+}
+
+export function loadRuleDomains(path: string): RuleDomainsFile | null {
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, "utf-8")) as RuleDomainsFile;
+  } catch {
+    return null;
+  }
+}
+
+function applyDomainOverrides(
+  nodes: Record<string, GraphNode>,
+  ruleDomains: RuleDomainsFile,
+): number {
+  let count = 0;
+  for (const [id, node] of Object.entries(nodes)) {
+    const entry = ruleDomains.rules[id];
+    if (!entry) continue;
+    const valid = entry.domains.filter((d): d is Domain =>
+      (DOMAINS as readonly string[]).includes(d),
+    );
+    if (valid.length > 0) {
+      node.domains = valid;
+      count++;
+    }
+  }
+  return count;
+}
 
 // ── Graph I/O ──
 
@@ -244,7 +290,7 @@ function buildSameDomainEdges(
 
 // ── Build Graph ──
 
-export async function buildGraph(rulesDir: string, stateOutputDir?: string): Promise<Graph> {
+export async function buildGraph(rulesDir: string, stateOutputDir?: string, ruleDomainsPath?: string): Promise<Graph> {
   const files = discoverRuleFiles(rulesDir);
   const existingGraph = readGraph();
 
@@ -286,6 +332,17 @@ export async function buildGraph(rulesDir: string, stateOutputDir?: string): Pro
       content_hash: hash,
       memoryType: file.frontmatter["memoryType"] || "behavioral-rule",
     };
+  }
+
+  // Apply reviewed domain overrides from rule-domains.json
+  const rdPath = ruleDomainsPath ?? defaultRuleDomainsPath();
+  const ruleDomains = loadRuleDomains(rdPath);
+  let overrideCount = 0;
+  if (ruleDomains) {
+    overrideCount = applyDomainOverrides(nodes, ruleDomains);
+    if (overrideCount > 0) {
+      console.log(`  rule-domains.json: ${overrideCount} node(s) overridden with reviewed domains`);
+    }
   }
 
   const allEdges: GraphEdge[] = [];
@@ -349,6 +406,7 @@ export async function buildGraphWithAI(
   rulesDir: string,
   detector: DomainDetector,
   stateOutputDir?: string,
+  ruleDomainsPath?: string,
 ): Promise<Graph> {
   const files = discoverRuleFiles(rulesDir);
   const existingGraph = readGraph();
@@ -391,6 +449,16 @@ export async function buildGraphWithAI(
       content_hash: hash,
       memoryType: file.frontmatter["memoryType"] || "behavioral-rule",
     };
+  }
+
+  // Apply reviewed domain overrides from rule-domains.json
+  const rdPath = ruleDomainsPath ?? defaultRuleDomainsPath();
+  const ruleDomains = loadRuleDomains(rdPath);
+  if (ruleDomains) {
+    const overrideCount = applyDomainOverrides(nodes, ruleDomains);
+    if (overrideCount > 0) {
+      console.log(`  rule-domains.json: ${overrideCount} node(s) overridden with reviewed domains`);
+    }
   }
 
   const allEdges: GraphEdge[] = [];

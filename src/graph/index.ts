@@ -11,7 +11,7 @@ export type {
   Embedding,
 } from "./types";
 
-export { buildGraph, updateGraph, readGraph, writeGraphFile, pruneStaleNodes, keywordClassify, parseFrontmatter, inferSeverity } from "./builder";
+export { buildGraph, updateGraph, readGraph, writeGraphFile, pruneStaleNodes, keywordClassify, parseFrontmatter, inferSeverity, loadRuleDomains, defaultRuleDomainsPath } from "./builder";
 export { queryGraph } from "./query";
 export { buildIndex, buildIndexFromDir, searchIndex, tokenize } from "./bm25";
 export { hybridRetrieve } from "./retrieval";
