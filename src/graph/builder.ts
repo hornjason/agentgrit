@@ -214,7 +214,7 @@ export function createAIDetector(
         }
       } catch { /* fall through */ }
 
-      return ["verification"];
+      return [];
     },
   };
 }
@@ -313,6 +313,80 @@ function buildSameDomainEdges(
   return edges;
 }
 
+// ── Co-Occurrence Edges ──
+
+interface SessionEntry {
+  ruleIds: string[];
+}
+
+interface RatingEntry {
+  session_id: string;
+  rating: number;
+}
+
+function readJsonLines<T>(path: string): T[] {
+  if (!existsSync(path)) return [];
+  const lines = readFileSync(path, "utf-8").trim().split("\n");
+  const items: T[] = [];
+  for (const line of lines) {
+    if (!line) continue;
+    try { items.push(JSON.parse(line) as T); } catch { /* skip malformed */ }
+  }
+  return items;
+}
+
+export function buildCoOccurrenceEdges(
+  nodes: Record<string, GraphNode>,
+  existingPairs: Set<string>,
+  historyPath?: string,
+  ratingsPath?: string,
+): GraphEdge[] {
+  const hPath = historyPath ?? join(homedir(), ".agentgrit", "state", "session-context-history.jsonl");
+  const sessions = readJsonLines<SessionEntry>(hPath);
+  if (sessions.length === 0) return [];
+
+  const rPath = ratingsPath ?? join(homedir(), ".agentgrit", "signals", "ratings.jsonl");
+  const ratings = readJsonLines<RatingEntry>(rPath);
+  const ratingBySession = new Map<string, number>();
+  for (const r of ratings) {
+    if (r.session_id && typeof r.rating === "number") {
+      ratingBySession.set(r.session_id, r.rating);
+    }
+  }
+
+  const nodeIds = new Set(Object.keys(nodes));
+  const pairCounts = new Map<string, number>();
+  const totalSessions = sessions.length;
+
+  for (const session of sessions) {
+    const ids = (session.ruleIds || []).filter(id => nodeIds.has(id));
+    if (ids.length < 2) continue;
+
+    const weight = 1;
+    const sorted = [...ids].sort();
+    for (let i = 0; i < sorted.length; i++) {
+      for (let j = i + 1; j < sorted.length; j++) {
+        const key = `${sorted[i]}::${sorted[j]}`;
+        pairCounts.set(key, (pairCounts.get(key) || 0) + weight);
+      }
+    }
+  }
+
+  const ranked = [...pairCounts.entries()]
+    .map(([key, count]) => ({ key, strength: count / totalSessions }))
+    .sort((a, b) => b.strength - a.strength)
+    .slice(0, 200);
+
+  const edges: GraphEdge[] = [];
+  for (const { key, strength } of ranked) {
+    if (existingPairs.has(key)) continue;
+    const [from, to] = key.split("::");
+    edges.push({ from, to, relationship: "co_occurred", strength });
+  }
+
+  return edges;
+}
+
 // ── Build Graph ──
 
 export async function buildGraph(rulesDir: string, stateOutputDir?: string, ruleDomainsPath?: string): Promise<Graph> {
@@ -340,7 +414,7 @@ export async function buildGraph(rulesDir: string, stateOutputDir?: string, rule
       domains = cached.domains;
     } else {
       const classified = keywordClassify(name, desc, bodyText);
-      domains = classified || ["verification"];
+      domains = classified || [];
     }
 
     const existing = existingGraph.nodes[file.id];
@@ -397,6 +471,17 @@ export async function buildGraph(rulesDir: string, stateOutputDir?: string, rule
   const existingPairs = new Set(allEdges.map(e => [e.from, e.to].sort().join("::")));
   const domainEdges = buildSameDomainEdges(nodes, existingPairs);
   for (const edge of domainEdges) {
+    const key = [edge.from, edge.to].sort().join("::") + "::" + edge.relationship;
+    if (!edgeSeen.has(key)) {
+      edgeSeen.add(key);
+      allEdges.push(edge);
+    }
+  }
+
+  // Co-occurrence edges
+  const pairsAfterDomain = new Set(allEdges.map(e => [e.from, e.to].sort().join("::")));
+  const coEdges = buildCoOccurrenceEdges(nodes, pairsAfterDomain);
+  for (const edge of coEdges) {
     const key = [edge.from, edge.to].sort().join("::") + "::" + edge.relationship;
     if (!edgeSeen.has(key)) {
       edgeSeen.add(key);
@@ -513,6 +598,17 @@ export async function buildGraphWithAI(
   const existingPairs = new Set(allEdges.map((e) => [e.from, e.to].sort().join("::")));
   const domainEdges = buildSameDomainEdges(nodes, existingPairs);
   for (const edge of domainEdges) {
+    const key = [edge.from, edge.to].sort().join("::") + "::" + edge.relationship;
+    if (!edgeSeen.has(key)) {
+      edgeSeen.add(key);
+      allEdges.push(edge);
+    }
+  }
+
+  // Co-occurrence edges
+  const pairsAfterDomainAI = new Set(allEdges.map(e => [e.from, e.to].sort().join("::")));
+  const coEdgesAI = buildCoOccurrenceEdges(nodes, pairsAfterDomainAI);
+  for (const edge of coEdgesAI) {
     const key = [edge.from, edge.to].sort().join("::") + "::" + edge.relationship;
     if (!edgeSeen.has(key)) {
       edgeSeen.add(key);

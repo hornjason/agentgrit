@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { existsSync, rmSync, mkdirSync, writeFileSync, readFileSync } from "fs";
 import { join } from "path";
-import { buildGraph, updateGraph, pruneStaleNodes, parseFrontmatter, inferSeverity, keywordClassify, loadRuleDomains } from "../../src/graph/builder";
+import { buildGraph, updateGraph, pruneStaleNodes, parseFrontmatter, inferSeverity, keywordClassify, loadRuleDomains, buildCoOccurrenceEdges } from "../../src/graph/builder";
 import type { Graph } from "../../src/graph/types";
 import type { Rule, GraphNode } from "../../src/adapters/types";
 
@@ -445,6 +445,88 @@ Another generic rule about something else.`);
            e.relationship === "same_domain",
     );
     expect(hasEdge).toBe(true);
+  });
+});
+
+describe("buildCoOccurrenceEdges", () => {
+  test("creates edges from session co-occurrence data", () => {
+    const historyPath = join(TMP_DIR, "history.jsonl");
+    writeFileSync(historyPath, [
+      JSON.stringify({ ruleIds: ["rule_a", "rule_b", "rule_c"] }),
+      JSON.stringify({ ruleIds: ["rule_a", "rule_b"] }),
+    ].join("\n"), "utf-8");
+
+    const nodes: Record<string, GraphNode> = {
+      rule_a: makeNode("rule_a", ["verification"]),
+      rule_b: makeNode("rule_b", ["verification"]),
+      rule_c: makeNode("rule_c", ["scope"]),
+    };
+
+    const edges = buildCoOccurrenceEdges(nodes, new Set(), historyPath);
+
+    expect(edges.length).toBe(3);
+    expect(edges.every(e => e.relationship === "co_occurred")).toBe(true);
+
+    const abEdge = edges.find(e =>
+      (e.from === "rule_a" && e.to === "rule_b") || (e.from === "rule_b" && e.to === "rule_a"),
+    );
+    expect(abEdge).toBeDefined();
+    expect(abEdge!.strength).toBe(1.0); // 2/2 sessions
+  });
+
+  test("skips pairs already in existingPairs", () => {
+    const historyPath = join(TMP_DIR, "history.jsonl");
+    writeFileSync(historyPath, JSON.stringify({ ruleIds: ["rule_a", "rule_b"] }), "utf-8");
+
+    const nodes: Record<string, GraphNode> = {
+      rule_a: makeNode("rule_a", ["verification"]),
+      rule_b: makeNode("rule_b", ["verification"]),
+    };
+
+    const existing = new Set(["rule_a::rule_b"]);
+    const edges = buildCoOccurrenceEdges(nodes, existing, historyPath);
+
+    expect(edges.length).toBe(0);
+  });
+
+  test("filters out ruleIds not in graph nodes", () => {
+    const historyPath = join(TMP_DIR, "history.jsonl");
+    writeFileSync(historyPath, JSON.stringify({ ruleIds: ["rule_a", "rule_b", "missing_rule"] }), "utf-8");
+
+    const nodes: Record<string, GraphNode> = {
+      rule_a: makeNode("rule_a", ["verification"]),
+      rule_b: makeNode("rule_b", ["verification"]),
+    };
+
+    const edges = buildCoOccurrenceEdges(nodes, new Set(), historyPath);
+
+    expect(edges.length).toBe(1);
+    expect(edges[0].from).toBe("rule_a");
+    expect(edges[0].to).toBe("rule_b");
+  });
+
+  test("returns empty for missing history file", () => {
+    const nodes: Record<string, GraphNode> = {
+      rule_a: makeNode("rule_a", ["verification"]),
+    };
+    const edges = buildCoOccurrenceEdges(nodes, new Set(), join(TMP_DIR, "nonexistent.jsonl"));
+    expect(edges.length).toBe(0);
+  });
+
+  test("caps at 200 edges", () => {
+    const historyPath = join(TMP_DIR, "history.jsonl");
+    const ruleIds: string[] = [];
+    const nodes: Record<string, GraphNode> = {};
+    for (let i = 0; i < 30; i++) {
+      const id = `rule_${i}`;
+      ruleIds.push(id);
+      nodes[id] = makeNode(id, ["verification"]);
+    }
+    // 30 rules in one session = 435 pairs, should cap at 200
+    writeFileSync(historyPath, JSON.stringify({ ruleIds }), "utf-8");
+
+    const edges = buildCoOccurrenceEdges(nodes, new Set(), historyPath);
+    expect(edges.length).toBeLessThanOrEqual(200);
   });
 });
 
