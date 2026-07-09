@@ -42,6 +42,8 @@ export function detectDomains(text: string): string[] {
 
 // ── Get Context Rules ──
 
+const RRF_K = 60;
+
 export function getContextRules(
   graph: Graph,
   index: BM25Index,
@@ -52,49 +54,51 @@ export function getContextRules(
 ): Rule[] {
   const domains = currentDomains.length > 0 ? currentDomains : DEFAULT_DOMAINS;
 
-  // Graph query for domain-matched clusters
-  const clusters: RankedCluster[] = queryGraph(graph, domains, limit);
-
-  // BM25 keyword search — use session text when available, fall back to domains
+  // Fetch both ranked lists (over-fetch for RRF headroom)
+  const fetchLimit = Math.max(limit * 3, 30);
+  const clusters: RankedCluster[] = queryGraph(graph, domains, fetchLimit);
   const searchText = queryText || domains.join(" ");
-  const bm25Results = searchIndex(index, searchText, limit);
+  const bm25Results = searchIndex(index, searchText, fetchLimit);
 
-  // Merge: graph-first, BM25 fills gaps
+  // RRF merge: score each unique ID by 1/(k + rank) from each source
+  const rrfScores = new Map<string, number>();
+  const graphRank = new Map<string, number>();
+  const bm25Rank = new Map<string, number>();
+
+  for (let i = 0; i < clusters.length; i++) {
+    const id = clusters[i].primary.id;
+    graphRank.set(id, i);
+    rrfScores.set(id, (rrfScores.get(id) || 0) + 1 / (RRF_K + i));
+  }
+
+  for (let i = 0; i < bm25Results.length; i++) {
+    const id = bm25Results[i].id;
+    bm25Rank.set(id, i);
+    rrfScores.set(id, (rrfScores.get(id) || 0) + 1 / (RRF_K + i));
+  }
+
+  // Sort by combined RRF score descending
+  const ranked = Array.from(rrfScores.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit);
+
+  // Build rule objects — prefer graph node metadata when available
   const resultIds = new Set<string>();
   const rules: Rule[] = [];
 
-  for (const cluster of clusters) {
-    if (rules.length >= limit) break;
-    const node = cluster.primary;
-    if (resultIds.has(node.id)) continue;
-    resultIds.add(node.id);
+  for (const [id, rrfScore] of ranked) {
+    resultIds.add(id);
+    const node = graph.nodes[id];
+    const gIdx = graphRank.get(id);
+    const cluster = gIdx !== undefined ? clusters[gIdx] : undefined;
 
     rules.push({
-      id: node.id,
-      text: node.description || node.name,
-      tier: Tier.Graph,
-      tags: node.domains,
-      created: node.last_updated,
-      correlationScore: cluster.score,
-      sourceSignals: [],
-      schemaVersion: 1,
-    });
-  }
-
-  // Fill remaining slots from BM25 results not already in graph results
-  for (const result of bm25Results) {
-    if (rules.length >= limit) break;
-    if (resultIds.has(result.id)) continue;
-    resultIds.add(result.id);
-
-    const node = graph.nodes[result.id];
-    rules.push({
-      id: result.id,
-      text: node?.description || node?.name || result.id,
+      id,
+      text: node?.description || node?.name || id,
       tier: Tier.Graph,
       tags: node?.domains || [],
       created: node?.last_updated || new Date().toISOString(),
-      correlationScore: result.score,
+      correlationScore: rrfScore,
       sourceSignals: [],
       schemaVersion: 1,
     });
