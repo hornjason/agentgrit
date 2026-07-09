@@ -1,5 +1,6 @@
 import type { AgentGritConfig, Pattern, Score } from "../adapters/types";
 import type { ReviewResult } from "../promote/review";
+import type { EvictionCandidate, EvictionResult, DuplicateCandidate } from "../promote/evict";
 
 export interface CleanupStats {
   staleFilesRemoved: number;
@@ -30,18 +31,14 @@ export interface CycleResult {
   errors: string[];
 }
 
-export interface EvictionCandidate {
-  ruleId: string;
-  avgCorrelatedRating: number;
-  injectionCount: number;
-}
-
 export interface WeeklyReviewResult {
   timestamp: string;
   review: ReviewResult;
   graphRebuilt: boolean;
   budgetStatus: { global: string; project: string };
   evictionCandidates: EvictionCandidate[];
+  evictionResult: EvictionResult | null;
+  duplicateCandidates: DuplicateCandidate[];
   errors: string[];
 }
 
@@ -646,6 +643,8 @@ export async function runWeeklyReview(
     graphRebuilt: false,
     budgetStatus: { global: "OK", project: "OK" },
     evictionCandidates: [],
+    evictionResult: null,
+    duplicateCandidates: [],
     errors: [],
   };
 
@@ -686,34 +685,47 @@ export async function runWeeklyReview(
     result.errors.push(`budget: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // 4. Eviction candidates — low-correlation rules with sufficient data
+  // 4. Eviction pipeline — find candidates, detect duplicates, enforce budget, evict
   try {
-    const { loadRuleStats } = await import("../promote/rules");
-    const { writeFileSync, mkdirSync } = await import("fs");
-    const { stateDir } = await import("../adapters/paths");
+    const { findEvictionCandidates, findDuplicates, evictRules, enforceBudget } = await import("../promote/evict");
     const { join } = await import("path");
+    const { existsSync: exists, readFileSync: readFile } = await import("fs");
 
-    const statsMap = loadRuleStats();
-    const candidates: EvictionCandidate[] = [];
-    for (const stats of statsMap.values()) {
-      if (stats.injectionCount > 10 && stats.avgCorrelatedRating < 4) {
-        candidates.push({
-          ruleId: stats.ruleId,
-          avgCorrelatedRating: stats.avgCorrelatedRating,
-          injectionCount: stats.injectionCount,
-        });
-      }
-    }
-    candidates.sort((a, b) => a.avgCorrelatedRating - b.avgCorrelatedRating);
+    const candidates = findEvictionCandidates();
     result.evictionCandidates = candidates;
 
-    const state = stateDir();
-    if (!existsSync(state)) mkdirSync(state, { recursive: true });
-    writeFileSync(
-      join(state, "eviction-candidates.json"),
-      JSON.stringify(candidates, null, 2),
-      "utf-8",
-    );
+    // Duplicate detection
+    const home = process.env.HOME ?? "";
+    const learnedPath = join(home, ".claude", "CLAUDE-LEARNED.md");
+    if (exists(learnedPath)) {
+      const learnedContent = readFile(learnedPath, "utf-8");
+      const ruleLines = learnedContent.split("\n").filter((l: string) => l.startsWith("- **"));
+      const rules = ruleLines.map((line: string) => {
+        const match = line.match(/^- \*\*([^:]+):\*\*\s*(.*)/);
+        return match ? { id: match[1], text: match[2] } : null;
+      }).filter(Boolean) as Array<{ id: string; text: string }>;
+
+      result.duplicateCandidates = findDuplicates(rules);
+    }
+
+    // Budget enforcement
+    const learnedBudget = config.rules.learnedBudget ?? 80;
+    const learnedCount = exists(learnedPath)
+      ? (readFile(learnedPath, "utf-8").match(/^- \*\*/gm) || []).length
+      : 0;
+    const budgetEvictions = enforceBudget(candidates, learnedCount, learnedBudget);
+
+    // Evict: merge correlation + budget candidates, deduplicate
+    const allToEvict = [...candidates];
+    for (const be of budgetEvictions) {
+      if (!allToEvict.find(c => c.ruleId === be.ruleId)) {
+        allToEvict.push(be);
+      }
+    }
+
+    if (allToEvict.length > 0 && exists(learnedPath)) {
+      result.evictionResult = await evictRules(allToEvict, learnedPath);
+    }
   } catch (err) {
     result.errors.push(`eviction: ${err instanceof Error ? err.message : String(err)}`);
   }

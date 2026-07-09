@@ -45,6 +45,14 @@ async function doRun(base: string): Promise<void> {
     console.log(`  Patterns found:  ${weeklyResult.review.patternsFound}`);
     console.log(`  Candidates:      ${weeklyResult.review.candidatesProposed}`);
     console.log(`  Graph rebuilt:   ${weeklyResult.graphRebuilt}`);
+    console.log(`  Eviction candidates: ${weeklyResult.evictionCandidates.length}`);
+    if (weeklyResult.evictionResult) {
+      console.log(`  Evicted:         ${weeklyResult.evictionResult.evicted.length}`);
+      console.log(`  Skipped (reviewed): ${weeklyResult.evictionResult.skipped.length}`);
+    }
+    if (weeklyResult.duplicateCandidates.length > 0) {
+      console.log(`  Duplicate pairs: ${weeklyResult.duplicateCandidates.length}`);
+    }
     if (weeklyResult.errors.length > 0) {
       console.log(`  Errors:`);
       for (const err of weeklyResult.errors) {
