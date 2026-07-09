@@ -48,15 +48,16 @@ export function getContextRules(
   currentDomains: string[],
   limit: number = 10,
   signalDir?: string,
+  queryText?: string,
 ): Rule[] {
   const domains = currentDomains.length > 0 ? currentDomains : DEFAULT_DOMAINS;
 
   // Graph query for domain-matched clusters
   const clusters: RankedCluster[] = queryGraph(graph, domains, limit);
 
-  // Optionally boost with BM25 keyword search
-  const queryText = domains.join(" ");
-  const bm25Results = searchIndex(index, queryText, limit);
+  // BM25 keyword search — use session text when available, fall back to domains
+  const searchText = queryText || domains.join(" ");
+  const bm25Results = searchIndex(index, searchText, limit);
 
   // Merge: graph-first, BM25 fills gaps
   const resultIds = new Set<string>();
@@ -356,7 +357,7 @@ export function getContextRulesWithReranking(
   query: string,
   limit: number = 10,
 ): Promise<Rule[]> {
-  const rules = getContextRules(graph, index, currentDomains, limit * 2);
+  const rules = getContextRules(graph, index, currentDomains, limit * 2, undefined, query);
 
   if (!reranker || rules.length === 0) {
     return Promise.resolve(rules.slice(0, limit));
