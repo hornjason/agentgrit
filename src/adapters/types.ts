@@ -112,6 +112,7 @@ export type EdgeType =
   | "conflicts_with"
   | "supersedes"
   | "same_domain"
+  | "co_occurred"
   | "co_occurred_in_failure"
   | "contradicts"
   | "caused_by";

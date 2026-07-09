@@ -40,7 +40,7 @@ function scoreNode(
 
 // ── Cluster Builder ──
 
-const CLUSTER_RELS = new Set(["reinforces", "sibling", "caused_by_same_root", "same_domain"]);
+const CLUSTER_RELS = new Set(["reinforces", "sibling", "caused_by_same_root", "same_domain", "co_occurred"]);
 
 function buildCluster(
   primary: GraphNode,
