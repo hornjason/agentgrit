@@ -59,7 +59,11 @@ describe("writeSessionContext", () => {
       makeNode("rule-a", ["deployment"]),
       makeNode("rule-b", ["verification"]),
     ]);
-    const index = buildIndex([]);
+    const f1 = join(TMP_DIR, "rule-a.md");
+    const f2 = join(TMP_DIR, "rule-b.md");
+    writeFileSync(f1, "deployment containers rebuild deployment", "utf-8");
+    writeFileSync(f2, "verification verify before verification", "utf-8");
+    const index = buildIndex([f1, f2]);
     const rules = getContextRules(graph, index, ["deployment", "verification"]);
 
     writeSessionContext(rules, ["deployment", "verification"]);

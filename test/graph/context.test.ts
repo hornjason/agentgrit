@@ -96,7 +96,9 @@ describe("getContextRules", () => {
       makeNode("scope_guard", ["scope"], "Keep changes minimal"),
     ]);
 
-    const index = buildIndex([]);
+    const f1 = join(TMP_DIR, "deploy_gate.md");
+    writeFileSync(f1, "deployment make rebuild deployment containers", "utf-8");
+    const index = buildIndex([f1]);
 
     const rules = getContextRules(graph, index, ["deployment"]);
     expect(rules.length).toBeGreaterThan(0);
@@ -106,11 +108,16 @@ describe("getContextRules", () => {
   });
 
   test("respects limit", () => {
-    const nodes = Array.from({ length: 20 }, (_, i) =>
-      makeNode(`rule-${i}`, ["deployment"]),
-    );
+    const files: string[] = [];
+    const nodes = Array.from({ length: 20 }, (_, i) => {
+      const id = `rule-${i}`;
+      const f = join(TMP_DIR, `${id}.md`);
+      writeFileSync(f, `deployment containers rule number ${i}`, "utf-8");
+      files.push(f);
+      return makeNode(id, ["deployment"]);
+    });
     const graph = makeGraph(nodes);
-    const index = buildIndex([]);
+    const index = buildIndex(files);
 
     const rules = getContextRules(graph, index, ["deployment"], 5);
     expect(rules.length).toBeLessThanOrEqual(5);
@@ -122,35 +129,47 @@ describe("getContextRules", () => {
       makeNode("deliver_rule", ["delivery"], "Complete delivery"),
       makeNode("deploy_rule", ["deployment"], "Deploy correctly"),
     ]);
-    const index = buildIndex([]);
+    const f1 = join(TMP_DIR, "verify_rule.md");
+    const f2 = join(TMP_DIR, "deliver_rule.md");
+    const f3 = join(TMP_DIR, "deploy_rule.md");
+    writeFileSync(f1, "verification verify always verify", "utf-8");
+    writeFileSync(f2, "delivery complete delivery", "utf-8");
+    writeFileSync(f3, "deployment deploy correctly", "utf-8");
+    const index = buildIndex([f1, f2, f3]);
 
     const rules = getContextRules(graph, index, []);
     expect(rules.length).toBeGreaterThan(0);
   });
 
-  test("fills gaps with BM25 results", () => {
+  test("BM25 hits expand to graph neighbors", () => {
     const graph = makeGraph([
-      makeNode("graph_rule", ["deployment"], "Deploy with make rebuild"),
+      makeNode("bm25_hit", ["deployment"], "Deploy with make rebuild"),
+      makeNode("neighbor_rule", ["deployment"], "Run smoke tests after deploy"),
     ]);
+    graph.edges = [{
+      from: "bm25_hit",
+      to: "neighbor_rule",
+      relationship: "reinforces",
+      strength: 0.8,
+    }];
 
-    const f1 = join(TMP_DIR, "bm25_rule.md");
+    const f1 = join(TMP_DIR, "bm25_hit.md");
     writeFileSync(f1, "deployment deployment deployment containers", "utf-8");
     const index = buildIndex([f1]);
 
     const rules = getContextRules(graph, index, ["deployment"], 10);
-
     const ids = rules.map(r => r.id);
-    expect(ids).toContain("graph_rule");
-    expect(ids).toContain("bm25_rule");
+    expect(ids).toContain("bm25_hit");
+    expect(ids).toContain("neighbor_rule");
   });
 
-  test("deduplicates between graph and BM25", () => {
+  test("deduplicates between direct BM25 and expansion", () => {
     const graph = makeGraph([
-      makeNode("shared_rule", ["deployment"], "Deploy with make rebuild"),
+      makeNode("shared_rule", ["deployment"], "deployment make rebuild"),
     ]);
 
     const f1 = join(TMP_DIR, "shared_rule.md");
-    writeFileSync(f1, "Deploy with make rebuild", "utf-8");
+    writeFileSync(f1, "deployment make rebuild deployment", "utf-8");
     const index = buildIndex([f1]);
 
     const rules = getContextRules(graph, index, ["deployment"], 10);
@@ -169,7 +188,9 @@ describe("getContextRules", () => {
     const graph = makeGraph([
       makeNode("test_rule", ["verification"], "Always verify before asserting anything"),
     ]);
-    const index = buildIndex([]);
+    const f1 = join(TMP_DIR, "test_rule.md");
+    writeFileSync(f1, "verification verify before asserting anything", "utf-8");
+    const index = buildIndex([f1]);
 
     const rules = getContextRules(graph, index, ["verification"]);
     expect(rules[0].text).toBe("Always verify before asserting anything");
