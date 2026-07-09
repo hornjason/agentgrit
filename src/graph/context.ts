@@ -136,13 +136,14 @@ const SESSION_CONTEXT_TTL_MS = 24 * 60 * 60 * 1000;
 export interface SessionContext {
   ruleIds: string[];
   domains: string[];
+  domain_source: "metadata" | "keyword" | "bm25";
   timestamp: string;
   ttl: number;
   rulesInjectedCount: number;
   rulesInjectedKB: number;
 }
 
-export function writeSessionContext(rules: Rule[], domains: string[]): void {
+export function writeSessionContext(rules: Rule[], domains: string[], domainSource: "metadata" | "keyword" | "bm25" = "keyword"): void {
   const filePath = statePath(SESSION_CONTEXT_FILE);
   const dir = dirname(filePath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -153,6 +154,7 @@ export function writeSessionContext(rules: Rule[], domains: string[]): void {
   const context: SessionContext = {
     ruleIds: rules.map((r) => r.id),
     domains,
+    domain_source: domainSource,
     timestamp: new Date().toISOString(),
     ttl: SESSION_CONTEXT_TTL_MS,
     rulesInjectedCount,
