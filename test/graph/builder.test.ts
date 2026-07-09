@@ -376,6 +376,47 @@ Always verify before answering.`);
     expect(result!.rules.test_rule.domains).toEqual(["scope"]);
   });
 
+  test("matches kebab-case rule-domains keys to underscore graph IDs with prefix", async () => {
+    writeRule("feedback_ac_garbage_test", `---
+name: ac-garbage-test
+description: Every AC needs measurable threshold
+---
+Every acceptance criterion needs a measurable threshold, not vague language.`);
+
+    writeRule("feedback_commit_after_every_working_change", `---
+name: commit-after-every-working-change
+description: Commit after every working change
+---
+Always commit after every working change to preserve progress.`);
+
+    const rdPath = writeRuleDomains({
+      "ac-garbage-test": { domains: ["delivery", "scope"], source: "reviewed" },
+      "commit-after-every-working-change": { domains: ["delivery"], source: "reviewed" },
+    });
+
+    const graph = await buildGraph(RULES_DIR, STATE_DIR, rdPath);
+
+    expect(graph.nodes["feedback_ac_garbage_test"].domains).toEqual(["delivery", "scope"]);
+    expect(graph.nodes["feedback_commit_after_every_working_change"].domains).toEqual(["delivery"]);
+  });
+
+  test("prefers exact match over normalized match", async () => {
+    writeRule("feedback_verify_before_answering", `---
+name: verify-before-answering
+description: Verify before answering
+---
+Always verify before answering.`);
+
+    const rdPath = writeRuleDomains({
+      "feedback_verify_before_answering": { domains: ["verification", "data"], source: "reviewed" },
+      "verify-before-answering": { domains: ["scope"], source: "reviewed" },
+    });
+
+    const graph = await buildGraph(RULES_DIR, STATE_DIR, rdPath);
+
+    expect(graph.nodes["feedback_verify_before_answering"].domains).toEqual(["verification", "data"]);
+  });
+
   test("same-domain edges reflect overridden domains", async () => {
     writeRule("rule_a", `---
 name: rule-a

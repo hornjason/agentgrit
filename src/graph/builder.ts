@@ -42,13 +42,38 @@ export function loadRuleDomains(path: string): RuleDomainsFile | null {
   }
 }
 
+const KNOWN_PREFIXES = ["feedback_", "success_", "project_", "reference_"];
+
+function normalizeId(id: string): string {
+  let s = id;
+  for (const pfx of KNOWN_PREFIXES) {
+    if (s.startsWith(pfx)) { s = s.slice(pfx.length); break; }
+  }
+  return s.replace(/-/g, "_");
+}
+
+function buildOverrideLookup(
+  rules: Record<string, RuleDomainEntry>,
+): Map<string, RuleDomainEntry> {
+  const map = new Map<string, RuleDomainEntry>();
+  for (const [key, entry] of Object.entries(rules)) {
+    map.set(key, entry);
+    map.set(normalizeId(key), entry);
+  }
+  return map;
+}
+
 function applyDomainOverrides(
   nodes: Record<string, GraphNode>,
   ruleDomains: RuleDomainsFile,
 ): number {
+  const lookup = buildOverrideLookup(ruleDomains.rules);
   let count = 0;
   for (const [id, node] of Object.entries(nodes)) {
-    const entry = ruleDomains.rules[id];
+    const entry = lookup.get(id)
+      ?? lookup.get(normalizeId(id))
+      ?? lookup.get(node.name)
+      ?? lookup.get(normalizeId(node.name));
     if (!entry) continue;
     const valid = entry.domains.filter((d): d is Domain =>
       (DOMAINS as readonly string[]).includes(d),
