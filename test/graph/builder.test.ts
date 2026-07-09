@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { existsSync, rmSync, mkdirSync, writeFileSync, readFileSync } from "fs";
 import { join } from "path";
-import { buildGraph, updateGraph, pruneStaleNodes, parseFrontmatter, inferSeverity, keywordClassify } from "../../src/graph/builder";
+import { buildGraph, updateGraph, pruneStaleNodes, parseFrontmatter, inferSeverity, keywordClassify, loadRuleDomains } from "../../src/graph/builder";
 import type { Graph } from "../../src/graph/types";
 import type { Rule, GraphNode } from "../../src/adapters/types";
 
@@ -278,6 +278,132 @@ describe("updateGraph", () => {
 
     expect(updated.nodeCount).toBe(1);
     expect(updated.nodes["existing"].domains).toContain("deployment");
+  });
+});
+
+describe("rule-domains.json override", () => {
+  function writeRuleDomains(rules: Record<string, { domains: string[]; source: string }>): string {
+    const path = join(TMP_DIR, "rule-domains.json");
+    writeFileSync(path, JSON.stringify({ version: 1, reviewed: true, rules }, null, 2), "utf-8");
+    return path;
+  }
+
+  test("overrides keyword-classified domains with reviewed domains", async () => {
+    writeRule("feedback_verify", `---
+name: verify-before-assert
+description: Check before claiming
+---
+Always read source first and verify before answering any question.`);
+
+    const rdPath = writeRuleDomains({
+      feedback_verify: { domains: ["verification", "data"], source: "reviewed" },
+    });
+
+    const graph = await buildGraph(RULES_DIR, STATE_DIR, rdPath);
+
+    expect(graph.nodes["feedback_verify"].domains).toEqual(["verification", "data"]);
+  });
+
+  test("leaves unmatched nodes with keyword-classified domains", async () => {
+    writeRule("feedback_scope", `---
+name: minimal-scope
+description: Stay focused
+---
+Keep minimal scope, don't add unrequested features, stay focused.`);
+
+    const rdPath = writeRuleDomains({
+      unrelated_rule: { domains: ["security"], source: "reviewed" },
+    });
+
+    const graph = await buildGraph(RULES_DIR, STATE_DIR, rdPath);
+
+    expect(graph.nodes["feedback_scope"].domains).toContain("scope");
+  });
+
+  test("falls back gracefully when rule-domains.json missing", async () => {
+    writeRule("feedback_deploy", `---
+name: deploy-gate
+description: deploy sequence
+---
+Run make rebuild before deploying.`);
+
+    const graph = await buildGraph(RULES_DIR, STATE_DIR, join(TMP_DIR, "nonexistent.json"));
+
+    expect(graph.nodes["feedback_deploy"].domains).toContain("deployment");
+  });
+
+  test("falls back gracefully when rule-domains.json is invalid JSON", async () => {
+    const rdPath = join(TMP_DIR, "rule-domains.json");
+    writeFileSync(rdPath, "not valid json{{{", "utf-8");
+
+    writeRule("feedback_deploy", `---
+name: deploy-gate
+description: deploy sequence
+---
+Run make rebuild before deploying.`);
+
+    const graph = await buildGraph(RULES_DIR, STATE_DIR, rdPath);
+
+    expect(graph.nodes["feedback_deploy"].domains).toContain("deployment");
+  });
+
+  test("filters out invalid domain names from rule-domains.json", async () => {
+    writeRule("feedback_verify", `---
+name: verify-rule
+description: Check things
+---
+Always verify before answering.`);
+
+    const rdPath = writeRuleDomains({
+      feedback_verify: { domains: ["verification", "nonexistent_domain"], source: "reviewed" },
+    });
+
+    const graph = await buildGraph(RULES_DIR, STATE_DIR, rdPath);
+
+    expect(graph.nodes["feedback_verify"].domains).toEqual(["verification"]);
+  });
+
+  test("loadRuleDomains returns null for missing file", () => {
+    expect(loadRuleDomains(join(TMP_DIR, "missing.json"))).toBeNull();
+  });
+
+  test("loadRuleDomains parses valid file", () => {
+    const rdPath = writeRuleDomains({
+      test_rule: { domains: ["scope"], source: "reviewed" },
+    });
+    const result = loadRuleDomains(rdPath);
+    expect(result).not.toBeNull();
+    expect(result!.rules.test_rule.domains).toEqual(["scope"]);
+  });
+
+  test("same-domain edges reflect overridden domains", async () => {
+    writeRule("rule_a", `---
+name: rule-a
+description: generic rule
+---
+A generic rule about something.`);
+
+    writeRule("rule_b", `---
+name: rule-b
+description: another generic rule
+---
+Another generic rule about something else.`);
+
+    const rdPath = writeRuleDomains({
+      rule_a: { domains: ["security"], source: "reviewed" },
+      rule_b: { domains: ["security"], source: "reviewed" },
+    });
+
+    const graph = await buildGraph(RULES_DIR, STATE_DIR, rdPath);
+
+    expect(graph.nodes["rule_a"].domains).toEqual(["security"]);
+    expect(graph.nodes["rule_b"].domains).toEqual(["security"]);
+    const hasEdge = graph.edges.some(
+      e => (e.from === "rule_a" || e.to === "rule_a") &&
+           (e.from === "rule_b" || e.to === "rule_b") &&
+           e.relationship === "same_domain",
+    );
+    expect(hasEdge).toBe(true);
   });
 });
 
