@@ -317,6 +317,7 @@ function buildSameDomainEdges(
 
 interface SessionEntry {
   ruleIds: string[];
+  session_id?: string;
 }
 
 interface RatingEntry {
@@ -362,7 +363,10 @@ export function buildCoOccurrenceEdges(
     const ids = (session.ruleIds || []).filter(id => nodeIds.has(id));
     if (ids.length < 2) continue;
 
-    const weight = 1;
+    const raw = session.session_id ? ratingBySession.get(session.session_id) : undefined;
+    const valid = raw != null && Number.isFinite(raw);
+    const clamped = valid ? Math.min(10, Math.max(1, raw)) : undefined;
+    const weight = Math.max(0.3, (clamped ?? 5) / 10);
     const sorted = [...ids].sort();
     for (let i = 0; i < sorted.length; i++) {
       for (let j = i + 1; j < sorted.length; j++) {

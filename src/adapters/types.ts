@@ -87,6 +87,12 @@ export interface Rule {
   lowRatingActivations?: number;
   sessionRatings?: number[];
   lastSeen?: string;
+  signals?: {
+    bm25Rank?: number;
+    vectorRank?: number;
+    graphExpansionRank?: number;
+    coOccurrenceBoost?: number;
+  };
 }
 
 // ── Patterns ──

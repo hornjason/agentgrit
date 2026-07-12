@@ -171,6 +171,12 @@ export function writeSessionContext(rules: Rule[], domains: string[], domainSour
 
   const historyPath = statePath(SESSION_HISTORY_FILE);
   appendFileSync(historyPath, JSON.stringify(context) + "\n", "utf-8");
+
+  const historyContent = readFileSync(historyPath, "utf-8");
+  const lines = historyContent.trimEnd().split("\n");
+  if (lines.length > 1000) {
+    writeFileSync(historyPath, lines.slice(-1000).join("\n") + "\n", "utf-8");
+  }
 }
 
 export function readSessionContext(): SessionContext | null {

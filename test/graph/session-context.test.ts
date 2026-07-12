@@ -104,6 +104,75 @@ describe("writeSessionContext", () => {
   });
 });
 
+describe("writeSessionContext rotation", () => {
+  test("caps history file at 1000 lines after exceeding limit", () => {
+    const stateDir = join(TMP_DIR, "state");
+    mkdirSync(stateDir, { recursive: true });
+    const historyPath = join(stateDir, "session-context-history.jsonl");
+
+    // Pre-fill with 1000 entries
+    const lines: string[] = [];
+    for (let i = 0; i < 1000; i++) {
+      lines.push(JSON.stringify({
+        ruleIds: [`pre-${i}`],
+        domains: ["test"],
+        domain_source: "keyword",
+        timestamp: new Date().toISOString(),
+        ttl: 86400000,
+        rulesInjectedCount: 1,
+        rulesInjectedKB: 0.1,
+      }));
+    }
+    writeFileSync(historyPath, lines.join("\n") + "\n", "utf-8");
+
+    // Write one more entry — should trigger rotation
+    writeSessionContext(
+      [{ id: "rule-1001", text: "latest", tier: "graph" as any, tags: [], created: "", correlationScore: 0, sourceSignals: [], schemaVersion: 1 }],
+      ["scope"],
+    );
+
+    const result = readFileSync(historyPath, "utf-8").trimEnd().split("\n");
+    expect(result.length).toBe(1000);
+    // Oldest entry (pre-0) should be gone, newest (rule-1001) should be present
+    const lastEntry = JSON.parse(result[result.length - 1]);
+    expect(lastEntry.ruleIds).toContain("rule-1001");
+    const firstEntry = JSON.parse(result[0]);
+    expect(firstEntry.ruleIds[0]).toBe("pre-1");
+  });
+
+  test("does not rotate when at or below 1000 lines", () => {
+    const stateDir = join(TMP_DIR, "state");
+    mkdirSync(stateDir, { recursive: true });
+    const historyPath = join(stateDir, "session-context-history.jsonl");
+
+    // Pre-fill with 999 entries
+    const lines: string[] = [];
+    for (let i = 0; i < 999; i++) {
+      lines.push(JSON.stringify({
+        ruleIds: [`pre-${i}`],
+        domains: ["test"],
+        domain_source: "keyword",
+        timestamp: new Date().toISOString(),
+        ttl: 86400000,
+        rulesInjectedCount: 1,
+        rulesInjectedKB: 0.1,
+      }));
+    }
+    writeFileSync(historyPath, lines.join("\n") + "\n", "utf-8");
+
+    // Write one more → total 1000, should NOT rotate
+    writeSessionContext(
+      [{ id: "rule-1000", text: "new", tier: "graph" as any, tags: [], created: "", correlationScore: 0, sourceSignals: [], schemaVersion: 1 }],
+      ["scope"],
+    );
+
+    const result = readFileSync(historyPath, "utf-8").trimEnd().split("\n");
+    expect(result.length).toBe(1000);
+    const firstEntry = JSON.parse(result[0]);
+    expect(firstEntry.ruleIds[0]).toBe("pre-0");
+  });
+});
+
 describe("readSessionContext", () => {
   test("returns null when file does not exist", () => {
     expect(readSessionContext()).toBeNull();

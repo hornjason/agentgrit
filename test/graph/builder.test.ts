@@ -471,7 +471,7 @@ describe("buildCoOccurrenceEdges", () => {
       (e.from === "rule_a" && e.to === "rule_b") || (e.from === "rule_b" && e.to === "rule_a"),
     );
     expect(abEdge).toBeDefined();
-    expect(abEdge!.strength).toBe(1.0); // 2/2 sessions
+    expect(abEdge!.strength).toBeCloseTo(0.5, 5); // 2 sessions × 0.5 default weight / 2 total
   });
 
   test("skips pairs already in existingPairs", () => {
@@ -511,6 +511,134 @@ describe("buildCoOccurrenceEdges", () => {
     };
     const edges = buildCoOccurrenceEdges(nodes, new Set(), join(TMP_DIR, "nonexistent.jsonl"));
     expect(edges.length).toBe(0);
+  });
+
+  test("weights edges by session rating (rating 9 → weight 0.9)", () => {
+    const historyPath = join(TMP_DIR, "history.jsonl");
+    const ratingsPath = join(TMP_DIR, "ratings.jsonl");
+    writeFileSync(historyPath, [
+      JSON.stringify({ ruleIds: ["rule_a", "rule_b"], session_id: "s1" }),
+    ].join("\n"), "utf-8");
+    writeFileSync(ratingsPath, JSON.stringify({ session_id: "s1", rating: 9 }), "utf-8");
+
+    const nodes: Record<string, GraphNode> = {
+      rule_a: makeNode("rule_a", ["verification"]),
+      rule_b: makeNode("rule_b", ["verification"]),
+    };
+
+    const edges = buildCoOccurrenceEdges(nodes, new Set(), historyPath, ratingsPath);
+    expect(edges.length).toBe(1);
+    expect(edges[0].strength).toBeCloseTo(0.9, 5);
+  });
+
+  test("weights edges by session rating (rating 3 → weight 0.3)", () => {
+    const historyPath = join(TMP_DIR, "history.jsonl");
+    const ratingsPath = join(TMP_DIR, "ratings.jsonl");
+    writeFileSync(historyPath, JSON.stringify({ ruleIds: ["rule_a", "rule_b"], session_id: "s1" }), "utf-8");
+    writeFileSync(ratingsPath, JSON.stringify({ session_id: "s1", rating: 3 }), "utf-8");
+
+    const nodes: Record<string, GraphNode> = {
+      rule_a: makeNode("rule_a", ["verification"]),
+      rule_b: makeNode("rule_b", ["verification"]),
+    };
+
+    const edges = buildCoOccurrenceEdges(nodes, new Set(), historyPath, ratingsPath);
+    expect(edges.length).toBe(1);
+    expect(edges[0].strength).toBeCloseTo(0.3, 5);
+  });
+
+  test("defaults to 0.5 weight for sessions with no rating", () => {
+    const historyPath = join(TMP_DIR, "history.jsonl");
+    const ratingsPath = join(TMP_DIR, "ratings.jsonl");
+    writeFileSync(historyPath, JSON.stringify({ ruleIds: ["rule_a", "rule_b"], session_id: "s1" }), "utf-8");
+    writeFileSync(ratingsPath, "", "utf-8");
+
+    const nodes: Record<string, GraphNode> = {
+      rule_a: makeNode("rule_a", ["verification"]),
+      rule_b: makeNode("rule_b", ["verification"]),
+    };
+
+    const edges = buildCoOccurrenceEdges(nodes, new Set(), historyPath, ratingsPath);
+    expect(edges.length).toBe(1);
+    expect(edges[0].strength).toBeCloseTo(0.5, 5);
+  });
+
+  test("defaults to 0.5 weight when session has no session_id", () => {
+    const historyPath = join(TMP_DIR, "history.jsonl");
+    const ratingsPath = join(TMP_DIR, "ratings.jsonl");
+    writeFileSync(historyPath, JSON.stringify({ ruleIds: ["rule_a", "rule_b"] }), "utf-8");
+    writeFileSync(ratingsPath, JSON.stringify({ session_id: "s1", rating: 9 }), "utf-8");
+
+    const nodes: Record<string, GraphNode> = {
+      rule_a: makeNode("rule_a", ["verification"]),
+      rule_b: makeNode("rule_b", ["verification"]),
+    };
+
+    const edges = buildCoOccurrenceEdges(nodes, new Set(), historyPath, ratingsPath);
+    expect(edges[0].strength).toBeCloseTo(0.5, 5);
+  });
+
+  test("skips NaN rating values", () => {
+    const historyPath = join(TMP_DIR, "history.jsonl");
+    const ratingsPath = join(TMP_DIR, "ratings.jsonl");
+    writeFileSync(historyPath, JSON.stringify({ ruleIds: ["rule_a", "rule_b"], session_id: "s1" }), "utf-8");
+    writeFileSync(ratingsPath, JSON.stringify({ session_id: "s1", rating: NaN }), "utf-8");
+
+    const nodes: Record<string, GraphNode> = {
+      rule_a: makeNode("rule_a", ["verification"]),
+      rule_b: makeNode("rule_b", ["verification"]),
+    };
+
+    const edges = buildCoOccurrenceEdges(nodes, new Set(), historyPath, ratingsPath);
+    // NaN fails typeof check in ratingBySession population, so treated as no rating → 0.5
+    expect(edges[0].strength).toBeCloseTo(0.5, 5);
+  });
+
+  test("clamps rating -1 to floor of 0.3", () => {
+    const historyPath = join(TMP_DIR, "history.jsonl");
+    const ratingsPath = join(TMP_DIR, "ratings.jsonl");
+    writeFileSync(historyPath, JSON.stringify({ ruleIds: ["rule_a", "rule_b"], session_id: "s1" }), "utf-8");
+    writeFileSync(ratingsPath, JSON.stringify({ session_id: "s1", rating: -1 }), "utf-8");
+
+    const nodes: Record<string, GraphNode> = {
+      rule_a: makeNode("rule_a", ["verification"]),
+      rule_b: makeNode("rule_b", ["verification"]),
+    };
+
+    const edges = buildCoOccurrenceEdges(nodes, new Set(), historyPath, ratingsPath);
+    // -1 clamped to 1, then 1/10 = 0.1, but floor is 0.3
+    expect(edges[0].strength).toBeCloseTo(0.3, 5);
+  });
+
+  test("clamps rating 999 to 1.0", () => {
+    const historyPath = join(TMP_DIR, "history.jsonl");
+    const ratingsPath = join(TMP_DIR, "ratings.jsonl");
+    writeFileSync(historyPath, JSON.stringify({ ruleIds: ["rule_a", "rule_b"], session_id: "s1" }), "utf-8");
+    writeFileSync(ratingsPath, JSON.stringify({ session_id: "s1", rating: 999 }), "utf-8");
+
+    const nodes: Record<string, GraphNode> = {
+      rule_a: makeNode("rule_a", ["verification"]),
+      rule_b: makeNode("rule_b", ["verification"]),
+    };
+
+    const edges = buildCoOccurrenceEdges(nodes, new Set(), historyPath, ratingsPath);
+    // 999 clamped to 10, then 10/10 = 1.0
+    expect(edges[0].strength).toBeCloseTo(1.0, 5);
+  });
+
+  test("Infinity rating treated as no rating (default 0.5)", () => {
+    const historyPath = join(TMP_DIR, "history.jsonl");
+    const ratingsPath = join(TMP_DIR, "ratings.jsonl");
+    writeFileSync(historyPath, JSON.stringify({ ruleIds: ["rule_a", "rule_b"], session_id: "s1" }), "utf-8");
+    writeFileSync(ratingsPath, JSON.stringify({ session_id: "s1", rating: Infinity }), "utf-8");
+
+    const nodes: Record<string, GraphNode> = {
+      rule_a: makeNode("rule_a", ["verification"]),
+      rule_b: makeNode("rule_b", ["verification"]),
+    };
+
+    const edges = buildCoOccurrenceEdges(nodes, new Set(), historyPath, ratingsPath);
+    expect(edges[0].strength).toBeCloseTo(0.5, 5);
   });
 
   test("caps at 200 edges", () => {
