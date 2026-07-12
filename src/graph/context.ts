@@ -41,7 +41,7 @@ export function detectDomains(text: string): string[] {
 
 // ── Get Context Rules ──
 
-const EXPANSION_RELS = new Set(["reinforces", "sibling", "caused_by_same_root", "same_domain", "co_occurred_in_failure"]);
+const EXPANSION_RELS = new Set(["reinforces", "sibling", "caused_by_same_root", "same_domain", "co_occurred"]);
 const EXPANSION_DECAY = 0.5;
 
 export function getContextRules(
