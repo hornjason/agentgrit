@@ -40,12 +40,12 @@ function writeWatermark(wm: Watermark): void {
   writeFileSync(p, JSON.stringify(wm, null, 2), "utf-8");
 }
 
-export function checkEvalRegression(
+export async function checkEvalRegression(
   goldSetPath: string,
   watermarkFilePath: string | undefined,
   graph: Graph,
   index: BM25Index,
-): EvalRegressionResult {
+): Promise<EvalRegressionResult> {
   const goldRaw = readFileSync(goldSetPath, "utf-8");
   const goldSet = JSON.parse(goldRaw) as GoldSet;
 
@@ -64,7 +64,7 @@ export function checkEvalRegression(
 
     const domains = session.domains ?? [];
     const queryText = session.task_context ?? session.description ?? "";
-    const retrieved = getContextRules(graph, index, domains, 5, undefined, queryText);
+    const retrieved = await getContextRules(graph, index, domains, 5, undefined, queryText);
     const retrievedIds = new Set(retrieved.map(r => r.id));
     const relevantSet = new Set(relevantRules);
 

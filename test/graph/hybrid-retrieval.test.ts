@@ -49,7 +49,7 @@ function makeGraph(nodes: GraphNode[]): Graph {
 }
 
 describe("hybrid BM25+vector retrieval", () => {
-  test("vector cache changes ranking vs BM25-only", () => {
+  test("vector cache changes ranking vs BM25-only", async () => {
     // Set up: verify_before_answering is a BM25 hit for "verify"
     // incomplete_delivery is NOT a BM25 hit for "verify" but is semantically close
     const f1 = join(TMP_DIR, "verify_before_answering.md");
@@ -67,7 +67,7 @@ describe("hybrid BM25+vector retrieval", () => {
     ]);
 
     // BM25-only results
-    const bm25Only = getContextRules(graph, index, ["verification"], 10, undefined, "verify before answering");
+    const bm25Only = await getContextRules(graph, index, ["verification"], 10, undefined, "verify before answering");
     const bm25Ids = bm25Only.map(r => r.id);
 
     // Create vector cache where verify_before_answering and incomplete_delivery are close in vector space
@@ -81,7 +81,7 @@ describe("hybrid BM25+vector retrieval", () => {
     saveVectorCache(vectors, "test", 4, cachePath);
 
     // Hybrid results
-    const hybrid = getContextRules(graph, index, ["verification"], 10, undefined, "verify before answering", cachePath);
+    const hybrid = await getContextRules(graph, index, ["verification"], 10, undefined, "verify before answering", cachePath);
     const hybridIds = hybrid.map(r => r.id);
 
     // The hybrid results should include incomplete_delivery (vocabulary gap bridged)
@@ -100,7 +100,7 @@ describe("hybrid BM25+vector retrieval", () => {
     }
   });
 
-  test("BM25-only fallback: identical results when no vector cache", () => {
+  test("BM25-only fallback: identical results when no vector cache", async () => {
     const f1 = join(TMP_DIR, "rule_a.md");
     writeFileSync(f1, "verify before asserting always check source evidence", "utf-8");
     const f2 = join(TMP_DIR, "rule_b.md");
@@ -112,14 +112,14 @@ describe("hybrid BM25+vector retrieval", () => {
       makeNode("rule_b", ["deployment"], "Deploy production containers"),
     ]);
 
-    const withoutCache = getContextRules(graph, index, ["verification"], 10, undefined, "verify before asserting");
-    const withMissingCache = getContextRules(graph, index, ["verification"], 10, undefined, "verify before asserting", join(TMP_DIR, "nonexistent.json"));
+    const withoutCache = await getContextRules(graph, index, ["verification"], 10, undefined, "verify before asserting");
+    const withMissingCache = await getContextRules(graph, index, ["verification"], 10, undefined, "verify before asserting", join(TMP_DIR, "nonexistent.json"));
 
     expect(withMissingCache.map(r => r.id)).toEqual(withoutCache.map(r => r.id));
     expect(withMissingCache.map(r => r.text)).toEqual(withoutCache.map(r => r.text));
   });
 
-  test("empty vector cache falls back to BM25-only", () => {
+  test("empty vector cache falls back to BM25-only", async () => {
     const f1 = join(TMP_DIR, "rule_x.md");
     writeFileSync(f1, "verify check source before answering", "utf-8");
     const index = buildIndex([f1]);
@@ -131,7 +131,7 @@ describe("hybrid BM25+vector retrieval", () => {
     const cachePath = join(TMP_DIR, "empty-vectors.json");
     saveVectorCache(new Map(), "test", 4, cachePath);
 
-    const result = getContextRules(graph, index, ["verification"], 10, undefined, "verify source", cachePath);
+    const result = await getContextRules(graph, index, ["verification"], 10, undefined, "verify source", cachePath);
     expect(result.length).toBe(1);
     expect(result[0].id).toBe("rule_x");
   });

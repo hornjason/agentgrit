@@ -89,7 +89,7 @@ describe("detectDomains", () => {
 });
 
 describe("getContextRules", () => {
-  test("returns rules for matching domains", () => {
+  test("returns rules for matching domains", async () => {
     const graph = makeGraph([
       makeNode("deploy_gate", ["deployment"], "Run make rebuild before deploying"),
       makeNode("verify_first", ["verification"], "Verify endpoints are up"),
@@ -100,14 +100,14 @@ describe("getContextRules", () => {
     writeFileSync(f1, "deployment make rebuild deployment containers", "utf-8");
     const index = buildIndex([f1]);
 
-    const rules = getContextRules(graph, index, ["deployment"]);
+    const rules = await getContextRules(graph, index, ["deployment"]);
     expect(rules.length).toBeGreaterThan(0);
     expect(rules[0].id).toBe("deploy_gate");
     expect(rules[0].tags).toContain("deployment");
     expect(rules[0].tier).toBe("graph");
   });
 
-  test("respects limit", () => {
+  test("respects limit", async () => {
     const files: string[] = [];
     const nodes = Array.from({ length: 20 }, (_, i) => {
       const id = `rule-${i}`;
@@ -119,11 +119,11 @@ describe("getContextRules", () => {
     const graph = makeGraph(nodes);
     const index = buildIndex(files);
 
-    const rules = getContextRules(graph, index, ["deployment"], 5);
+    const rules = await getContextRules(graph, index, ["deployment"], 5);
     expect(rules.length).toBeLessThanOrEqual(5);
   });
 
-  test("falls back to default domains when empty", () => {
+  test("falls back to default domains when empty", async () => {
     const graph = makeGraph([
       makeNode("verify_rule", ["verification"], "Always verify"),
       makeNode("deliver_rule", ["delivery"], "Complete delivery"),
@@ -137,11 +137,11 @@ describe("getContextRules", () => {
     writeFileSync(f3, "deployment deploy correctly", "utf-8");
     const index = buildIndex([f1, f2, f3]);
 
-    const rules = getContextRules(graph, index, []);
+    const rules = await getContextRules(graph, index, []);
     expect(rules.length).toBeGreaterThan(0);
   });
 
-  test("BM25 hits expand to graph neighbors", () => {
+  test("BM25 hits expand to graph neighbors", async () => {
     const graph = makeGraph([
       makeNode("bm25_hit", ["deployment"], "Deploy with make rebuild"),
       makeNode("neighbor_rule", ["deployment"], "Run smoke tests after deploy"),
@@ -157,13 +157,13 @@ describe("getContextRules", () => {
     writeFileSync(f1, "deployment deployment deployment containers", "utf-8");
     const index = buildIndex([f1]);
 
-    const rules = getContextRules(graph, index, ["deployment"], 10);
+    const rules = await getContextRules(graph, index, ["deployment"], 10);
     const ids = rules.map(r => r.id);
     expect(ids).toContain("bm25_hit");
     expect(ids).toContain("neighbor_rule");
   });
 
-  test("deduplicates between direct BM25 and expansion", () => {
+  test("deduplicates between direct BM25 and expansion", async () => {
     const graph = makeGraph([
       makeNode("shared_rule", ["deployment"], "deployment make rebuild"),
     ]);
@@ -172,19 +172,19 @@ describe("getContextRules", () => {
     writeFileSync(f1, "deployment make rebuild deployment", "utf-8");
     const index = buildIndex([f1]);
 
-    const rules = getContextRules(graph, index, ["deployment"], 10);
+    const rules = await getContextRules(graph, index, ["deployment"], 10);
     const sharedCount = rules.filter(r => r.id === "shared_rule").length;
     expect(sharedCount).toBe(1);
   });
 
-  test("returns empty for empty graph and index", () => {
+  test("returns empty for empty graph and index", async () => {
     const graph = makeGraph([]);
     const index = buildIndex([]);
-    const rules = getContextRules(graph, index, ["deployment"]);
+    const rules = await getContextRules(graph, index, ["deployment"]);
     expect(rules).toEqual([]);
   });
 
-  test("rule text comes from node", () => {
+  test("rule text comes from node", async () => {
     const graph = makeGraph([
       makeNode("test_rule", ["verification"], "Always verify before asserting anything"),
     ]);
@@ -192,11 +192,11 @@ describe("getContextRules", () => {
     writeFileSync(f1, "verification verify before asserting anything", "utf-8");
     const index = buildIndex([f1]);
 
-    const rules = getContextRules(graph, index, ["verification"]);
+    const rules = await getContextRules(graph, index, ["verification"]);
     expect(rules[0].text).toBe("Always verify before asserting anything");
   });
 
-  test("includes trajectory data when signalDir provided", () => {
+  test("includes trajectory data when signalDir provided", async () => {
     const graph = makeGraph([]);
     const index = buildIndex([]);
 
@@ -218,7 +218,7 @@ describe("getContextRules", () => {
       }),
     );
 
-    const rules = getContextRules(graph, index, ["verification"], 10, trajDir);
+    const rules = await getContextRules(graph, index, ["verification"], 10, trajDir);
     expect(rules.length).toBe(1);
     expect(rules[0].id).toBe("traj-1");
     expect(rules[0].text).toContain("[trajectory]");

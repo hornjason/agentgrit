@@ -54,7 +54,7 @@ function makeGraph(nodes: GraphNode[]): Graph {
 }
 
 describe("writeSessionContext", () => {
-  test("writes session-context.json with ruleIds, domains, timestamp", () => {
+  test("writes session-context.json with ruleIds, domains, timestamp", async () => {
     const graph = makeGraph([
       makeNode("rule-a", ["deployment"]),
       makeNode("rule-b", ["verification"]),
@@ -64,7 +64,7 @@ describe("writeSessionContext", () => {
     writeFileSync(f1, "deployment containers rebuild deployment", "utf-8");
     writeFileSync(f2, "verification verify before verification", "utf-8");
     const index = buildIndex([f1, f2]);
-    const rules = getContextRules(graph, index, ["deployment", "verification"]);
+    const rules = await getContextRules(graph, index, ["deployment", "verification"]);
 
     writeSessionContext(rules, ["deployment", "verification"]);
 

@@ -8,7 +8,7 @@
  */
 
 import type { Graph, BM25Index } from "./types";
-import { Tier, type Rule } from "../adapters/types";
+import { Tier, type Rule, type EmbeddingProvider } from "../adapters/types";
 import { searchIndex } from "./bm25";
 import { queryTrajectoriesSync } from "../detect/trajectories";
 import { loadVectorCache, computeCentroid, rankByVectorSimilarity } from "./embeddings";
@@ -66,7 +66,7 @@ export function sanitizeRuleText(text: string): string {
 const EXPANSION_RELS = new Set(["reinforces", "sibling", "caused_by_same_root", "same_domain", "co_occurred"]);
 const EXPANSION_DECAY = 0.5;
 
-export function getContextRules(
+export async function getContextRules(
   graph: Graph,
   index: BM25Index,
   currentDomains: string[],
@@ -74,7 +74,8 @@ export function getContextRules(
   signalDir?: string,
   queryText?: string,
   vectorCachePath?: string,
-): Rule[] {
+  embeddingProvider?: EmbeddingProvider,
+): Promise<Rule[]> {
   const domains = currentDomains.length > 0 ? currentDomains : DEFAULT_DOMAINS;
 
   // 1. BM25 primary — retrieve 3x candidates
@@ -82,15 +83,20 @@ export function getContextRules(
   const searchText = queryText || domains.join(" ");
   const bm25Results = searchIndex(index, searchText, fetchLimit);
 
-  // 2. Vector retrieval — centroid of top BM25 hits finds semantic neighbors
+  // 2. Vector retrieval — real query embedding when provider available, centroid fallback
   let vectorScores: Array<{ id: string; score: number }> | null = null;
   if (vectorCachePath) {
     const cache = loadVectorCache(vectorCachePath);
     if (cache && cache.size > 0) {
-      const topBm25Ids = bm25Results.slice(0, 5).map(r => r.id);
-      const centroid = computeCentroid(topBm25Ids, cache);
-      if (centroid) {
-        vectorScores = rankByVectorSimilarity(centroid, cache, fetchLimit);
+      if (embeddingProvider) {
+        const [queryVec] = await embeddingProvider.embed([searchText]);
+        vectorScores = rankByVectorSimilarity(queryVec, cache, fetchLimit);
+      } else {
+        const topBm25Ids = bm25Results.slice(0, 5).map(r => r.id);
+        const centroid = computeCentroid(topBm25Ids, cache);
+        if (centroid) {
+          vectorScores = rankByVectorSimilarity(centroid, cache, fetchLimit);
+        }
       }
     }
   }
@@ -412,7 +418,7 @@ export function createReranker(apiKey: string, provider: "jina" | "voyage" = "ji
  * Get context rules with optional reranking.
  * First retrieves via graph + BM25, then optionally reranks with an API.
  */
-export function getContextRulesWithReranking(
+export async function getContextRulesWithReranking(
   graph: Graph,
   index: BM25Index,
   currentDomains: string[],
@@ -420,19 +426,19 @@ export function getContextRulesWithReranking(
   query: string,
   limit: number = 10,
   vectorCachePath?: string,
+  embeddingProvider?: EmbeddingProvider,
 ): Promise<Rule[]> {
-  const rules = getContextRules(graph, index, currentDomains, limit * 2, undefined, query, vectorCachePath);
+  const rules = await getContextRules(graph, index, currentDomains, limit * 2, undefined, query, vectorCachePath, embeddingProvider);
 
   if (!reranker || rules.length === 0) {
-    return Promise.resolve(rules.slice(0, limit));
+    return rules.slice(0, limit);
   }
 
   const candidates = rules.map((r) => ({ id: r.id, text: r.text }));
 
-  return reranker.rerank(query, candidates, limit).then((reranked) => {
-    const ruleMap = new Map(rules.map((r) => [r.id, r]));
-    return reranked
-      .map((r) => ruleMap.get(r.id))
-      .filter((r): r is Rule => r !== undefined);
-  });
+  const reranked = await reranker.rerank(query, candidates, limit);
+  const ruleMap = new Map(rules.map((r) => [r.id, r]));
+  return reranked
+    .map((r) => ruleMap.get(r.id))
+    .filter((r): r is Rule => r !== undefined);
 }

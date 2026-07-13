@@ -52,7 +52,7 @@ function writeRuleFile(id: string, content: string): string {
 }
 
 describe("checkEvalRegression", () => {
-  test("passes on first run when no watermark exists", () => {
+  test("passes on first run when no watermark exists", async () => {
     const nodes: Record<string, GraphNode> = {
       r1: makeNode("r1", ["deployment"], "deploy container rebuild makefile"),
       r2: makeNode("r2", ["verification"], "verify before answering check source"),
@@ -80,14 +80,14 @@ describe("checkEvalRegression", () => {
       updated: new Date().toISOString(),
     }));
 
-    const result = checkEvalRegression(goldPath, wmPath, graph, index);
+    const result = await checkEvalRegression(goldPath, wmPath, graph, index);
     expect(result.pass).toBe(true);
     expect(result.previousPrecision).toBeNull();
     expect(result.precision).toBeGreaterThanOrEqual(0);
     expect(existsSync(wmPath)).toBe(true);
   });
 
-  test("passes when precision stays stable", () => {
+  test("passes when precision stays stable", async () => {
     const nodes: Record<string, GraphNode> = {
       r1: makeNode("r1", ["deployment"], "deploy container rebuild makefile"),
       r2: makeNode("r2", ["verification"], "verify before answering check"),
@@ -115,15 +115,15 @@ describe("checkEvalRegression", () => {
       updated: new Date().toISOString(),
     }));
 
-    const first = checkEvalRegression(goldPath, wmPath, graph, index);
+    const first = await checkEvalRegression(goldPath, wmPath, graph, index);
     expect(first.pass).toBe(true);
 
-    const second = checkEvalRegression(goldPath, wmPath, graph, index);
+    const second = await checkEvalRegression(goldPath, wmPath, graph, index);
     expect(second.pass).toBe(true);
     expect(second.previousPrecision).not.toBeNull();
   });
 
-  test("blocks when precision drops >= 0.05", () => {
+  test("blocks when precision drops >= 0.05", async () => {
     const nodes: Record<string, GraphNode> = {
       r1: makeNode("r1", ["deployment"], "deploy container rebuild"),
       r2: makeNode("r2", ["verification"], "verify before answering"),
@@ -157,7 +157,7 @@ describe("checkEvalRegression", () => {
       updated: new Date().toISOString(),
     }));
 
-    const result = checkEvalRegression(goldPath, wmPath, graph, index);
+    const result = await checkEvalRegression(goldPath, wmPath, graph, index);
     expect(result.pass).toBe(false);
     expect(result.previousPrecision).toBe(0.95);
     expect(result.precision).toBeLessThan(0.90);
