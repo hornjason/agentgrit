@@ -20,6 +20,14 @@
     "lint": "bunx biome check .",
     "typecheck": "bunx tsc --noEmit"
   },
+  "peerDependencies": {
+    "@huggingface/transformers": ">=3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@huggingface/transformers": {
+      "optional": true
+    }
+  },
   "dependencies": {},
   "devDependencies": {
     "@types/bun": "latest",

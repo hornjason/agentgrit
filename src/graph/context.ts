@@ -11,6 +11,8 @@ import type { Graph, BM25Index } from "./types";
 import { Tier, type Rule } from "../adapters/types";
 import { searchIndex } from "./bm25";
 import { queryTrajectoriesSync } from "../detect/trajectories";
+import { loadVectorCache, computeCentroid, rankByVectorSimilarity } from "./embeddings";
+import { rrfMerge } from "./retrieval";
 
 // ── Default Domains ──
 
@@ -39,6 +41,26 @@ export function detectDomains(text: string): string[] {
   return domains.size > 0 ? Array.from(domains) : [];
 }
 
+// ── Sanitize Rule Text ──
+
+const INJECTION_PATTERNS = [
+  /ignore\s+(all\s+)?previous\s+instructions/gi,
+  /you\s+are\s+now\s+/gi,
+  /act\s+as\s+(a\s+)?/gi,
+  /system\s*:\s*/gi,
+  /\[INST\]/gi,
+  /<<SYS>>/gi,
+  /<\|im_start\|>/gi,
+];
+
+export function sanitizeRuleText(text: string): string {
+  let sanitized = text;
+  for (const p of INJECTION_PATTERNS) {
+    sanitized = sanitized.replace(p, "");
+  }
+  return sanitized.trim();
+}
+
 // ── Get Context Rules ──
 
 const EXPANSION_RELS = new Set(["reinforces", "sibling", "caused_by_same_root", "same_domain", "co_occurred"]);
@@ -51,6 +73,7 @@ export function getContextRules(
   limit: number = 10,
   signalDir?: string,
   queryText?: string,
+  vectorCachePath?: string,
 ): Rule[] {
   const domains = currentDomains.length > 0 ? currentDomains : DEFAULT_DOMAINS;
 
@@ -59,7 +82,20 @@ export function getContextRules(
   const searchText = queryText || domains.join(" ");
   const bm25Results = searchIndex(index, searchText, fetchLimit);
 
-  // 2. Graph expansion — for each BM25 hit, expand 1-hop via edges
+  // 2. Vector retrieval — centroid of top BM25 hits finds semantic neighbors
+  let vectorScores: Array<{ id: string; score: number }> | null = null;
+  if (vectorCachePath) {
+    const cache = loadVectorCache(vectorCachePath);
+    if (cache && cache.size > 0) {
+      const topBm25Ids = bm25Results.slice(0, 5).map(r => r.id);
+      const centroid = computeCentroid(topBm25Ids, cache);
+      if (centroid) {
+        vectorScores = rankByVectorSimilarity(centroid, cache, fetchLimit);
+      }
+    }
+  }
+
+  // 3. Graph expansion — for each BM25 hit, expand 1-hop via edges
   const scores = new Map<string, number>();
 
   for (const hit of bm25Results) {
@@ -80,12 +116,28 @@ export function getContextRules(
     }
   }
 
-  // 3. Sort by score, take top limit
-  const ranked = Array.from(scores.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, limit);
+  // 4. 3-way RRF merge when vectors available, otherwise score-based ranking
+  let ranked: Array<[string, number]>;
 
-  // 4. Build rule objects
+  if (vectorScores) {
+    const bm25List = bm25Results.map((r, i) => ({ id: r.id, rank: i + 1 }));
+    const graphList = Array.from(scores.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([id], i) => ({ id, rank: i + 1 }));
+    const vectorList = vectorScores.map((r, i) => ({ id: r.id, rank: i + 1 }));
+
+    const merged = rrfMerge(bm25List, graphList, vectorList);
+    ranked = Array.from(merged.values())
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit)
+      .map(e => [e.id, e.score] as [string, number]);
+  } else {
+    ranked = Array.from(scores.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit);
+  }
+
+  // 5. Build rule objects
   const resultIds = new Set<string>();
   const rules: Rule[] = [];
 
@@ -95,7 +147,7 @@ export function getContextRules(
 
     rules.push({
       id,
-      text: node?.description || node?.name || id,
+      text: sanitizeRuleText(node?.description || node?.name || id),
       tier: Tier.Graph,
       tags: node?.domains || [],
       created: node?.last_updated || new Date().toISOString(),
@@ -105,7 +157,7 @@ export function getContextRules(
     });
   }
 
-  // 5. Trajectory backfill
+  // 6. Trajectory backfill
   if (signalDir && rules.length < limit) {
     const remaining = limit - rules.length;
     const trajectories = queryTrajectoriesSync(domains, signalDir, remaining);
@@ -115,7 +167,7 @@ export function getContextRules(
       resultIds.add(t.id);
       rules.push({
         id: t.id,
-        text: `[trajectory] ${t.summary}`,
+        text: sanitizeRuleText(`[trajectory] ${t.summary}`),
         tier: Tier.Graph,
         tags: t.domains,
         created: t.timestamp,
@@ -367,8 +419,9 @@ export function getContextRulesWithReranking(
   reranker: Reranker | null,
   query: string,
   limit: number = 10,
+  vectorCachePath?: string,
 ): Promise<Rule[]> {
-  const rules = getContextRules(graph, index, currentDomains, limit * 2, undefined, query);
+  const rules = getContextRules(graph, index, currentDomains, limit * 2, undefined, query, vectorCachePath);
 
   if (!reranker || rules.length === 0) {
     return Promise.resolve(rules.slice(0, limit));

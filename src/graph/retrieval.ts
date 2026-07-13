@@ -12,11 +12,13 @@ interface RRFEntry {
   score: number;
   bm25Rank?: number;
   graphRank?: number;
+  vectorRank?: number;
 }
 
-function rrfMerge(
+export function rrfMerge(
   bm25List: Array<{ id: string; rank: number }>,
   graphList: Array<{ id: string; rank: number }>,
+  vectorList?: Array<{ id: string; rank: number }>,
 ): Map<string, RRFEntry> {
   const scores = new Map<string, RRFEntry>();
 
@@ -47,6 +49,23 @@ function rrfMerge(
         score: contribution,
         graphRank: item.rank,
       });
+    }
+  }
+
+  if (vectorList) {
+    for (const item of vectorList) {
+      const contribution = 1 / (RRF_K + item.rank);
+      const existing = scores.get(item.id);
+      if (existing) {
+        existing.score += contribution;
+        existing.vectorRank = item.rank;
+      } else {
+        scores.set(item.id, {
+          id: item.id,
+          score: contribution,
+          vectorRank: item.rank,
+        });
+      }
     }
   }
 
@@ -85,5 +104,6 @@ export function hybridRetrieve(
     rrfScore: entry.score,
     bm25Rank: entry.bm25Rank,
     graphRank: entry.graphRank,
+    vectorRank: entry.vectorRank,
   }));
 }

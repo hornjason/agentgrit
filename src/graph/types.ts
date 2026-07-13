@@ -61,6 +61,7 @@ export interface RetrievalResult {
   rrfScore: number;
   bm25Rank?: number;
   graphRank?: number;
+  vectorRank?: number;
 }
 
 // ── Embeddings ──
@@ -78,6 +79,15 @@ export interface Embedding {
   vector: number[];
 }
 
+// ── Vector Cache ──
+
+export interface VectorCache {
+  model: string;
+  dimensions: number;
+  builtAt: string;
+  vectors: Record<string, number[]>;
+}
+
 // ── Re-exports for convenience ──
 
-export type { GraphNode, GraphEdge, EdgeType, EdgeSource, Rule } from "../adapters/types";
+export type { GraphNode, GraphEdge, EdgeType, EdgeSource, Rule, EmbeddingProvider } from "../adapters/types";

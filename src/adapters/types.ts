@@ -188,6 +188,12 @@ export interface PromotionRecord {
   approved: boolean;
 }
 
+// ── Embedding Provider ──
+
+export interface EmbeddingProvider {
+  embed(texts: string[]): Promise<number[][]>;
+}
+
 // ── Config ──
 
 export interface AgentGritConfig {
