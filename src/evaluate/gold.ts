@@ -6,8 +6,10 @@ export interface GoldSession {
   sessionId: string;
   timestamp?: string;
   description: string;
+  task_context?: string;
   domains?: string[];
   relevantRules: string[];
+  excluded_rules?: string[];
   noRules?: boolean;
   autoLabeled?: boolean;
   synthetic?: boolean;
