@@ -130,23 +130,26 @@ Claude Code session
 
 AgentGrit is imported at runtime via dynamic `import()`. If unavailable, PAI falls back to local graph queries. AgentGrit availability never blocks session start.
 
-## Current State (2026-07-08)
+## Current State (2026-07-13)
 
 | Area | Status | Reference |
 |------|--------|-----------|
 | Signal capture | COMPLETE | 216 tests pass |
 | Pattern detection | COMPLETE | 47 tests pass |
 | Rule promotion | COMPLETE | 108 tests pass |
-| Graph + injection | COMPLETE | 131 tests pass |
-| Recall measurement | COMPLETE | Baseline captured |
+| Graph + injection | SHIPPED (hybrid) | BM25 + vector + graph 3-way RRF (#97, #98). sanitizeRuleText. |
+| Recall measurement | FIXED | Evaluator decontaminated. 60-session gold set with negatives. Regression gate. |
+| Eviction pipeline | COMPLETE | #85 shipped — correlation-based, duplicate detection, budget cap |
+| Co-occurrence edges | SHIPPED | Rating-weighted (#97). Attribution feedback updates weights per session (#99). |
+| Embedding support | SHIPPED | transformers.js optional peerDep, vector-cache.json, EmbeddingProvider interface (#98) |
+| Feedback loop | CLOSED | Attribution → edge weights → retrieval → session → attribution (#99) |
+| Eval regression gate | SHIPPED | Blocks buildGraph on precision drop >= 0.05 (#99) |
 | Skill optimization | COMPLETE | 75 tests pass |
 | Track 1 ports (#63-74) | ALL CLOSED | 12/12 verified 2026-07-08 |
 | Track 1 cutover (#75) | OPEN | Prerequisites met |
-| Track 2 injection (#78) | IN PROGRESS | SC-1 passes (11 rules), precision below target |
-| Lifecycle management (#81) | OPEN | Correlation dashboard + eviction pipeline |
-| BM25 domain inference (#104) | OPEN | Build in AgentGrit, not PAI |
 | Package exports | MISSING | No programmatic API surface |
 | Claude Code hook templates | MISSING | `agentgrit init --claude-code` not built |
+| Multi-layer context | GAP | Only retrieves feedback rules. Project docs, skills not precision-gated. |
 
 ## Specs & ADRs
 
@@ -154,7 +157,8 @@ AgentGrit is imported at runtime via dynamic `import()`. If unavailable, PAI fal
 |-----|----------|--------|
 | This spec | `docs/SYSTEM-SPEC.md` | Full system overview (authoritative) |
 | ADR-001 | `docs/adr/ADR-001-correlation-driven-rule-injection.md` | Rule injection architecture |
-| ADR-004 | `~/.claude/PAI/ADR/ADR-004-domain-gated-rule-injection.md` | Domain detection, BM25, integration |
+| ADR-004 | `~/.claude/PAI/ADR/ADR-004-domain-gated-rule-injection.md` | Domain detection, BM25, integration (SD-2 superseded by ADR-005) |
+| ADR-005 | `docs/adr/ADR-005-bm25-first-retrieval.md` | BM25-first retrieval, co-occurrence edges, gold set rebuild |
 | Migration plan | `docs/migration-plan.md` | 42-capability audit, phase plan |
 | Migration spec | `docs/migration-spec.md` | 221-file PAI→AgentGrit mapping |
 | Test matrix | `docs/TEST-MATRIX.md` | 89-item verification checklist |
@@ -164,8 +168,11 @@ AgentGrit is imported at runtime via dynamic `import()`. If unavailable, PAI fal
 ## Success Metrics
 
 The system succeeds when:
-1. **Recall:** ≥82% of needed rules in top 5 retrieved — **MET (0.832)**
-2. **Precision:** ≥70% of retrieved rules are relevant — **NOT MET (0.490)**
-3. **Rule budget:** ≤12 universal + ≤20 domain-filtered per session — **MET (11 + ~8)**
+1. **Recall:** ≥82% of needed rules in top 5 retrieved — **MEASURING (0.17 before hybrid, re-measure with vectors)**
+2. **Precision:** ≥70% of retrieved rules are relevant — **MEASURING (0.24 before hybrid, re-measure with vectors)**
+3. **Rule budget:** ≤12 universal + ≤20 domain-filtered per session — **MET (11 + ~15)**
 4. **Zero repeat corrections:** same mistake never rated ≤3 twice — **PARTIALLY MET (some patterns recur)**
-5. **Self-maintaining:** rules added, classified, correlated, and evicted without manual intervention — **PARTIALLY MET (add works, evict has gaps)**
+5. **Self-maintaining:** rules added, classified, correlated, and evicted without manual intervention — **MET (eviction #85, attribution #99, regression gate #99)**
+6. **Self-improving:** rated sessions automatically improve retrieval quality — **SHIPPED (attribution feedback → edge weights → better retrieval)**
+
+**Note (2026-07-13):** All infrastructure is shipped. Precision measurement pending — need to run `agentgrit embed` to pre-compute vectors, then run RecallEvaluator against expanded 60-session gold set. Expected jump: 0.24 → 0.40-0.50 from vocabulary gap bridging.
