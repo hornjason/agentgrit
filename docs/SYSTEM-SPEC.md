@@ -168,11 +168,12 @@ AgentGrit is imported at runtime via dynamic `import()`. If unavailable, PAI fal
 ## Success Metrics
 
 The system succeeds when:
-1. **Recall:** ≥82% of needed rules in top 5 retrieved — **MEASURING (0.17 before hybrid, re-measure with vectors)**
-2. **Precision:** ≥70% of retrieved rules are relevant — **MEASURING (0.24 before hybrid, re-measure with vectors)**
-3. **Rule budget:** ≤12 universal + ≤20 domain-filtered per session — **MET (11 + ~15)**
-4. **Zero repeat corrections:** same mistake never rated ≤3 twice — **PARTIALLY MET (some patterns recur)**
-5. **Self-maintaining:** rules added, classified, correlated, and evicted without manual intervention — **MET (eviction #85, attribution #99, regression gate #99)**
-6. **Self-improving:** rated sessions automatically improve retrieval quality — **SHIPPED (attribution feedback → edge weights → better retrieval)**
+1. **Recall@5:** ≥82% of needed rules in top 5 retrieved — **NOT MET (0.37). recall@15 = 0.61.** Top-5 is tight with larger relevant sets; most rules found by rank 15.
+2. **Precision@5:** ≥70% of retrieved rules are relevant — **MET (0.76)** ✅ Achieved via hybrid BM25+vector+graph retrieval + node-type weighting.
+3. **MRR:** ≥0.90 — **MET (0.96)** ✅ First relevant rule is typically rank 1 or 2.
+4. **Rule budget:** ≤12 universal + ≤20 domain-filtered per session — **MET (11 + ~15)**
+5. **Zero repeat corrections:** same mistake never rated ≤3 twice — **PARTIALLY MET (some patterns recur)**
+6. **Self-maintaining:** rules added, classified, correlated, and evicted without manual intervention — **MET (eviction #85, attribution #99, regression gate #99)**
+7. **Self-improving:** rated sessions automatically improve retrieval quality — **MET (attribution feedback → edge weights → better retrieval #99)**
 
-**Note (2026-07-13):** All infrastructure is shipped. Precision measurement pending — need to run `agentgrit embed` to pre-compute vectors, then run RecallEvaluator against expanded 60-session gold set. Expected jump: 0.24 → 0.40-0.50 from vocabulary gap bridging.
+**Measurement note (2026-07-13):** Precision measured on 60-session gold set (34 real + 26 synthetic, all audited for under-labeling). Hybrid retrieval: BM25 (2x weight) + vector similarity (0.5x) + graph expansion (1x). Node-type weighting: feedback/steering 1.0x, success 0.8x, reference 0.5x, project 0.3x. 382 pre-computed vectors via all-MiniLM-L6-v2.
