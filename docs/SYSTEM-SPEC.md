@@ -92,34 +92,37 @@ At session start, inject only the rules relevant to the current task.
 
 **Problem:** Rules are precision-gated (0.76) but only account for 2.5% of total context. The other 97.5% (~4,876 lines) is bulk-loaded regardless of task type:
 
-| Layer | Lines | Status |
-|---|---|---|
-| GRAPH-CONTEXT.md (rules) | 93 | ✅ Precision-gated (0.76) |
-| Dynamic context | 30 | ✅ Signals-based |
-| CLAUDE.md | 177 | ❌ Always loaded |
-| CLAUDE-LEARNED.md | 63 | ❌ Always loaded |
-| MEMORY.md | 101 | ❌ Always loaded |
-| Ship skill files | 1,666 | ❌ Every ship task |
-| Project docs (DDB) | 2,869 | ❌ Every project task |
+| Layer | Lines (before) | Lines (after) | Status |
+|---|---|---|---|
+| GRAPH-CONTEXT.md (rules) | 93 | 93 | ✅ Precision-gated (0.76) |
+| Dynamic context | 30 | 30 | ✅ Signals-based |
+| CLAUDE.md | 177 | 177 | Claude Code loads (not controllable) |
+| CLAUDE-LEARNED.md | 63 | 63 (10 filtered injected) | ✅ BM25-filtered (#103) |
+| MEMORY.md | 101 | 101 | Claude Code loads |
+| Ship skill files | 1,666 | 1,666 | Future: defer ceremony docs |
+| Project docs (DDB) | 2,869 | **~181** | ✅ Section-level retrieval (#104) |
+| **TOTAL (XS on DDB)** | **~4,999** | **~2,311** | **53.8% reduction** |
 
-**Design (2 phases):**
+**Shipped (2026-07-13):**
 
-**Phase 1: Size-aware loading + learned rules filtering (#103)**
-- Ship skill loads ceremony docs (HARNESS-GATES, BRIEF-TEMPLATES) on-demand, not at SCOPE start
-- XS/S tasks skip ceremony until BUILD needs them (~626 lines saved)
-- CLAUDE-LEARNED.md filtered to top-K relevant rules via BM25+vector (same pipeline as graph rules)
-- Measurement harness logs total lines loaded per session
+**Phase 1 (#103): CLAUDE-LEARNED filtering + line counter**
+- `parseLearnedRules()` + `filterLearnedRules()` in context.ts — BM25 scores rules against task text, keeps top-10
+- `totalContextLines` field in SessionContext tracks lines loaded per session
+- 14 new tests
 
-**Phase 2: Section-level project doc retrieval (#104)**
-- Embed sections of ARCHITECTURE.md, PRINCIPLES.md at build time (same approach as rule vectors)
-- At session start, retrieve only sections relevant to the task (by section heading)
-- A config typo fix loads ~200 lines of relevant sections, not 2,869 lines of full docs
-- Fallback: load full doc if no section vectors available (graceful degradation)
+**Phase 2 (#104): Section-level project doc retrieval**
+- `splitDocSections()` splits markdown by ## headings
+- `buildDocSectionCache()` embeds sections via all-MiniLM-L6-v2 (59 sections from DDB docs)
+- `retrieveRelevantSections()` returns top-K sections by cosine similarity
+- Hook writes filtered sections to PROJECT-CONTEXT.md
+- XS query "fix config typo" → 181 lines (from 2,412 = **92.5% reduction**)
+- Graceful fallback when no section cache exists
+- 18 new tests
 
-**Targets:**
-- XS task: ≤ 1,000 lines total (from ~5,000)
-- M task: ≤ 3,000 lines total (from ~5,000)
-- Rules precision: no regression below 0.70
+**Remaining gap:**
+- Ship ceremony docs (HARNESS-GATES 197, BRIEF-TEMPLATES 429, HARNESS-STANDARD 475) still bulk-load for XS tasks
+- Deferring these to on-demand Read() calls would save ~1,101 lines (XS → ~1,210)
+- Requires restructuring SKILL.md — lower priority, diminishing returns
 
 ### 5. Recall Measurement (`src/evaluate/`)
 
