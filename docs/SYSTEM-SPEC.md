@@ -70,21 +70,56 @@ Session signals (ratings, corrections, failures)
 
 ### 4. Context Injection (`src/graph/`)
 
-At session start, inject only the rules relevant to the current task:
+At session start, inject only the rules relevant to the current task.
 
-1. **Domain detection** — classify task into 1-4 domains from 18 canonical categories
-2. **Graph query** — knowledge graph (302 nodes, 1081 edges) returns domain-matched clusters, capped at 8
-3. **BM25 search** — fill gaps with keyword-matched rules, capped at 7
-4. **Trajectory backfill** — proven sequences for matched domains
-5. **Per-role filtering** — Marcus gets engineering rules, Quinn gets QA rules, Rook gets security rules
+**Current pipeline (hybrid BM25+vector, shipped 2026-07-13):**
+1. **BM25 primary** — search task text against 383 memory files, retrieve 3x candidates
+2. **Vector similarity** — compute query embedding (all-MiniLM-L6-v2 via transformers.js), cosine against 382 pre-computed node vectors
+3. **Graph expansion** — 1-hop neighbors via co_occurred + reinforces edges
+4. **3-way RRF merge** — BM25 (2x weight) + vector (0.5x) + graph (1x) via `rrfMerge()` in retrieval.ts
+5. **Node-type weighting** — feedback/steering 1.0x, success 0.8x, reference 0.5x, project 0.3x
+6. **Content sanitization** — `sanitizeRuleText()` strips injection patterns before agent injection
+7. **Top-K selection** — return top 10-15 rules
+8. **Attribution feedback** — rated sessions update co-occurrence edge weights automatically
 
-**Domain metadata:** `rule-domains.json` tags each rule with domains. Self-healing adds new rules automatically at session start. Weekly review auto-classifies new rules.
+**Performance (measured 2026-07-13):** precision@5 = 0.76, MRR = 0.96, recall@5 = 0.37, recall@15 = 0.61.
 
 **Architecture decisions:**
-- ADR-001 (`docs/adr/ADR-001-correlation-driven-rule-injection.md`) — correlation-driven injection replaces bulk loading
-- PAI ADR-004 (`~/.claude/PAI/ADR/ADR-004-domain-gated-rule-injection.md`) — domain detection mechanism, BM25 inference, integration architecture
+- ADR-001 (`docs/adr/ADR-001-correlation-driven-rule-injection.md`) — correlation-driven injection
+- ADR-005 (`docs/adr/ADR-005-bm25-first-retrieval.md`) — BM25-first retrieval, co-occurrence edges
 
-**Planned: BM25 domain inference (AG #78 / PAI #104)** — replace regex keyword matching with BM25 search against rule corpus for domain detection. Infrastructure exists, not yet wired.
+### 4b. Multi-Layer Context Gating (planned — #102)
+
+**Problem:** Rules are precision-gated (0.76) but only account for 2.5% of total context. The other 97.5% (~4,876 lines) is bulk-loaded regardless of task type:
+
+| Layer | Lines | Status |
+|---|---|---|
+| GRAPH-CONTEXT.md (rules) | 93 | ✅ Precision-gated (0.76) |
+| Dynamic context | 30 | ✅ Signals-based |
+| CLAUDE.md | 177 | ❌ Always loaded |
+| CLAUDE-LEARNED.md | 63 | ❌ Always loaded |
+| MEMORY.md | 101 | ❌ Always loaded |
+| Ship skill files | 1,666 | ❌ Every ship task |
+| Project docs (DDB) | 2,869 | ❌ Every project task |
+
+**Design (2 phases):**
+
+**Phase 1: Size-aware loading + learned rules filtering (#103)**
+- Ship skill loads ceremony docs (HARNESS-GATES, BRIEF-TEMPLATES) on-demand, not at SCOPE start
+- XS/S tasks skip ceremony until BUILD needs them (~626 lines saved)
+- CLAUDE-LEARNED.md filtered to top-K relevant rules via BM25+vector (same pipeline as graph rules)
+- Measurement harness logs total lines loaded per session
+
+**Phase 2: Section-level project doc retrieval (#104)**
+- Embed sections of ARCHITECTURE.md, PRINCIPLES.md at build time (same approach as rule vectors)
+- At session start, retrieve only sections relevant to the task (by section heading)
+- A config typo fix loads ~200 lines of relevant sections, not 2,869 lines of full docs
+- Fallback: load full doc if no section vectors available (graceful degradation)
+
+**Targets:**
+- XS task: ≤ 1,000 lines total (from ~5,000)
+- M task: ≤ 3,000 lines total (from ~5,000)
+- Rules precision: no regression below 0.70
 
 ### 5. Recall Measurement (`src/evaluate/`)
 
