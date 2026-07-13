@@ -21,7 +21,7 @@
     "typecheck": "bunx tsc --noEmit"
   },
   "peerDependencies": {
-    "@huggingface/transformers": ">=3.0.0"
+    "@huggingface/transformers": "latest"
   },
   "peerDependenciesMeta": {
     "@huggingface/transformers": {
@@ -30,6 +30,7 @@
   },
   "dependencies": {},
   "devDependencies": {
+    "@huggingface/transformers": "^3.5.1",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   },
