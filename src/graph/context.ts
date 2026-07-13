@@ -12,7 +12,7 @@ import { Tier, type Rule, type EmbeddingProvider } from "../adapters/types";
 import { searchIndex } from "./bm25";
 import { queryTrajectoriesSync } from "../detect/trajectories";
 import { loadVectorCache, computeCentroid, rankByVectorSimilarity } from "./embeddings";
-import { rrfMerge } from "./retrieval";
+import { rrfMerge, RRF_WEIGHTS } from "./retrieval";
 
 // ── Default Domains ──
 
@@ -132,7 +132,7 @@ export async function getContextRules(
       .map(([id], i) => ({ id, rank: i + 1 }));
     const vectorList = vectorScores.map((r, i) => ({ id: r.id, rank: i + 1 }));
 
-    const merged = rrfMerge(bm25List, graphList, vectorList);
+    const merged = rrfMerge(bm25List, graphList, vectorList, RRF_WEIGHTS);
     ranked = Array.from(merged.values())
       .sort((a, b) => b.score - a.score)
       .slice(0, limit)

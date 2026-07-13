@@ -5,6 +5,16 @@ import { searchIndex } from "./bm25";
 // RRF constant (standard value from Cormack et al.)
 const RRF_K = 60;
 
+// ── RRF Signal Weights ──
+
+export interface RRFWeights {
+  bm25: number;
+  graph: number;
+  vector: number;
+}
+
+export const RRF_WEIGHTS: RRFWeights = { bm25: 2, graph: 0.5, vector: 1 };
+
 // ── RRF Merge ──
 
 interface RRFEntry {
@@ -19,11 +29,13 @@ export function rrfMerge(
   bm25List: Array<{ id: string; rank: number }>,
   graphList: Array<{ id: string; rank: number }>,
   vectorList?: Array<{ id: string; rank: number }>,
+  weights?: Partial<RRFWeights>,
 ): Map<string, RRFEntry> {
+  const w = { ...RRF_WEIGHTS, ...weights };
   const scores = new Map<string, RRFEntry>();
 
   for (const item of bm25List) {
-    const contribution = 1 / (RRF_K + item.rank);
+    const contribution = w.bm25 * (1 / (RRF_K + item.rank));
     const existing = scores.get(item.id);
     if (existing) {
       existing.score += contribution;
@@ -38,7 +50,7 @@ export function rrfMerge(
   }
 
   for (const item of graphList) {
-    const contribution = 1 / (RRF_K + item.rank);
+    const contribution = w.graph * (1 / (RRF_K + item.rank));
     const existing = scores.get(item.id);
     if (existing) {
       existing.score += contribution;
@@ -54,7 +66,7 @@ export function rrfMerge(
 
   if (vectorList) {
     for (const item of vectorList) {
-      const contribution = 1 / (RRF_K + item.rank);
+      const contribution = w.vector * (1 / (RRF_K + item.rank));
       const existing = scores.get(item.id);
       if (existing) {
         existing.score += contribution;
@@ -91,8 +103,8 @@ export function hybridRetrieve(
 
   if (bm25List.length === 0 && graphList.length === 0) return [];
 
-  // Step 3: RRF merge
-  const merged = rrfMerge(bm25List, graphList);
+  // Step 3: RRF merge (uses global RRF_WEIGHTS)
+  const merged = rrfMerge(bm25List, graphList, undefined, RRF_WEIGHTS);
 
   // Sort by RRF score descending
   const sorted = Array.from(merged.values())
