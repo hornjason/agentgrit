@@ -123,6 +123,18 @@ export async function getContextRules(
   }
 
   // 4. 3-way RRF merge when vectors available, otherwise score-based ranking
+  const NODE_TYPE_WEIGHT: Record<string, number> = {
+    feedback: 1.0,
+    steering: 1.0,
+    success: 0.8,
+    project: 0.3,
+    reference: 0.5,
+  };
+  function nodeTypeWeight(id: string): number {
+    const prefix = id.split("_")[0];
+    return NODE_TYPE_WEIGHT[prefix] ?? 1.0;
+  }
+
   let ranked: Array<[string, number]>;
 
   if (vectorScores) {
@@ -134,11 +146,13 @@ export async function getContextRules(
 
     const merged = rrfMerge(bm25List, graphList, vectorList, RRF_WEIGHTS);
     ranked = Array.from(merged.values())
+      .map(e => ({ ...e, score: e.score * nodeTypeWeight(e.id) }))
       .sort((a, b) => b.score - a.score)
       .slice(0, limit)
       .map(e => [e.id, e.score] as [string, number]);
   } else {
     ranked = Array.from(scores.entries())
+      .map(([id, s]) => [id, s * nodeTypeWeight(id)] as [string, number])
       .sort((a, b) => b[1] - a[1])
       .slice(0, limit);
   }
