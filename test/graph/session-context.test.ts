@@ -77,6 +77,20 @@ describe("writeSessionContext", () => {
     expect(data.domains).toEqual(["deployment", "verification"]);
     expect(new Date(data.timestamp).getTime()).toBeGreaterThan(0);
     expect(data.ttl).toBe(24 * 60 * 60 * 1000);
+    expect(data.totalContextLines).toBe(0);
+  });
+
+  test("writes totalContextLines when provided", () => {
+    writeSessionContext(
+      [{ id: "rule-x", text: "text", tier: "graph" as any, tags: [], created: "", correlationScore: 0, sourceSignals: [], schemaVersion: 1 }],
+      ["deployment"],
+      "keyword",
+      142,
+    );
+    const data = JSON.parse(
+      readFileSync(join(TMP_DIR, "state", "session-context.json"), "utf-8"),
+    ) as SessionContext;
+    expect(data.totalContextLines).toBe(142);
   });
 
   test("creates state directory if it does not exist", () => {

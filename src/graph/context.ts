@@ -9,7 +9,7 @@
 
 import type { Graph, BM25Index } from "./types";
 import { Tier, type Rule, type EmbeddingProvider } from "../adapters/types";
-import { searchIndex } from "./bm25";
+import { searchIndex, tokenize } from "./bm25";
 import { queryTrajectoriesSync } from "../detect/trajectories";
 import { loadVectorCache, computeCentroid, rankByVectorSimilarity } from "./embeddings";
 import { rrfMerge, RRF_WEIGHTS } from "./retrieval";
@@ -201,6 +201,78 @@ export async function getContextRules(
   return rules;
 }
 
+// ── Learned Rules Filtering ──
+
+export function parseLearnedRules(content: string): string[] {
+  const rules: string[] = [];
+  const lines = content.split("\n");
+  let current = "";
+
+  for (const line of lines) {
+    if (line.startsWith("- **")) {
+      if (current) rules.push(current.trim());
+      current = line;
+    } else if (current && line.startsWith("  ") && line.trim()) {
+      current += "\n" + line;
+    } else if (current && line.trim() === "") {
+      // blank line ends a rule only if next non-blank isn't a continuation
+    } else if (current && !line.startsWith("- **") && !line.startsWith("#") && line.trim()) {
+      current += " " + line.trim();
+    } else if (current) {
+      rules.push(current.trim());
+      current = "";
+    }
+  }
+  if (current) rules.push(current.trim());
+
+  return rules;
+}
+
+export function filterLearnedRules(rules: string[], queryText: string, topK: number = 10): string[] {
+  if (rules.length === 0 || !queryText.trim()) return rules.slice(0, topK);
+  if (rules.length <= topK) return rules;
+
+  const queryTokens = tokenize(queryText);
+  if (queryTokens.length === 0) return rules.slice(0, topK);
+
+  const N = rules.length;
+  const docs = rules.map((rule, i) => {
+    const tokens = tokenize(rule);
+    const counts: Record<string, number> = {};
+    for (const t of tokens) counts[t] = (counts[t] || 0) + 1;
+    return { id: String(i), tokens: counts, len: tokens.length };
+  });
+
+  const avgDocLen = docs.reduce((s, d) => s + d.len, 0) / N;
+
+  const df: Record<string, number> = {};
+  for (const doc of docs) {
+    for (const term of Object.keys(doc.tokens)) {
+      df[term] = (df[term] || 0) + 1;
+    }
+  }
+
+  const K1 = 1.5;
+  const B = 0.75;
+
+  const scored = docs.map((doc, i) => {
+    let score = 0;
+    for (const term of queryTokens) {
+      const termDf = df[term];
+      if (!termDf) continue;
+      const tf = doc.tokens[term] || 0;
+      if (tf === 0) continue;
+      const idf = Math.log((N - termDf + 0.5) / (termDf + 0.5) + 1);
+      const tfNorm = (tf * (K1 + 1)) / (tf + K1 * (1 - B + B * (doc.len / avgDocLen)));
+      score += idf * tfNorm;
+    }
+    return { index: i, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, topK).map(s => rules[s.index]);
+}
+
 // ── Session Context Attribution ──
 
 import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "fs";
@@ -219,9 +291,10 @@ export interface SessionContext {
   ttl: number;
   rulesInjectedCount: number;
   rulesInjectedKB: number;
+  totalContextLines: number;
 }
 
-export function writeSessionContext(rules: Rule[], domains: string[], domainSource: "metadata" | "keyword" | "bm25" = "keyword"): void {
+export function writeSessionContext(rules: Rule[], domains: string[], domainSource: "metadata" | "keyword" | "bm25" = "keyword", totalContextLines: number = 0): void {
   const filePath = statePath(SESSION_CONTEXT_FILE);
   const dir = dirname(filePath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -237,6 +310,7 @@ export function writeSessionContext(rules: Rule[], domains: string[], domainSour
     ttl: SESSION_CONTEXT_TTL_MS,
     rulesInjectedCount,
     rulesInjectedKB,
+    totalContextLines,
   };
 
   writeFileSync(filePath, JSON.stringify(context, null, 2), "utf-8");

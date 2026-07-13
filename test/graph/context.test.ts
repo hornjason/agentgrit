@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { existsSync, rmSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
-import { getContextRules, detectDomains } from "../../src/graph/context";
+import { getContextRules, detectDomains, parseLearnedRules, filterLearnedRules } from "../../src/graph/context";
 import { buildIndex } from "../../src/graph/bm25";
 import type { Graph } from "../../src/graph/types";
 import type { GraphNode } from "../../src/adapters/types";
@@ -223,5 +223,94 @@ describe("getContextRules", () => {
     expect(rules[0].id).toBe("traj-1");
     expect(rules[0].text).toContain("[trajectory]");
     expect(rules[0].text).toContain("Fixed auth flow with retry");
+  });
+});
+
+describe("parseLearnedRules", () => {
+  test("parses bullet-point rules from CLAUDE-LEARNED.md format", () => {
+    const content = `# PAI Learned Rules
+
+### Learned Rules
+
+- **Rule One (from debrief 2026-04-17):** First rule description here.
+- **Rule Two (from session 2026-06-07):** Second rule description.
+- **Rule Three (from debrief 2026-04-18):** Third rule with multi-word description text.
+`;
+    const rules = parseLearnedRules(content);
+    expect(rules.length).toBe(3);
+    expect(rules[0]).toContain("Rule One");
+    expect(rules[1]).toContain("Rule Two");
+    expect(rules[2]).toContain("Rule Three");
+  });
+
+  test("handles rules with continuation lines", () => {
+    const content = `### Learned Rules
+
+- **Verify Fix (from debrief 2026-04-18):** After any fix check the actual output.
+  *(promoted from /debrief 2026-04-18 via LearningReview)*
+- **Next Rule (from session):** Simple rule.
+`;
+    const rules = parseLearnedRules(content);
+    expect(rules.length).toBe(2);
+    expect(rules[0]).toContain("promoted from");
+  });
+
+  test("returns empty array for content with no rules", () => {
+    const content = `# Just a header\n\nSome text without rules.\n`;
+    const rules = parseLearnedRules(content);
+    expect(rules.length).toBe(0);
+  });
+
+  test("handles empty content", () => {
+    expect(parseLearnedRules("")).toEqual([]);
+  });
+});
+
+describe("filterLearnedRules", () => {
+  const rules = [
+    "- **Deploy Gate (from debrief):** Always run make rebuild before deploying containers to production.",
+    "- **Verify First (from session):** Verify all endpoints are up and responding before asserting success.",
+    "- **Security Scan (from debrief):** Run security vulnerability scan on all changed files.",
+    "- **Scope Guard (from session):** Keep changes minimal and focused on the original request.",
+    "- **Test Coverage (from debrief):** Write regression tests before fixing any bug.",
+    "- **UI Validation (from session):** Use Playwright for visual testing and screenshot comparison.",
+    "- **Data Pipeline (from debrief):** Validate output preserves existing enriched fields before overwriting.",
+    "- **Git Commits (from session):** Commit after every working change with descriptive messages.",
+    "- **Architecture Docs (from debrief):** Update PRINCIPLES.md and CONTEXT.md when changing architecture.",
+    "- **Container Build (from session):** Use Makefile targets for all container operations.",
+    "- **Quinn Testing (from debrief):** Quinn must test outcomes not just mechanisms.",
+    "- **Marcus Execute (from session):** Marcus must execute and write code, never enter plan mode.",
+  ];
+
+  test("returns top-K rules ranked by BM25 relevance", () => {
+    const filtered = filterLearnedRules(rules, "deploy containers make rebuild", 3);
+    expect(filtered.length).toBe(3);
+    expect(filtered[0]).toContain("Deploy Gate");
+  });
+
+  test("returns all rules when count <= topK", () => {
+    const few = rules.slice(0, 3);
+    const filtered = filterLearnedRules(few, "deploy", 10);
+    expect(filtered.length).toBe(3);
+  });
+
+  test("returns topK slice for empty query", () => {
+    const filtered = filterLearnedRules(rules, "", 5);
+    expect(filtered.length).toBe(5);
+  });
+
+  test("returns empty for empty rules", () => {
+    expect(filterLearnedRules([], "deploy", 5)).toEqual([]);
+  });
+
+  test("filters to <= 10 from a larger set", () => {
+    const filtered = filterLearnedRules(rules, "security vulnerability scan deploy", 10);
+    expect(filtered.length).toBeLessThanOrEqual(10);
+    expect(filtered.length).toBeGreaterThan(0);
+  });
+
+  test("security query ranks security rule higher than deploy rule", () => {
+    const filtered = filterLearnedRules(rules, "security vulnerability scan", 3);
+    expect(filtered[0]).toContain("Security Scan");
   });
 });
