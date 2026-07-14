@@ -7,9 +7,9 @@ updated: 2026-07-08
 
 # AgentGrit System Spec
 
-**Version:** 1.0 (2026-07-08)
+**Version:** 1.1 (2026-07-14)
 **Package:** @agentgrit/core@0.1.4 on npm
-**Tests:** 907 pass, 0 fail across 83 files
+**Tests:** 1166 pass, 0 fail across 99 files
 
 ## Purpose
 
@@ -96,7 +96,7 @@ At session start, inject only the rules relevant to the current task.
 - ADR-001 (`docs/adr/ADR-001-correlation-driven-rule-injection.md`) — correlation-driven injection
 - ADR-005 (`docs/adr/ADR-005-bm25-first-retrieval.md`) — BM25-first retrieval, co-occurrence edges
 
-### 4b. Multi-Layer Context Gating (planned — #102)
+### 4b. Multi-Layer Context Gating (shipped #103, #104 — remaining: #129)
 
 **Problem:** Rules are precision-gated (0.76) but only account for 2.5% of total context. The other 97.5% (~4,876 lines) is bulk-loaded regardless of task type:
 
@@ -134,17 +134,18 @@ At session start, inject only the rules relevant to the current task.
 
 ### 5. Recall Measurement (`src/evaluate/`)
 
-| Metric | Current (2026-07-08) | Target |
-|--------|---------------------|--------|
-| recall@5 | 0.832 | ≥ 0.82 |
-| precision@5 | 0.490 | ≥ 0.70 |
-| MRR | 0.89 | ≥ 0.90 |
-| Universal rules | 11 | ≤ 12 |
-| Session rule load | ~19 rules | ≤ 20 |
+| Metric | Current (2026-07-14) | Target | Status |
+|--------|---------------------|--------|--------|
+| recall@5 | 0.37 | ≥ 0.82 | Revise target (#126) |
+| recall@15 | 0.61 | — | Most rules found by rank 15 |
+| precision@5 | 0.76 | ≥ 0.70 | ✅ MET |
+| MRR | 0.96 | ≥ 0.90 | ✅ MET |
+| Universal rules | 11 | ≤ 12 | ✅ MET |
+| Session rule load | ~15 rules | ≤ 20 | ✅ MET |
 
-Measured by `RecallEvaluator` over 34 sessions. `session-context.json` records which rules were loaded and which domain detection method was used (`domain_source: "metadata" | "keyword" | "bm25"`).
+Measured by `RecallEvaluator` over 60-session gold set (34 real + 26 synthetic). `session-context.json` records which rules were loaded and which domain detection method was used (`domain_source: "metadata" | "keyword" | "bm25" | "propagation" | "ai"`).
 
-**Precision gap:** 0.490 vs 0.70 target. Root cause: keyword-based domain detection produces false positives (5-6 domains when 2-3 is correct). BM25 inference (#104) is the planned fix.
+**Precision gap: CLOSED.** Achieved 0.76 via hybrid BM25+vector+graph retrieval + node-type weighting + hub-dampening. recall@5 target under revision (#126) — top-5 is tight with larger relevant sets.
 
 ### 6. Rule Lifecycle Management
 
@@ -155,13 +156,15 @@ Measured by `RecallEvaluator` over 34 sessions. `session-context.json` records w
 - **Self-healing** — new graph nodes auto-classified into `rule-domains.json` at session start
 - **Auto-prune** — `pruneTobudget()` runs when over budget cap
 
-**GAP: Eviction doesn't clean rule-domains.json.** Rules evicted from CLAUDE.md leave stale entries in rule-domains.json. Weekly LearningReview should remove them but doesn't reference rule-domains.json yet. Tracked: AG #81 + PAI #98.
+**GAP: Eviction doesn't clean rule-domains.json.** Rules evicted from CLAUDE.md leave stale entries in rule-domains.json. Tracked: #123.
 
-**FIXED: Auto-review of domain classifications.** `reviewDomains()` in `promote/domain-review.ts` compares auto-assigned vs BM25-inferred domains. 26/71 rules promoted to `source: "reviewed"` (36.6%). Shipped #115.
+**SHIPPED: Auto-review of domain classifications (#115).** `reviewDomains()` in `promote/domain-review.ts` compares auto-assigned vs BM25-inferred domains. 26/71 rules promoted to `source: "reviewed"` (36.6%).
 
-**GAP: Rating signal has 2.4-point optimism bias.** Haiku implicit sentiment averages 5.6 vs explicit user ratings at 3.2. Eviction system functionally dead — zero rules with 5+ injections fall below 4.0. Council decision (2026-07-14): replace with correction-weighted objective scoring (base 5.0, mutual-exclusive Haiku fallback, config-driven coefficients). Tracked: #120.
+**SHIPPED: Rating optimism bias fix (#120).** Correction-weighted objective scoring (base 5.0 - corrections×0.5 - reprompts×0.3 - iterations×0.3 + first_pass_gates×1.0 + uninterrupted_runs×0.3). Mutual-exclusive Haiku: only fires for zero-signal sessions. All coefficients config-driven. Council-approved design.
 
-**GAP: Session-level bulk rating.** 187/201 rules share identical session_ratings arrays. Per-rule discrimination impossible until interaction-level attribution ships. Tracked: #122.
+**SHIPPED: Interaction-level rule attribution (#122).** Per-rule BM25 correlation with correction context via `attributeRulesToCorrections()`. Rules with similarity > 0.3 get -0.5 penalty per correction. Replaces session-level bulk rating.
+
+**SHIPPED: LLM classification for isolated nodes.** `classifyIsolatedNodes()` in `src/graph/classify-isolated.ts`. Daemon step 3c runs periodically. 19/20 isolated nodes classified on first run. `domainSource = "ai"`. CLI: `agentgrit graph classify`.
 
 ## Integration: AgentGrit ↔ Claude Code
 
@@ -197,9 +200,12 @@ AgentGrit is imported at runtime via dynamic `import()`. If unavailable, PAI fal
 | Skill optimization | COMPLETE | 75 tests pass |
 | Track 1 ports (#63-74) | ALL CLOSED | 12/12 verified 2026-07-08 |
 | Track 1 cutover (#75) | OPEN | Prerequisites met |
-| Package exports | MISSING | No programmatic API surface |
-| Claude Code hook templates | MISSING | `agentgrit init --claude-code` not built |
-| Multi-layer context | GAP | Only retrieves feedback rules. Project docs, skills not precision-gated. |
+| LLM isolated node classification | SHIPPED | `classifyIsolatedNodes()` + daemon step 3c + CLI `graph classify` |
+| Rating bias fix | SHIPPED | Correction-weighted scoring (#120), mutual-exclusive Haiku |
+| Rule attribution | SHIPPED | Per-rule BM25 correlation (#122) |
+| Package exports | OPEN | #124 — index.ts with typed API surface |
+| Claude Code hook templates | OPEN | #125 — `agentgrit init --claude-code` generator |
+| Multi-layer context | PARTIALLY SHIPPED | CLAUDE-LEARNED BM25-filtered (#103), section-level docs (#104). Ship ceremony docs still bulk-load (#129). |
 
 ## Specs & ADRs
 
@@ -218,12 +224,12 @@ AgentGrit is imported at runtime via dynamic `import()`. If unavailable, PAI fal
 ## Success Metrics
 
 The system succeeds when:
-1. **Recall@5:** ≥82% of needed rules in top 5 retrieved — **NOT MET (0.37). recall@15 = 0.61.** Top-5 is tight with larger relevant sets; most rules found by rank 15.
-2. **Precision@5:** ≥70% of retrieved rules are relevant — **MET (0.76)** ✅ Achieved via hybrid BM25+vector+graph retrieval + node-type weighting.
+1. **Recall@5:** ≥82% target — **0.37 (under revision #126).** recall@15 = 0.61. Top-5 is tight with larger relevant sets; most rules found by rank 15. Revising to recall@15 ≥ 0.60 or increasing top-K.
+2. **Precision@5:** ≥70% — **MET (0.76)** ✅ Hybrid BM25+vector+graph retrieval + node-type weighting + hub-dampening.
 3. **MRR:** ≥0.90 — **MET (0.96)** ✅ First relevant rule is typically rank 1 or 2.
 4. **Rule budget:** ≤12 universal + ≤20 domain-filtered per session — **MET (11 + ~15)**
-5. **Zero repeat corrections:** same mistake never rated ≤3 twice — **PARTIALLY MET (some patterns recur)**
-6. **Self-maintaining:** rules added, classified, correlated, and evicted without manual intervention — **MET (eviction #85, attribution #99, regression gate #99)**
-7. **Self-improving:** rated sessions automatically improve retrieval quality — **MET (attribution feedback → edge weights → better retrieval #99)**
+5. **Zero repeat corrections:** same mistake never rated ≤3 twice — **GAP (#127).** 170x repeated corrections not prevented by promoted rules. Effectiveness tracking planned.
+6. **Self-maintaining:** rules added, classified, correlated, and evicted without manual intervention — **MET (eviction #85, attribution #99, LLM classify, domain review #115)**
+7. **Self-improving:** rated sessions automatically improve retrieval quality — **MET (attribution feedback → edge weights → better retrieval #99, correction-weighted scoring #120)**
 
 **Measurement note (2026-07-13):** Precision measured on 60-session gold set (34 real + 26 synthetic, all audited for under-labeling). Hybrid retrieval: BM25 (2x weight) + vector similarity (0.5x) + graph expansion (1x). Node-type weighting: feedback/steering 1.0x, success 0.8x, reference 0.5x, project 0.3x. 382 pre-computed vectors via all-MiniLM-L6-v2.
