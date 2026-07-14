@@ -15,6 +15,14 @@ updated: 2026-07-08
 
 AgentGrit is a self-learning engine that makes AI coding agents smarter over time. It captures behavioral signals during sessions, extracts patterns, promotes proven patterns to rules, injects only the relevant rules per session, measures whether the right rules fired, and evicts rules that don't help. The goal: **the user should never have to correct the same mistake twice.** Every correction compounds into permanent improvement.
 
+## Design Principles
+
+1. **Nothing hardcoded, everything lifecycled.** Domain vocabularies, rule classifications, keyword patterns, and scoring weights must all be derived from graph data and updated through the learning loop — not maintained as static lists. Hardcoded values are technical debt that prevents the system from self-improving. Any configuration that exists today as a static regex, keyword list, or threshold constant should have a migration path to graph-derived, dynamically-updated state.
+
+2. **The graph is the source of truth.** Rules, domains, correlations, and retrieval quality all live in the graph. External files (CLAUDE.md, rule-domains.json, keyword classifier) are caches or fallbacks — never primary. When the graph has enough signal, the fallback should stop firing.
+
+3. **Measure before and after every change.** No change ships without a precision/recall measurement on the gold set. Context accuracy (relevance % of injected rules) is measured live during ship sessions, not just in offline evals.
+
 ## The Learning Loop
 
 ```
