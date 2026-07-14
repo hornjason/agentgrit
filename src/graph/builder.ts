@@ -5,6 +5,7 @@ import { createHash } from "crypto";
 import { getBaseDir, stateDir } from "../adapters/paths";
 import type { GraphNode, GraphEdge, Rule } from "../adapters/types";
 import type { Graph } from "./types";
+import { propagateDomains } from "./domain-propagation";
 
 // ── Domain Taxonomy ──
 
@@ -80,6 +81,7 @@ function applyDomainOverrides(
     );
     if (valid.length > 0) {
       node.domains = valid;
+      node.domainSource = "override";
       count++;
     }
   }
@@ -397,10 +399,10 @@ export async function buildGraph(rulesDir: string, stateOutputDir?: string, rule
   const files = discoverRuleFiles(rulesDir);
   const existingGraph = readGraph();
 
-  const cachedHashes = new Map<string, { domains: string[]; hash: string }>();
+  const cachedHashes = new Map<string, { domains: string[]; hash: string; domainSource?: GraphNode["domainSource"] }>();
   for (const node of Object.values(existingGraph.nodes)) {
     if (node.content_hash) {
-      cachedHashes.set(node.id, { domains: node.domains, hash: node.content_hash });
+      cachedHashes.set(node.id, { domains: node.domains, hash: node.content_hash, domainSource: node.domainSource });
     }
   }
 
@@ -414,11 +416,14 @@ export async function buildGraph(rulesDir: string, stateOutputDir?: string, rule
 
     const cached = cachedHashes.get(file.id);
     let domains: string[];
+    let domainSource: GraphNode["domainSource"];
     if (cached && cached.hash === hash) {
       domains = cached.domains;
+      domainSource = cached.domainSource;
     } else {
       const classified = keywordClassify(name, desc, bodyText);
       domains = classified || [];
+      domainSource = classified ? "keyword" : undefined;
     }
 
     const existing = existingGraph.nodes[file.id];
@@ -429,6 +434,7 @@ export async function buildGraph(rulesDir: string, stateOutputDir?: string, rule
       name,
       description: desc || bodyText.trim().slice(0, 500),
       domains,
+      domainSource,
       severity: inferSeverity(bodyText),
       occurrence_count: existing?.occurrence_count ?? 0,
       last_updated: existing?.last_updated ?? new Date().toISOString(),
@@ -493,6 +499,9 @@ export async function buildGraph(rulesDir: string, stateOutputDir?: string, rule
     }
   }
 
+  // BM25 neighbor propagation + text similarity for unclassified nodes
+  propagateDomains(nodes, allEdges);
+
   const graph: Graph = {
     version: "1.0",
     builtAt: new Date().toISOString(),
@@ -525,10 +534,10 @@ export async function buildGraphWithAI(
   const files = discoverRuleFiles(rulesDir);
   const existingGraph = readGraph();
 
-  const cachedHashes = new Map<string, { domains: string[]; hash: string }>();
+  const cachedHashes = new Map<string, { domains: string[]; hash: string; domainSource?: GraphNode["domainSource"] }>();
   for (const node of Object.values(existingGraph.nodes)) {
     if (node.content_hash) {
-      cachedHashes.set(node.id, { domains: node.domains, hash: node.content_hash });
+      cachedHashes.set(node.id, { domains: node.domains, hash: node.content_hash, domainSource: node.domainSource });
     }
   }
 
@@ -542,11 +551,13 @@ export async function buildGraphWithAI(
 
     const cached = cachedHashes.get(file.id);
     let domains: string[];
+    let domainSource: GraphNode["domainSource"];
     if (cached && cached.hash === hash) {
       domains = cached.domains;
+      domainSource = cached.domainSource;
     } else {
-      // Use AI detector for changed/new nodes
       domains = await detector.detect(name, desc, bodyText);
+      domainSource = domains.length > 0 ? "ai" : undefined;
     }
 
     const existing = existingGraph.nodes[file.id];
@@ -557,6 +568,7 @@ export async function buildGraphWithAI(
       name,
       description: desc || bodyText.trim().slice(0, 500),
       domains,
+      domainSource,
       severity: inferSeverity(bodyText),
       occurrence_count: existing?.occurrence_count ?? 0,
       last_updated: existing?.last_updated ?? new Date().toISOString(),
@@ -620,6 +632,9 @@ export async function buildGraphWithAI(
     }
   }
 
+  // BM25 neighbor propagation + text similarity for unclassified nodes
+  propagateDomains(nodes, allEdges);
+
   const graph: Graph = {
     version: "1.0",
     builtAt: new Date().toISOString(),
@@ -648,12 +663,15 @@ export function updateGraph(graph: Graph, newRules: Rule[]): Graph {
 
   for (const rule of newRules) {
     const hash = computeHash(rule.text);
-    const domains = keywordClassify(rule.id, rule.text, rule.text) || ["verification"];
+    const classified = keywordClassify(rule.id, rule.text, rule.text);
+    const domains = classified || ["verification"];
+    const domainSource: GraphNode["domainSource"] = classified ? "keyword" : undefined;
 
     if (updated.nodes[rule.id]) {
       updated.nodes[rule.id] = {
         ...updated.nodes[rule.id],
         domains,
+        domainSource,
         description: rule.text.slice(0, 500),
         content_hash: hash,
       };
@@ -667,6 +685,7 @@ export function updateGraph(graph: Graph, newRules: Rule[]): Graph {
       name: rule.id,
       description: rule.text.slice(0, 500),
       domains,
+      domainSource,
       severity: inferSeverity(rule.text),
       occurrence_count: 0,
       last_updated: new Date().toISOString(),

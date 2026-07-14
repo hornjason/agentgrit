@@ -133,6 +133,7 @@ export interface GraphNode {
   name: string;
   description: string;
   domains: string[];
+  domainSource?: "propagation" | "bm25" | "keyword" | "ai" | "override";
   severity: number;
   occurrence_count: number;
   last_updated: string;
