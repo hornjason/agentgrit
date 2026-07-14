@@ -1,3 +1,10 @@
+---
+doc-type: reference
+status: active
+owner: jason
+updated: 2026-07-14
+---
+
 # Plan: PAI Learning Loop → AgentGrit Migration
 
 ## Context
@@ -67,19 +74,25 @@ Every capability comparison must answer three questions before moving on:
 | P3 | Theme cohorts | 5 in-memory cohorts vs PAI's 6 with disk persistence. PAI's per-cohort rating analysis depends on `graph-node-stats.json` (PAI-specific). Disk persistence is caller responsibility. |
 | P6 | Learning readback | AgentGrit reads recentSignals + failurePatterns + themes. PAI adds wisdomFrames and signalTrends — both PAI-specific data sources. AgentGrit's `status` calculates trends independently. |
 
-### MISSING (12 capabilities — not in AgentGrit)
-1. **Implicit sentiment via LLM (Haiku)** — PAI's richest auto-signal. AgentGrit uses keywords only.
-2. **AutoFeedback generation** — LLM behavioral lesson extraction from low ratings
-3. **AutoSuccess capture** — positive outcome memory from high ratings
-4. **Contradiction check before promotion** — LLM-based duplicate/conflict detection
-5. **7-day gate for proposed rules** — time-gated promotion
-6. **Session-context.json** — rating-to-rule attribution snapshot
-7. **Token counting** — sessions.jsonl token usage tracking
-8. **Relationship context** — opinion injection at session start
-9. **Active work summary** — WORK/ dir progress injection
-10. **Agent-specific learning** — Marcus hard rules injection
-11. **Startup file loading** — settings.json-driven file injection
-12. **patterns.json for harness gates** — state file used by ship skill
+### MISSING (12 capabilities — 5 now BUILT, 2 DEFER, 5 PAI-specific)
+
+**BUILT (shipped 2026-07-13/14):**
+1. ~~**Implicit sentiment via LLM**~~ — BUILT (#113 G1). `scoreSentimentLLM()` in rating.ts, keyword fallback.
+2. ~~**AutoFeedback generation**~~ — BUILT (#82). `generateFeedback()` in daemon/feedback.ts.
+3. ~~**AutoSuccess capture**~~ — BUILT (#82). `generateSuccess()` in daemon/feedback.ts.
+4. ~~**Contradiction check before promotion**~~ — BUILT (#82). `checkContradiction()` in promote/contradiction.ts.
+5. ~~**7-day gate for proposed rules**~~ — BUILT (#113 G5). `COOLING_PERIOD_DAYS = 7` in promote/bridge.ts.
+6. ~~**Session-context.json**~~ — BUILT (#82). Written by `writeSessionContext()` in graph/context.ts.
+
+**DEFER (PAI-specific infrastructure):**
+7. **Token counting** — sessions.jsonl token usage tracking. PAI hook concern.
+8. **Relationship context** — opinion injection at session start. PAI personality concern.
+
+**PAI-SPECIFIC (stays in PAI hooks, not AgentGrit scope):**
+9. **Active work summary** — WORK/ dir progress injection (PAI session manager)
+10. **Agent-specific learning** — Marcus hard rules injection (PAI brief templates)
+11. **Startup file loading** — settings.json-driven file injection (PAI hooks)
+12. **patterns.json for harness gates** — state file used by ship skill (PAI workflow)
 
 ## Phase 1: Fix Pipeline Gaps (COMPLETE)
 
