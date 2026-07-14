@@ -47,8 +47,27 @@ describe("bootstrapCI", () => {
 describe("evaluateSessionRecall", () => {
   test("without cluster expansion", () => { const r = evaluateSessionRecall("s1", "test", ["a", "b", "c"], ["a", "d", "e", "b", "f"]); expect(r.recall5).toBeCloseTo(0.667, 2); expect(r.mrr).toBe(1); });
   test("with cluster expansion", () => { const n = new Map([["x", ["a"]]]); const r = evaluateSessionRecall("s1", "test", ["a"], ["x", "y", "z"], n); expect(r.recall3).toBe(1); expect(r.mrr).toBe(1); });
+  test("recall@15 captures rules beyond top-5", () => {
+    // 4 gold rules spread across 15 retrieved positions — only 1 in top-5, 3 in top-15
+    const gold = ["g1", "g2", "g3", "g4"];
+    const retrieved = ["g1", "x1", "x2", "x3", "x4", "x5", "x6", "g2", "x7", "x8", "x9", "x10", "g3", "x11", "x12"];
+    const r = evaluateSessionRecall("s1", "recall@15 test", gold, retrieved);
+    expect(r.recall5).toBe(0.25);   // 1/4 in top-5
+    expect(r.recall15).toBe(0.75);  // 3/4 in top-15
+  });
 });
 
 describe("aggregateRecallScores", () => {
   test("aggregates with CI", () => { const s = [evaluateSessionRecall("s1", "t1", ["a", "b"], ["a", "b", "c", "d", "e"]), evaluateSessionRecall("s2", "t2", ["x"], ["x", "y", "z", "w", "v"])]; const r = aggregateRecallScores(s, 1); expect(r.sessionsEvaluated).toBe(2); expect(r.sessionsSkipped).toBe(1); expect(r.meanRecall5).toBe(1); });
+  test("recall@15 aggregated as primary metric with CI", () => {
+    // Session 1: gold spread across 15 positions
+    const s1 = evaluateSessionRecall("s1", "wide spread", ["a", "b", "c", "d"], ["a", "x1", "x2", "x3", "x4", "x5", "b", "x6", "x7", "x8", "c", "x9", "x10", "x11", "d"]);
+    // Session 2: all gold in top-15
+    const s2 = evaluateSessionRecall("s2", "all found", ["p", "q"], ["p", "q", "r", "s", "t"]);
+    const r = aggregateRecallScores([s1, s2]);
+    expect(r.meanRecall15).toBe((s1.recall15 + s2.recall15) / 2);
+    expect(r.ci95Recall15).toBeDefined();
+    expect(r.ci95Recall15[0]).toBeLessThanOrEqual(r.meanRecall15);
+    expect(r.ci95Recall15[1]).toBeGreaterThanOrEqual(r.meanRecall15);
+  });
 });
