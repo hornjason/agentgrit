@@ -149,8 +149,8 @@ describe("hybridRetrieve", () => {
     const results = hybridRetrieve("deploy", [], graph, index);
     expect(results.length).toBe(1);
 
-    // rank=1, RRF_K=60: score = 1/(60+1) = 0.01639...
-    const expected = 1 / (60 + 1);
+    // rank=1, RRF_K=60, bm25 weight=2: score = 2 * 1/(60+1)
+    const expected = 2 / (60 + 1);
     expect(results[0].rrfScore).toBeCloseTo(expected, 4);
   });
 });
