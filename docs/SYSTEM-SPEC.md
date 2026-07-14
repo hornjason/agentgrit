@@ -157,7 +157,11 @@ Measured by `RecallEvaluator` over 34 sessions. `session-context.json` records w
 
 **GAP: Eviction doesn't clean rule-domains.json.** Rules evicted from CLAUDE.md leave stale entries in rule-domains.json. Weekly LearningReview should remove them but doesn't reference rule-domains.json yet. Tracked: AG #81 + PAI #98.
 
-**GAP: No human review of auto-classifications.** 50/71 rules in rule-domains.json are `source: "auto"`, 0 are `source: "reviewed"`. Domain assignments may be wrong.
+**FIXED: Auto-review of domain classifications.** `reviewDomains()` in `promote/domain-review.ts` compares auto-assigned vs BM25-inferred domains. 26/71 rules promoted to `source: "reviewed"` (36.6%). Shipped #115.
+
+**GAP: Rating signal has 2.4-point optimism bias.** Haiku implicit sentiment averages 5.6 vs explicit user ratings at 3.2. Eviction system functionally dead — zero rules with 5+ injections fall below 4.0. Council decision (2026-07-14): replace with correction-weighted objective scoring (base 5.0, mutual-exclusive Haiku fallback, config-driven coefficients). Tracked: #120.
+
+**GAP: Session-level bulk rating.** 187/201 rules share identical session_ratings arrays. Per-rule discrimination impossible until interaction-level attribution ships. Tracked: #122.
 
 ## Integration: AgentGrit ↔ Claude Code
 
