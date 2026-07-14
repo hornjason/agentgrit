@@ -17,11 +17,11 @@ afterEach(() => {
   if (existsSync(TMP_DIR)) rmSync(TMP_DIR, { recursive: true });
 });
 
-function makeNode(id: string, domains: string[], description?: string): GraphNode {
+function makeNode(id: string, domains: string[], description?: string, overrides?: Partial<GraphNode>): GraphNode {
   return {
     id,
     file: `${id}.md`,
-    type: "rule",
+    type: "feedback",
     name: `Rule: ${id}`,
     description: description || `Text for ${id}`,
     domains,
@@ -30,6 +30,7 @@ function makeNode(id: string, domains: string[], description?: string): GraphNod
     last_updated: new Date().toISOString(),
     content_hash: id.slice(0, 8),
     memoryType: "behavioral-rule",
+    ...overrides,
   };
 }
 
@@ -194,6 +195,86 @@ describe("getContextRules", () => {
 
     const rules = await getContextRules(graph, index, ["verification"]);
     expect(rules[0].text).toBe("Always verify before asserting anything");
+  });
+
+  test("hub-dampening reduces score for high-edge-count neighbors", async () => {
+    const hubNode = makeNode("hub_node", ["deployment"], "Hub with many edges");
+    const normalNode = makeNode("normal_node", ["deployment"], "Normal node with few edges");
+    const sourceNode = makeNode("source_node", ["deployment"], "deployment source deployment");
+    const graph = makeGraph([hubNode, normalNode, sourceNode]);
+
+    // Hub has 12 edges, normal has 1
+    const hubEdges = Array.from({ length: 12 }, (_, i) => ({
+      from: "hub_node",
+      to: `phantom_${i}`,
+      relationship: "sibling" as const,
+      strength: 0.5,
+    }));
+    graph.edges = [
+      ...hubEdges,
+      { from: "source_node", to: "hub_node", relationship: "reinforces" as const, strength: 0.8 },
+      { from: "source_node", to: "normal_node", relationship: "reinforces" as const, strength: 0.8 },
+    ];
+
+    const f1 = join(TMP_DIR, "source_node.md");
+    writeFileSync(f1, "deployment deployment deployment source", "utf-8");
+    const index = buildIndex([f1]);
+
+    const rules = await getContextRules(graph, index, ["deployment"], 10);
+    const hubRule = rules.find(r => r.id === "hub_node");
+    const normalRule = rules.find(r => r.id === "normal_node");
+    if (hubRule && normalRule) {
+      expect(hubRule.correlationScore).toBeLessThan(normalRule.correlationScore);
+    }
+  });
+
+  test("type-allowlist blocks reference and project nodes", async () => {
+    const graph = makeGraph([
+      makeNode("feedback_rule", ["deployment"], "Deploy gate feedback", { type: "feedback" }),
+      makeNode("reference_rule", ["deployment"], "Reference to deployment doc", { type: "reference" }),
+      makeNode("project_rule", ["deployment"], "Project deployment config", { type: "project" }),
+      makeNode("steering_rule", ["deployment"], "Steering for deployment", { type: "steering" }),
+    ]);
+
+    const files = ["feedback_rule", "reference_rule", "project_rule", "steering_rule"].map(id => {
+      const f = join(TMP_DIR, `${id}.md`);
+      writeFileSync(f, "deployment deployment deployment containers", "utf-8");
+      return f;
+    });
+    const index = buildIndex(files);
+
+    const rules = await getContextRules(graph, index, ["deployment"], 10);
+    const ids = rules.map(r => r.id);
+    expect(ids).toContain("feedback_rule");
+    expect(ids).toContain("steering_rule");
+    expect(ids).not.toContain("reference_rule");
+    expect(ids).not.toContain("project_rule");
+  });
+
+  test("type-allowlist allows nodes with undefined type", async () => {
+    const nodeNoType = makeNode("untyped_rule", ["deployment"], "Untyped deployment rule");
+    (nodeNoType as any).type = undefined;
+    const graph = makeGraph([nodeNoType]);
+
+    const f1 = join(TMP_DIR, "untyped_rule.md");
+    writeFileSync(f1, "deployment deployment deployment", "utf-8");
+    const index = buildIndex([f1]);
+
+    const rules = await getContextRules(graph, index, ["deployment"], 10);
+    expect(rules.map(r => r.id)).toContain("untyped_rule");
+  });
+
+  test("domainSource is propagated to returned Rule objects", async () => {
+    const graph = makeGraph([
+      makeNode("ds_rule", ["deployment"], "Deploy gate rule", { domainSource: "bm25" }),
+    ]);
+
+    const f1 = join(TMP_DIR, "ds_rule.md");
+    writeFileSync(f1, "deployment deployment deploy gate", "utf-8");
+    const index = buildIndex([f1]);
+
+    const rules = await getContextRules(graph, index, ["deployment"], 10);
+    expect(rules[0].domainSource).toBe("bm25");
   });
 
   test("includes trajectory data when signalDir provided", async () => {

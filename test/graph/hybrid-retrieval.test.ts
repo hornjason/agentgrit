@@ -23,7 +23,7 @@ function makeNode(id: string, domains: string[], description?: string): GraphNod
   return {
     id,
     file: `${id}.md`,
-    type: "rule",
+    type: "feedback",
     name: `Rule: ${id}`,
     description: description || `Text for ${id}`,
     domains,

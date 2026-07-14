@@ -28,7 +28,7 @@ function makeNode(id: string, domains: string[]): GraphNode {
   return {
     id,
     file: `${id}.md`,
-    type: "rule",
+    type: "feedback",
     name: `Rule: ${id}`,
     description: `Text for ${id}`,
     domains,

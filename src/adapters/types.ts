@@ -85,6 +85,7 @@ export interface Rule {
   correlationScore: number;
   sourceSignals: string[];
   schemaVersion: number;
+  domainSource?: "propagation" | "bm25" | "keyword" | "ai" | "override";
   injectionCount?: number;
   avgCorrelatedRating?: number;
   highRatingActivations?: number;

@@ -106,6 +106,13 @@ export async function getContextRules(
   // 3. Graph expansion — for each BM25 hit, expand 1-hop via edges
   const scores = new Map<string, number>();
 
+  // Precompute edge counts for hub-dampening
+  const edgeCounts = new Map<string, number>();
+  for (const edge of graph.edges) {
+    edgeCounts.set(edge.from, (edgeCounts.get(edge.from) || 0) + 1);
+    edgeCounts.set(edge.to, (edgeCounts.get(edge.to) || 0) + 1);
+  }
+
   for (const hit of bm25Results) {
     scores.set(hit.id, Math.max(scores.get(hit.id) || 0, hit.score));
 
@@ -119,7 +126,12 @@ export async function getContextRules(
       else if (edge.to === hit.id) neighborId = edge.from;
       if (!neighborId || !graph.nodes[neighborId]) continue;
 
-      const expandedScore = hit.score * EXPANSION_DECAY;
+      let expandedScore = hit.score * EXPANSION_DECAY;
+      // Hub-dampening: suppress high-connectivity nodes
+      const nEdges = edgeCounts.get(neighborId) || 0;
+      if (nEdges >= 10) {
+        expandedScore *= 1 / Math.log2(nEdges);
+      }
       scores.set(neighborId, Math.max(scores.get(neighborId) || 0, expandedScore));
     }
   }
@@ -159,11 +171,19 @@ export async function getContextRules(
       .slice(0, limit);
   }
 
-  // 5. Build rule objects
+  // 5. Type-allowlist — defense-in-depth filter
+  const ALLOWED_TYPES = new Set(["feedback", "steering", "success", "learned"]);
+  const filtered = ranked.filter(([id]) => {
+    const t = graph.nodes[id]?.type;
+    if (!t) return true;
+    return ALLOWED_TYPES.has(t);
+  });
+
+  // 6. Build rule objects
   const resultIds = new Set<string>();
   const rules: Rule[] = [];
 
-  for (const [id, score] of ranked) {
+  for (const [id, score] of filtered) {
     resultIds.add(id);
     const node = graph.nodes[id];
 
@@ -174,12 +194,13 @@ export async function getContextRules(
       tags: node?.domains || [],
       created: node?.last_updated || new Date().toISOString(),
       correlationScore: score,
+      domainSource: node?.domainSource,
       sourceSignals: [],
       schemaVersion: 1,
     });
   }
 
-  // 6. Trajectory backfill
+  // 7. Trajectory backfill
   if (signalDir && rules.length < limit) {
     const remaining = limit - rules.length;
     const trajectories = queryTrajectoriesSync(domains, signalDir, remaining);
