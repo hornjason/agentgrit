@@ -13,8 +13,13 @@ import {
   wordOverlapRatio,
   scoreSession,
   captureSessionSentiment,
+  scoreSessionObjective,
+  parseThumbsRating,
+  countUninterruptedRuns,
+  countShortFrustrated,
 } from "../../src/capture/rating";
-import type { Turn } from "../../src/capture/rating";
+import type { Turn, ObjectiveScoreInput } from "../../src/capture/rating";
+import type { AgentGritConfig } from "../../src/adapters/types";
 import type { InferenceOptions, InferenceResult } from "../../src/adapters/inference";
 
 const TMP_DIR = join(import.meta.dir, ".tmp-rating-test");
@@ -409,27 +414,21 @@ describe("captureRating", () => {
 });
 
 describe("captureSessionSentiment", () => {
-  test("writes sentiment signal for non-empty turns", async () => {
-    const turns: Turn[] = [
-      { role: "user", text: "fix the bug", charCount: 11 },
-      { role: "assistant", text: "Fixed.", charCount: 6 },
-      { role: "user", text: "perfect, great work", charCount: 19 },
-    ];
-
-    const signal = await captureSessionSentiment(turns, "test-session");
-    expect(signal).not.toBeNull();
-    expect(signal!.type).toBe("sentiment");
-    expect(signal!.source).toBe("transcript-analysis");
-    expect(signal!.rating).toBeGreaterThan(0);
-    expect(signal!.confidence).toBeGreaterThan(0);
-  });
-
   test("returns null for empty turns", async () => {
     const signal = await captureSessionSentiment([], "test-session");
     expect(signal).toBeNull();
   });
 
-  test("attaches correction and approval counts", async () => {
+  test("returns null when zero signals (lets Haiku handle)", async () => {
+    const turns: Turn[] = [
+      { role: "user", text: "check the build", charCount: 15 },
+      { role: "assistant", text: "Build passes.", charCount: 13 },
+    ];
+    const signal = await captureSessionSentiment(turns, "test-session");
+    expect(signal).toBeNull();
+  });
+
+  test("uses v2 scorer when corrections exist", async () => {
     const turns: Turn[] = [
       { role: "assistant", text: "I refactored it.", charCount: 16 },
       { role: "user", text: "wrong, just fix the bug", charCount: 23 },
@@ -439,7 +438,219 @@ describe("captureSessionSentiment", () => {
 
     const signal = await captureSessionSentiment(turns, "test-session");
     expect(signal).not.toBeNull();
+    expect(signal!.scorer_version).toBe("v2");
     expect(signal!.corrections).toBe(1);
     expect(signal!.approvals).toBe(1);
+  });
+
+  test("uses v2 scorer when gateRuns > 0", async () => {
+    const turns: Turn[] = [
+      { role: "user", text: "check the build", charCount: 15 },
+      { role: "assistant", text: "Build passes.", charCount: 13 },
+    ];
+    const signal = await captureSessionSentiment(turns, "test-session", { gateRuns: 3 });
+    expect(signal).not.toBeNull();
+    expect(signal!.scorer_version).toBe("v2");
+  });
+
+  test("uses v2 scorer when hasExplicitRating is true", async () => {
+    const turns: Turn[] = [
+      { role: "user", text: "check the build", charCount: 15 },
+      { role: "assistant", text: "Build passes.", charCount: 13 },
+    ];
+    const signal = await captureSessionSentiment(turns, "test-session", { hasExplicitRating: true });
+    expect(signal).not.toBeNull();
+    expect(signal!.scorer_version).toBe("v2");
+  });
+});
+
+describe("scoreSessionObjective", () => {
+  const BASE_INPUT: ObjectiveScoreInput = {
+    corrections: 0,
+    reprompts: 0,
+    iterations: 0,
+    firstPassGates: 0,
+    uninterruptedRuns: 0,
+    shortFrustrated: 0,
+  };
+
+  test("returns base score 5.0 with no signals", () => {
+    const result = scoreSessionObjective(BASE_INPUT);
+    expect(result.score).toBe(5);
+    expect(result.scorer_version).toBe("v2");
+    expect(result.breakdown.base).toBe(5);
+  });
+
+  test("corrections reduce score with no cap", () => {
+    const result = scoreSessionObjective({ ...BASE_INPUT, corrections: 4 });
+    expect(result.score).toBe(3);
+    expect(result.breakdown.correctionPenalty).toBe(-2);
+  });
+
+  test("many corrections drive score below base significantly (no cap)", () => {
+    const result = scoreSessionObjective({ ...BASE_INPUT, corrections: 10 });
+    expect(result.score).toBe(1);
+    expect(result.breakdown.correctionPenalty).toBe(-5);
+  });
+
+  test("reprompts reduce score with -1.5 cap", () => {
+    const result = scoreSessionObjective({ ...BASE_INPUT, reprompts: 10 });
+    expect(result.breakdown.repromptPenalty).toBe(-1.5);
+    expect(result.score).toBe(3.5);
+  });
+
+  test("iterations reduce score", () => {
+    const result = scoreSessionObjective({ ...BASE_INPUT, iterations: 3 });
+    expect(result.breakdown.iterationPenalty).toBeCloseTo(-0.9, 5);
+    expect(result.score).toBe(4.1);
+  });
+
+  test("first pass gates add bonus", () => {
+    const result = scoreSessionObjective({ ...BASE_INPUT, firstPassGates: 2 });
+    expect(result.breakdown.firstPassBonus).toBe(2);
+    expect(result.score).toBe(7);
+  });
+
+  test("uninterrupted runs add bonus capped at 1.5", () => {
+    const result = scoreSessionObjective({ ...BASE_INPUT, uninterruptedRuns: 10 });
+    expect(result.breakdown.uninterruptedBonus).toBe(1.5);
+    expect(result.score).toBe(6.5);
+  });
+
+  test("frustration reduces score", () => {
+    const result = scoreSessionObjective({ ...BASE_INPUT, shortFrustrated: 2 });
+    expect(result.breakdown.frustrationPenalty).toBe(-0.6);
+    expect(result.score).toBe(4.4);
+  });
+
+  test("clamps to minimum 1", () => {
+    const result = scoreSessionObjective({ ...BASE_INPUT, corrections: 20 });
+    expect(result.score).toBe(1);
+  });
+
+  test("clamps to maximum 10", () => {
+    const result = scoreSessionObjective({
+      ...BASE_INPUT,
+      firstPassGates: 10,
+      uninterruptedRuns: 20,
+    });
+    expect(result.score).toBe(10);
+  });
+
+  test("respects config overrides", () => {
+    const config: AgentGritConfig = {
+      signalDir: "/tmp",
+      adapter: "local",
+      rubrics: [],
+      rules: { globalBudget: 10, projectBudget: 5, autoPromote: false },
+      daemon: { interval: "1h", weeklyDay: "sunday" },
+      thresholds: {
+        scoringBase: 7.0,
+        correctionWeight: -1.0,
+      },
+    };
+    const result = scoreSessionObjective({ ...BASE_INPUT, corrections: 2 }, config);
+    expect(result.breakdown.base).toBe(7);
+    expect(result.breakdown.correctionPenalty).toBe(-2);
+    expect(result.score).toBe(5);
+  });
+});
+
+describe("parseThumbsRating", () => {
+  test("detects thumbs up emoji", () => {
+    const result = parseThumbsRating("👍");
+    expect(result).not.toBeNull();
+    expect(result!.direction).toBe("up");
+    expect(result!.score).toBe(9);
+  });
+
+  test("detects thumbs down emoji", () => {
+    const result = parseThumbsRating("👎");
+    expect(result).not.toBeNull();
+    expect(result!.direction).toBe("down");
+    expect(result!.score).toBe(2);
+  });
+
+  test("detects 'thumbs up' text", () => {
+    const result = parseThumbsRating("thumbs up");
+    expect(result).not.toBeNull();
+    expect(result!.direction).toBe("up");
+    expect(result!.score).toBe(9);
+  });
+
+  test("detects 'thumbs down' text", () => {
+    const result = parseThumbsRating("thumbs down");
+    expect(result).not.toBeNull();
+    expect(result!.direction).toBe("down");
+    expect(result!.score).toBe(2);
+  });
+
+  test("detects +1", () => {
+    const result = parseThumbsRating("+1");
+    expect(result).not.toBeNull();
+    expect(result!.direction).toBe("up");
+  });
+
+  test("detects -1", () => {
+    const result = parseThumbsRating("-1");
+    expect(result).not.toBeNull();
+    expect(result!.direction).toBe("down");
+  });
+
+  test("returns null for non-thumbs messages", () => {
+    expect(parseThumbsRating("great work")).toBeNull();
+    expect(parseThumbsRating("check logs")).toBeNull();
+  });
+
+  test("respects config scores", () => {
+    const config: AgentGritConfig = {
+      signalDir: "/tmp",
+      adapter: "local",
+      rubrics: [],
+      rules: { globalBudget: 10, projectBudget: 5, autoPromote: false },
+      daemon: { interval: "1h", weeklyDay: "sunday" },
+      thresholds: { thumbsUpScore: 8, thumbsDownScore: 3 },
+    };
+    const up = parseThumbsRating("👍", config);
+    expect(up!.score).toBe(8);
+    const down = parseThumbsRating("👎", config);
+    expect(down!.score).toBe(3);
+  });
+});
+
+describe("countUninterruptedRuns", () => {
+  test("counts 5+ consecutive AI turns without correction", () => {
+    const turns: Turn[] = [
+      ...Array.from({ length: 6 }, () => ({ role: "assistant" as const, text: "working...", charCount: 10 })),
+      { role: "user", text: "looks good", charCount: 10 },
+    ];
+    expect(countUninterruptedRuns(turns)).toBe(1);
+  });
+
+  test("returns 0 for short runs", () => {
+    const turns: Turn[] = [
+      { role: "assistant", text: "a", charCount: 1 },
+      { role: "assistant", text: "b", charCount: 1 },
+      { role: "user", text: "ok", charCount: 2 },
+    ];
+    expect(countUninterruptedRuns(turns)).toBe(0);
+  });
+});
+
+describe("countShortFrustrated", () => {
+  test("counts short user turns after long AI responses", () => {
+    const turns: Turn[] = [
+      { role: "assistant", text: "x".repeat(300), charCount: 300 },
+      { role: "user", text: "what", charCount: 4 },
+    ];
+    expect(countShortFrustrated(turns)).toBe(1);
+  });
+
+  test("excludes approvals", () => {
+    const turns: Turn[] = [
+      { role: "assistant", text: "x".repeat(300), charCount: 300 },
+      { role: "user", text: "yes", charCount: 3 },
+    ];
+    expect(countShortFrustrated(turns)).toBe(0);
   });
 });

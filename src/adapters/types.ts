@@ -26,6 +26,8 @@ export interface RatingSignal extends Signal {
   confidence?: number;
   response_preview?: string;
   rule_ids?: string[];
+  scorer_version?: string;
+  source_weight?: number;
 }
 
 export interface CorrectionSignal extends Signal {
@@ -43,6 +45,8 @@ export interface SentimentSignal extends Signal {
   corrections: number;
   approvals: number;
   reprompts: number;
+  scorer_version?: string;
+  source_weight?: number;
 }
 
 export interface SkillInvocationSignal extends Signal {
@@ -233,6 +237,16 @@ export interface AgentGritConfig {
     defaultEvictionBudget?: number;
     expansionDecay?: number;
     defaultDomains?: string[];
+    scoringBase?: number;
+    correctionWeight?: number;
+    repromptWeight?: number;
+    iterationWeight?: number;
+    firstPassBonus?: number;
+    uninterruptedBonus?: number;
+    uninterruptedCap?: number;
+    frustrationWeight?: number;
+    thumbsUpScore?: number;
+    thumbsDownScore?: number;
   };
   rrfWeights?: {
     bm25?: number;

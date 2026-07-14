@@ -15,9 +15,9 @@ import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { appendSignal } from "../adapters/jsonl";
 import { inference, type InferenceOptions, type InferenceResult } from "../adapters/inference";
-import { signalPath, resolveSignalDir } from "../adapters/paths";
+import { signalPath, resolveSignalDir, loadConfig } from "../adapters/paths";
 import { readSessionContext } from "../graph/context";
-import type { RatingSignal, SentimentSignal } from "../adapters/types";
+import type { RatingSignal, SentimentSignal, AgentGritConfig } from "../adapters/types";
 import { SCHEMA_VERSION } from "../adapters/types";
 
 export type InferenceFn = (opts: InferenceOptions) => Promise<InferenceResult>;
@@ -81,6 +81,34 @@ export interface SessionScoreResult {
   approvals: number;
   reprompts: number;
   summary: string;
+}
+
+export interface ObjectiveScoreInput {
+  corrections: number;
+  reprompts: number;
+  iterations: number;
+  firstPassGates: number;
+  uninterruptedRuns: number;
+  shortFrustrated: number;
+}
+
+export interface ObjectiveScoreResult {
+  score: number;
+  breakdown: {
+    base: number;
+    correctionPenalty: number;
+    repromptPenalty: number;
+    iterationPenalty: number;
+    firstPassBonus: number;
+    uninterruptedBonus: number;
+    frustrationPenalty: number;
+  };
+  scorer_version: "v2";
+}
+
+export interface ThumbsRating {
+  direction: "up" | "down";
+  score: number;
 }
 
 // ── Parse explicit /rate command ──
@@ -359,6 +387,75 @@ export function scoreSession(turns: Turn[]): SessionScoreResult {
   };
 }
 
+// ── Thumbs up/down parsing ──
+
+const THUMBS_UP_PATTERNS = [/👍/, /\bthumbs\s*up\b/i, /\+1\b/];
+const THUMBS_DOWN_PATTERNS = [/👎/, /\bthumbs\s*down\b/i, /(?<!\w)-1\b/];
+
+export function parseThumbsRating(message: string, config?: AgentGritConfig): ThumbsRating | null {
+  const t = config?.thresholds;
+  for (const pat of THUMBS_UP_PATTERNS) {
+    if (pat.test(message)) {
+      return { direction: "up", score: t?.thumbsUpScore ?? 9 };
+    }
+  }
+  for (const pat of THUMBS_DOWN_PATTERNS) {
+    if (pat.test(message)) {
+      return { direction: "down", score: t?.thumbsDownScore ?? 2 };
+    }
+  }
+  return null;
+}
+
+// ── Correction-weighted objective scoring ──
+
+export function scoreSessionObjective(
+  input: ObjectiveScoreInput,
+  config?: AgentGritConfig,
+): ObjectiveScoreResult {
+  const t = config?.thresholds;
+  const base = t?.scoringBase ?? 5.0;
+  const corrWeight = t?.correctionWeight ?? -0.5;
+  const repWeight = t?.repromptWeight ?? -0.3;
+  const iterWeight = t?.iterationWeight ?? -0.3;
+  const fpBonus = t?.firstPassBonus ?? 1.0;
+  const uBonus = t?.uninterruptedBonus ?? 0.3;
+  const uCap = t?.uninterruptedCap ?? 1.5;
+  const frustWeight = t?.frustrationWeight ?? -0.3;
+
+  const correctionPenalty = input.corrections * corrWeight;
+  const repromptPenalty = Math.max(input.reprompts * repWeight, -1.5);
+  const iterationPenalty = input.iterations * iterWeight;
+  const firstPassBonusVal = input.firstPassGates * fpBonus;
+  const uninterruptedBonusVal = Math.min(input.uninterruptedRuns * uBonus, uCap);
+  const frustrationPenalty = input.shortFrustrated * frustWeight;
+
+  let score = base
+    + correctionPenalty
+    + repromptPenalty
+    + iterationPenalty
+    + firstPassBonusVal
+    + uninterruptedBonusVal
+    + frustrationPenalty;
+
+  score = Math.max(1, Math.min(10, score));
+  score = Math.round(score * 10) / 10;
+
+  return {
+    score,
+    breakdown: {
+      base,
+      correctionPenalty,
+      repromptPenalty,
+      iterationPenalty,
+      firstPassBonus: firstPassBonusVal,
+      uninterruptedBonus: uninterruptedBonusVal,
+      frustrationPenalty,
+    },
+    scorer_version: "v2",
+  };
+}
+
 // ── Capture explicit rating (writes signal) ──
 
 export async function captureRating(
@@ -436,11 +533,28 @@ export async function captureRating(
 export async function captureSessionSentiment(
   turns: Turn[],
   sessionId: string,
-  opts?: { ruleIds?: string[] },
+  opts?: { ruleIds?: string[]; hasExplicitRating?: boolean; gateRuns?: number; firstPassGates?: number },
 ): Promise<SentimentSignal | null> {
   if (turns.length === 0) return null;
 
-  const result = scoreSession(turns);
+  const legacy = scoreSession(turns);
+  const hasSignals = legacy.corrections > 0
+    || (opts?.gateRuns ?? 0) > 0
+    || opts?.hasExplicitRating === true;
+
+  if (!hasSignals) return null;
+
+  const uninterruptedRuns = countUninterruptedRuns(turns);
+  const shortFrustrated = countShortFrustrated(turns);
+
+  const objective = scoreSessionObjective({
+    corrections: legacy.corrections,
+    reprompts: legacy.reprompts,
+    iterations: opts?.gateRuns ?? 0,
+    firstPassGates: opts?.firstPassGates ?? 0,
+    uninterruptedRuns,
+    shortFrustrated,
+  });
 
   const signal: SentimentSignal = {
     id: randomUUID(),
@@ -448,14 +562,59 @@ export async function captureSessionSentiment(
     timestamp: new Date().toISOString(),
     session_id: sessionId,
     schemaVersion: SCHEMA_VERSION,
-    rating: result.score,
+    rating: objective.score,
     source: "transcript-analysis",
-    confidence: result.confidence,
-    corrections: result.corrections,
-    approvals: result.approvals,
-    reprompts: result.reprompts,
+    confidence: legacy.confidence,
+    corrections: legacy.corrections,
+    approvals: legacy.approvals,
+    reprompts: legacy.reprompts,
+    scorer_version: "v2",
   };
 
   await appendSignal(signalPath(RATINGS_FILE), signal);
   return signal;
+}
+
+// ── Helpers for extracting objective inputs from turns ──
+
+export function countUninterruptedRuns(turns: Turn[]): number {
+  let count = 0;
+  let consecutiveAI = 0;
+  for (const turn of turns) {
+    if (turn.role === "assistant") {
+      consecutiveAI++;
+    } else {
+      const isCorrection = CORRECTION_PHRASES.some((p) =>
+        turn.text.toLowerCase().includes(p),
+      );
+      if (isCorrection) {
+        consecutiveAI = 0;
+      } else {
+        if (consecutiveAI >= 5) count++;
+        consecutiveAI = 0;
+      }
+    }
+  }
+  if (consecutiveAI >= 5) count++;
+  return count;
+}
+
+export function countShortFrustrated(turns: Turn[]): number {
+  let count = 0;
+  let lastAssistantLen = 0;
+  for (const turn of turns) {
+    if (turn.role === "assistant") {
+      lastAssistantLen = turn.charCount;
+      continue;
+    }
+    const wordCount = turn.text.trim().split(/\s+/).length;
+    if (wordCount < 5 && lastAssistantLen > 200) {
+      const isApproval = APPROVAL_PHRASES.some((p) =>
+        turn.text.toLowerCase().includes(p),
+      );
+      if (!isApproval) count++;
+    }
+    lastAssistantLen = 0;
+  }
+  return count;
 }
