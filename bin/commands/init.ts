@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, copyFileSync, writeFileSync } from "fs";
-import { join, dirname } from "path";
+import { existsSync, mkdirSync, copyFileSync, writeFileSync, readFileSync } from "fs";
+import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
 import { getBaseDir, signalsDir, stateDir, rubricsDir } from "../../src/adapters/paths";
@@ -85,6 +85,16 @@ async function askApiKey(speed: AdoptionSpeed): Promise<string | undefined> {
 }
 
 export async function initCommand(args: string[]): Promise<void> {
+  const importIdx = args.indexOf("--import");
+  if (importIdx !== -1) {
+    const importPath = args[importIdx + 1];
+    if (!importPath) {
+      console.error("Usage: agentgrit init --import <backup.json>");
+      process.exit(1);
+    }
+    return importInit(resolve(importPath));
+  }
+
   const isBootstrap = args.includes("--bootstrap");
 
   if (isBootstrap) {
@@ -134,6 +144,109 @@ async function quickInit(args: string[]): Promise<void> {
   }
 
   console.log(`\nSetup complete. Run 'agentgrit status' to verify.\n`);
+}
+
+export interface ImportResult {
+  graph: boolean;
+  rubrics: string[];
+  config: boolean;
+  promotions: number;
+  recallEval: boolean;
+}
+
+export async function importInit(filePath: string): Promise<ImportResult> {
+  if (!existsSync(filePath)) {
+    console.error(`File not found: ${filePath}`);
+    process.exit(1);
+  }
+
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(readFileSync(filePath, "utf-8"));
+  } catch {
+    console.error(`Invalid JSON: ${filePath}`);
+    process.exit(1);
+  }
+
+  if (!data.version || !data.exportedAt) {
+    console.error("Not a valid agentgrit export file (missing version/exportedAt).");
+    process.exit(1);
+  }
+
+  const base = getBaseDir();
+  const DIRS = ["signals", "state", "rubrics"];
+  for (const dir of DIRS) {
+    const path = join(base, dir);
+    if (!existsSync(path)) mkdirSync(path, { recursive: true });
+  }
+
+  console.log(`\nagentgrit init --import`);
+  console.log(`  source: ${filePath}`);
+  console.log(`  exported at: ${data.exportedAt}\n`);
+
+  const result: ImportResult = {
+    graph: false,
+    rubrics: [],
+    config: false,
+    promotions: 0,
+    recallEval: false,
+  };
+
+  if (data.graph) {
+    const graphPath = join(base, "state", "knowledge-graph.json");
+    writeFileSync(graphPath, JSON.stringify(data.graph, null, 2));
+    result.graph = true;
+    console.log("  ✓ Knowledge graph restored");
+  }
+
+  if (data.rubrics && typeof data.rubrics === "object") {
+    const rubrics = data.rubrics as Record<string, unknown>;
+    for (const [filename, content] of Object.entries(rubrics)) {
+      writeFileSync(join(base, "rubrics", filename), JSON.stringify(content, null, 2));
+      result.rubrics.push(filename);
+    }
+    console.log(`  ✓ Rubrics restored (${result.rubrics.length} files)`);
+  }
+
+  if (data.config && typeof data.config === "object") {
+    const configPath = join(base, "config.json");
+    const importedConfig = data.config as Record<string, unknown>;
+
+    if (existsSync(configPath)) {
+      const existing = JSON.parse(readFileSync(configPath, "utf-8"));
+      const localKeys = ["signalDir", "memoryDir", "transcriptDir", "langfuse"];
+      const merged = { ...existing };
+      for (const [key, value] of Object.entries(importedConfig)) {
+        if (!localKeys.includes(key)) {
+          merged[key] = value;
+        }
+      }
+      writeFileSync(configPath, JSON.stringify(merged, null, 2));
+      console.log("  ✓ Config merged (local paths preserved)");
+    } else {
+      writeFileSync(configPath, JSON.stringify(importedConfig, null, 2));
+      console.log("  ✓ Config written");
+    }
+    result.config = true;
+  }
+
+  if (Array.isArray(data.promotions) && data.promotions.length > 0) {
+    const ledgerPath = join(base, "state", "promotions.jsonl");
+    const lines = data.promotions.map((p: unknown) => JSON.stringify(p));
+    writeFileSync(ledgerPath, lines.join("\n") + "\n");
+    result.promotions = data.promotions.length;
+    console.log(`  ✓ Promotion ledger restored (${result.promotions} entries)`);
+  }
+
+  if (data.recallEval) {
+    const recallPath = join(base, "state", "recall-eval.json");
+    writeFileSync(recallPath, JSON.stringify(data.recallEval, null, 2));
+    result.recallEval = true;
+    console.log("  ✓ Recall evaluation results restored");
+  }
+
+  console.log(`\nImport complete. Run 'agentgrit status' to verify.\n`);
+  return result;
 }
 
 async function bootstrapInit(args: string[]): Promise<void> {
