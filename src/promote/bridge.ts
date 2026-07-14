@@ -1,10 +1,11 @@
 import { existsSync, mkdirSync, renameSync, unlinkSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import type { Rule } from "../adapters/types";
+import { loadConfig } from "../adapters/paths";
 import { checkBudget } from "./budget";
 import { checkContradiction, extractExistingRules, type InferenceFn } from "./contradiction";
 
-export const COOLING_PERIOD_DAYS = 7;
+export const COOLING_PERIOD_DAYS = loadConfig().thresholds?.coolingPeriodDays ?? 7;
 
 export type PromoteStatus = "promoted" | "cooling_off" | "error";
 

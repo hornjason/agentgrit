@@ -9,6 +9,7 @@
 
 import type { Graph, BM25Index } from "./types";
 import { Tier, type Rule, type EmbeddingProvider } from "../adapters/types";
+import { loadConfig } from "../adapters/paths";
 import { searchIndex, tokenize } from "./bm25";
 import { queryTrajectoriesSync } from "../detect/trajectories";
 import { loadVectorCache, computeCentroid, rankByVectorSimilarity } from "./embeddings";
@@ -16,7 +17,8 @@ import { rrfMerge, RRF_WEIGHTS } from "./retrieval";
 
 // ── Default Domains ──
 
-const DEFAULT_DOMAINS = ["verification", "delivery", "deployment"];
+const _cfg = loadConfig();
+const DEFAULT_DOMAINS = _cfg.thresholds?.defaultDomains ?? ["verification", "delivery", "deployment"];
 
 // ── Domain Detection from Text ──
 
@@ -64,7 +66,7 @@ export function sanitizeRuleText(text: string): string {
 // ── Get Context Rules ──
 
 const EXPANSION_RELS = new Set(["reinforces", "sibling", "caused_by_same_root", "same_domain", "co_occurred"]);
-const EXPANSION_DECAY = 0.5;
+const EXPANSION_DECAY = _cfg.thresholds?.expansionDecay ?? 0.5;
 
 export async function getContextRules(
   graph: Graph,

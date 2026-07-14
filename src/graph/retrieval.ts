@@ -1,6 +1,7 @@
 import type { Graph, RankedCluster, BM25Index, RetrievalResult } from "./types";
 import { queryGraph } from "./query";
 import { searchIndex } from "./bm25";
+import { loadConfig } from "../adapters/paths";
 
 // RRF constant (standard value from Cormack et al.)
 const RRF_K = 60;
@@ -13,7 +14,12 @@ export interface RRFWeights {
   vector: number;
 }
 
-export const RRF_WEIGHTS: RRFWeights = { bm25: 2, graph: 0.5, vector: 1 };
+const _rrfCfg = loadConfig().rrfWeights;
+export const RRF_WEIGHTS: RRFWeights = {
+  bm25: _rrfCfg?.bm25 ?? 2,
+  graph: _rrfCfg?.graph ?? 0.5,
+  vector: _rrfCfg?.vector ?? 1,
+};
 
 // ── RRF Merge ──
 

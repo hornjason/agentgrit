@@ -1,6 +1,6 @@
 import { join } from "path";
 import { readSignals } from "../adapters/jsonl";
-import { resolveSignalFile } from "../adapters/paths";
+import { loadConfig, resolveSignalFile } from "../adapters/paths";
 import { inference, type InferenceOptions, type InferenceResult } from "../adapters/inference";
 import type {
   CorrectionSignal,
@@ -17,7 +17,7 @@ export interface MinePatternsOptions {
   infer?: InferenceFn;
 }
 
-const RATING_LOW_THRESHOLD = 4;
+const RATING_LOW_THRESHOLD = loadConfig().thresholds?.ratingLowThreshold ?? 4;
 
 interface SessionSnapshot {
   session_id: string;

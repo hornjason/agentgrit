@@ -1,14 +1,15 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
-import { statePath } from "../adapters/paths";
+import { loadConfig, statePath } from "../adapters/paths";
 import { loadRuleStats, type RuleStats } from "./rules";
 import { removeRule } from "./bridge";
 
+const _cfg = loadConfig();
 const EVICTION_FILE = "eviction-candidates.json";
-const DEFAULT_BUDGET = 80;
-const CORRELATION_THRESHOLD = 3.0;
+const DEFAULT_BUDGET = _cfg.thresholds?.defaultEvictionBudget ?? 80;
+const CORRELATION_THRESHOLD = _cfg.thresholds?.correlationThreshold ?? 3.0;
 const MIN_SESSIONS = 5;
-const SIMILARITY_THRESHOLD = 0.85;
+const SIMILARITY_THRESHOLD = _cfg.thresholds?.similarityThreshold ?? 0.85;
 const STALE_DAYS = 60;
 
 export interface EvictionCandidate {

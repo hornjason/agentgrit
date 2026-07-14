@@ -224,6 +224,20 @@ export interface AgentGritConfig {
     interval: string;
     weeklyDay: string;
   };
+  thresholds?: {
+    coolingPeriodDays?: number;
+    ratingLowThreshold?: number;
+    correlationThreshold?: number;
+    similarityThreshold?: number;
+    defaultEvictionBudget?: number;
+    expansionDecay?: number;
+    defaultDomains?: string[];
+  };
+  rrfWeights?: {
+    bm25?: number;
+    graph?: number;
+    vector?: number;
+  };
 }
 
 // ── Adapter interfaces ──
