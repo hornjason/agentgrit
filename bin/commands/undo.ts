@@ -16,9 +16,10 @@ export async function undoCommand(args: string[]): Promise<void> {
     return;
   }
 
-  const count = args[0] ? parseInt(args[0], 10) : 1;
+  const positional = args.filter((a) => !a.startsWith("--"));
+  const count = positional[0] ? parseInt(positional[0], 10) : 1;
   if (isNaN(count) || count < 1) {
-    console.log("  Usage: agentgrit undo [count]\n");
+    console.log("  Usage: agentgrit undo [count] [--yes]\n");
     return;
   }
 
