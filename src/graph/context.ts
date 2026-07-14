@@ -173,7 +173,9 @@ export async function getContextRules(
 
   // 5. Type-allowlist — defense-in-depth filter
   const ALLOWED_TYPES = new Set(["feedback", "steering", "success", "learned"]);
+  const INDEX_NODE_PATTERN = /^(MEMORY|README|INDEX)$/i;
   const filtered = ranked.filter(([id]) => {
+    if (INDEX_NODE_PATTERN.test(id)) return false;
     const t = graph.nodes[id]?.type;
     if (!t) return true;
     return ALLOWED_TYPES.has(t);
