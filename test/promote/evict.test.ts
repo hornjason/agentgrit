@@ -138,6 +138,63 @@ describe("findEvictionCandidates", () => {
     expect(written[0].ruleId).toBe("evict-me");
   });
 
+  test("adds stale rules as eviction candidates regardless of rating", () => {
+    const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+    const stats: RuleStats[] = [
+      makeStats("stale-but-good", {
+        avgCorrelatedRating: 8.0,
+        injectionCount: 10,
+        lastSeen: ninetyDaysAgo,
+      }),
+      makeStats("fresh-and-good", {
+        avgCorrelatedRating: 8.0,
+        injectionCount: 10,
+        lastSeen: new Date().toISOString(),
+      }),
+    ];
+    persistRuleStats(stats, STATE_DIR);
+
+    const candidates = findEvictionCandidates({ stateDir: STATE_DIR, ruleDomainsPath: RULE_DOMAINS });
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].ruleId).toBe("stale-but-good");
+    expect(candidates[0].reason).toContain("stale");
+  });
+
+  test("stale rules bypass minSessions check", () => {
+    const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+    const stats: RuleStats[] = [
+      makeStats("stale-few-sessions", {
+        avgCorrelatedRating: 5.0,
+        injectionCount: 2,
+        lastSeen: ninetyDaysAgo,
+      }),
+    ];
+    persistRuleStats(stats, STATE_DIR);
+
+    const candidates = findEvictionCandidates({ stateDir: STATE_DIR, ruleDomainsPath: RULE_DOMAINS });
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].ruleId).toBe("stale-few-sessions");
+  });
+
+  test("stale reviewed rules get requiresHumanConfirmation", () => {
+    const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+    const stats: RuleStats[] = [
+      makeStats("stale-reviewed", {
+        avgCorrelatedRating: 7.0,
+        injectionCount: 10,
+        lastSeen: ninetyDaysAgo,
+      }),
+    ];
+    persistRuleStats(stats, STATE_DIR);
+    makeRuleDomains({
+      "stale-reviewed": { domains: ["verification"], source: "reviewed" },
+    });
+
+    const candidates = findEvictionCandidates({ stateDir: STATE_DIR, ruleDomainsPath: RULE_DOMAINS });
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].requiresHumanConfirmation).toBe(true);
+  });
+
   test("respects custom threshold", () => {
     const stats: RuleStats[] = [
       makeStats("mid", { avgCorrelatedRating: 4.5, injectionCount: 10 }),

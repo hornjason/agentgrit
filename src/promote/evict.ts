@@ -9,6 +9,7 @@ const DEFAULT_BUDGET = 80;
 const CORRELATION_THRESHOLD = 3.0;
 const MIN_SESSIONS = 5;
 const SIMILARITY_THRESHOLD = 0.85;
+const STALE_DAYS = 60;
 
 export interface EvictionCandidate {
   ruleId: string;
@@ -71,8 +72,26 @@ export function findEvictionCandidates(options?: {
   );
 
   const candidates: EvictionCandidate[] = [];
+  const now = Date.now();
 
   for (const stats of statsMap.values()) {
+    if (stats.lastSeen) {
+      const daysSince = (now - new Date(stats.lastSeen).getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSince > STALE_DAYS) {
+        const candidate: EvictionCandidate = {
+          ruleId: stats.ruleId,
+          avgCorrelatedRating: Math.round(stats.avgCorrelatedRating * 100) / 100,
+          sessionCount: stats.injectionCount,
+          reason: `stale: last seen ${Math.round(daysSince)} days ago`,
+        };
+        if (isReviewedRule(stats.ruleId, ruleDomains)) {
+          candidate.requiresHumanConfirmation = true;
+        }
+        candidates.push(candidate);
+        continue;
+      }
+    }
+
     if (stats.injectionCount < minSessions) continue;
     if (stats.avgCorrelatedRating >= threshold) continue;
 
