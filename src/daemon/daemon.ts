@@ -231,6 +231,24 @@ export async function runDaemonCycle(
     result.errors.push(`work-insights: ${err instanceof Error ? err.message : String(err)}`);
   }
 
+  // 3c. Classify isolated nodes — LLM classification for zero-edge, zero-domain nodes
+  try {
+    const { readGraph } = await import("../graph/builder");
+    const graph = readGraph();
+    const isolated = Object.values(graph.nodes).filter(
+      (n) => n.domains.length === 0,
+    );
+    if (isolated.length > 0) {
+      const { classifyIsolatedNodes } = await import("../graph/classify-isolated");
+      const classified = await classifyIsolatedNodes(graph, { maxNodes: 20 });
+      if (classified.length > 0) {
+        console.log(`  classify-isolated: ${classified.length} node(s) classified via LLM`);
+      }
+    }
+  } catch (err) {
+    result.errors.push(`classify-isolated: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   // 4. Promote — route detected patterns to rules if they cross threshold
   try {
     const { routeRule } = await import("../promote/router");

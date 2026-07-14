@@ -94,6 +94,22 @@ export async function graphCommand(args: string[]): Promise<void> {
 
   if (sub === "build") {
     await doBuild(base, args.includes("--full"));
+  } else if (sub === "classify") {
+    const { readGraph } = await import("../../src/graph/builder");
+    const { classifyIsolatedNodes } = await import("../../src/graph/classify-isolated");
+    const graph = readGraph();
+    const isolated = Object.values(graph.nodes).filter(n => n.domains.length === 0);
+    console.log(`  Isolated nodes (zero domains): ${isolated.length}`);
+    if (isolated.length === 0) {
+      console.log("  Nothing to classify.");
+      return;
+    }
+    const max = args.includes("--max") ? parseInt(args[args.indexOf("--max") + 1]) || 20 : 20;
+    const results = await classifyIsolatedNodes(graph, { maxNodes: max });
+    console.log(`  Classified: ${results.length} node(s)`);
+    for (const r of results) {
+      console.log(`    ${r.nodeId} → ${r.domains.join(", ")}`);
+    }
   } else if (sub === "query") {
     const query = args.slice(1).join(" ");
     if (!query) {
