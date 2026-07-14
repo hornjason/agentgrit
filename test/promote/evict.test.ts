@@ -260,6 +260,40 @@ describe("findDuplicates", () => {
   test("handles empty input", () => {
     expect(findDuplicates([])).toEqual([]);
   });
+
+  test("skips rules shorter than 20 characters", () => {
+    const rules = [
+      { id: "r1", text: "verify first" },
+      { id: "r2", text: "verify first" },
+      { id: "r3", text: "check before" },
+      { id: "r4", text: "check before" },
+    ];
+    const dupes = findDuplicates(rules, 0.5);
+    expect(dupes).toHaveLength(0);
+  });
+
+  test("short common rules are not false-flagged against long rules", () => {
+    const rules = [
+      { id: "r1", text: "check" },
+      { id: "r2", text: "Always check the deployment status before merging any pull request" },
+      { id: "r3", text: "Always check the build output before declaring a fix complete" },
+    ];
+    const dupes = findDuplicates(rules, 0.5);
+    for (const d of dupes) {
+      expect(d.ruleIdA).not.toBe("r1");
+      expect(d.ruleIdB).not.toBe("r1");
+    }
+  });
+
+  test("uses config threshold (0.85) by default", () => {
+    const rules = [
+      { id: "r1", text: "verify before asserting claims about code behavior in production systems" },
+      { id: "r2", text: "verify before asserting claims about code behavior in staging environments" },
+    ];
+    const defaultDupes = findDuplicates(rules);
+    const looseDupes = findDuplicates(rules, 0.5);
+    expect(looseDupes.length).toBeGreaterThanOrEqual(defaultDupes.length);
+  });
 });
 
 describe("evictRules", () => {

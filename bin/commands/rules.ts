@@ -9,6 +9,7 @@ import { routeRule } from "../../src/promote/router";
 import { promoteRule } from "../../src/promote/bridge";
 import { recordPromotion } from "../../src/promote/ledger";
 import { randomUUID } from "crypto";
+import { findDuplicates } from "../../src/promote/evict";
 
 function icon(status: BudgetStatus): string {
   if (status.level === "OK") return "✓";
@@ -262,17 +263,6 @@ async function doPromote(base: string, dryRun: boolean): Promise<void> {
   console.log(`\n  ${promoted} rule(s) promoted. Use 'agentgrit undo' to reverse.\n`);
 }
 
-function textSimilarity(a: string, b: string): number {
-  const wordsA = new Set(a.toLowerCase().split(/\W+/).filter((w) => w.length > 2));
-  const wordsB = new Set(b.toLowerCase().split(/\W+/).filter((w) => w.length > 2));
-  if (wordsA.size === 0 && wordsB.size === 0) return 1;
-  if (wordsA.size === 0 || wordsB.size === 0) return 0;
-  let intersection = 0;
-  for (const w of wordsA) {
-    if (wordsB.has(w)) intersection++;
-  }
-  return intersection / (wordsA.size + wordsB.size - intersection);
-}
 
 async function doRebalance(base: string, apply: boolean): Promise<void> {
   console.log("  Rebalance: analyze rules and suggest tier re-routing.\n");
@@ -321,32 +311,22 @@ async function doCompact(base: string, apply: boolean): Promise<void> {
     return;
   }
 
-  const THRESHOLD = 0.6;
-  const clusters: Array<{ a: string; b: string; similarity: number }> = [];
+  const duplicates = findDuplicates(rules);
 
-  for (let i = 0; i < rules.length; i++) {
-    for (let j = i + 1; j < rules.length; j++) {
-      const sim = textSimilarity(rules[i].text, rules[j].text);
-      if (sim >= THRESHOLD) {
-        clusters.push({ a: rules[i].id, b: rules[j].id, similarity: sim });
-      }
-    }
-  }
-
-  if (clusters.length === 0) {
+  if (duplicates.length === 0) {
     console.log("  No near-duplicate rules found.\n");
     return;
   }
 
-  console.log(`  ${clusters.length} near-duplicate pair(s):\n`);
-  for (const pair of clusters) {
-    console.log(`  → ${pair.a} ↔ ${pair.b} (${(pair.similarity * 100).toFixed(0)}% similar)`);
+  console.log(`  ${duplicates.length} near-duplicate pair(s):\n`);
+  for (const pair of duplicates) {
+    console.log(`  → ${pair.ruleIdA} ↔ ${pair.ruleIdB} (${(pair.similarity * 100).toFixed(0)}% similar)`);
   }
 
   if (!apply) {
     console.log(`\n  Review and pass --yes to merge candidates.\n`);
   } else {
-    console.log(`\n  ${clusters.length} pair(s) flagged for merge.\n`);
+    console.log(`\n  ${duplicates.length} pair(s) flagged for merge.\n`);
   }
 }
 

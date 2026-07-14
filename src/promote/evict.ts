@@ -10,6 +10,7 @@ const DEFAULT_BUDGET = _cfg.thresholds?.defaultEvictionBudget ?? 80;
 const CORRELATION_THRESHOLD = _cfg.thresholds?.correlationThreshold ?? 3.0;
 const MIN_SESSIONS = 5;
 const SIMILARITY_THRESHOLD = _cfg.thresholds?.similarityThreshold ?? 0.85;
+const MIN_TEXT_LENGTH = 20;
 const STALE_DAYS = 60;
 
 export interface EvictionCandidate {
@@ -144,7 +145,8 @@ export function findDuplicates(
   threshold?: number,
 ): DuplicateCandidate[] {
   const sim = threshold ?? SIMILARITY_THRESHOLD;
-  const tokenized = rules.map(r => ({ id: r.id, tokens: tokenize(r.text) }));
+  const eligible = rules.filter(r => r.text.length >= MIN_TEXT_LENGTH);
+  const tokenized = eligible.map(r => ({ id: r.id, tokens: tokenize(r.text) }));
   const duplicates: DuplicateCandidate[] = [];
 
   for (let i = 0; i < tokenized.length; i++) {
@@ -230,4 +232,93 @@ export function enforceBudget(
   const excess = totalRuleCount - cap;
   const evictable = candidates.filter(c => !c.requiresHumanConfirmation);
   return evictable.slice(0, excess);
+}
+
+export interface ExpiredEntry {
+  slug: string;
+  date: string;
+  ageDays: number;
+}
+
+export interface ExpireResult {
+  expired: ExpiredEntry[];
+  kept: number;
+  total: number;
+}
+
+const PENDING_SECTION_RE = /^## \[(PROPOSED|PROMOTED)\s*-\s*(\d{4}-\d{2}-\d{2})\]\s+(.+)$/;
+const DEFAULT_PENDING_EXPIRY_DAYS = 30;
+
+export function expirePendingRules(
+  pendingMdPath: string,
+  maxAgeDays?: number,
+): ExpireResult {
+  const cfg = loadConfig();
+  const expiryDays = maxAgeDays ?? cfg.rules?.pendingExpiryDays ?? DEFAULT_PENDING_EXPIRY_DAYS;
+  const now = Date.now();
+
+  if (!existsSync(pendingMdPath)) {
+    return { expired: [], kept: 0, total: 0 };
+  }
+
+  const content = readFileSync(pendingMdPath, "utf-8");
+  const lines = content.split("\n");
+
+  interface Section {
+    startLine: number;
+    endLine: number;
+    slug: string;
+    date: string;
+    status: string;
+  }
+
+  const sections: Section[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(PENDING_SECTION_RE);
+    if (match) {
+      if (sections.length > 0) {
+        sections[sections.length - 1].endLine = i;
+      }
+      sections.push({
+        startLine: i,
+        endLine: lines.length,
+        slug: match[3],
+        date: match[2],
+        status: match[1],
+      });
+    }
+  }
+  if (sections.length > 0) {
+    sections[sections.length - 1].endLine = lines.length;
+  }
+
+  const total = sections.length;
+  const expired: ExpiredEntry[] = [];
+  const linesToRemove = new Set<number>();
+
+  for (const section of sections) {
+    const sectionDate = new Date(section.date + "T00:00:00Z");
+    const ageDays = (now - sectionDate.getTime()) / (1000 * 60 * 60 * 24);
+
+    if (ageDays > expiryDays) {
+      expired.push({ slug: section.slug, date: section.date, ageDays: Math.round(ageDays) });
+      for (let i = section.startLine; i < section.endLine; i++) {
+        linesToRemove.add(i);
+      }
+    }
+  }
+
+  if (expired.length > 0) {
+    const kept = lines.filter((_, i) => !linesToRemove.has(i));
+    const cleaned: string[] = [];
+    for (const line of kept) {
+      if (line.trim() === "" && cleaned.length > 0 && cleaned[cleaned.length - 1].trim() === "") {
+        continue;
+      }
+      cleaned.push(line);
+    }
+    writeFileSync(pendingMdPath, cleaned.join("\n"), "utf-8");
+  }
+
+  return { expired, kept: total - expired.length, total };
 }
