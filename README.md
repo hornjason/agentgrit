@@ -1,8 +1,25 @@
+---
+doc-type: reference
+status: active
+owner: jason
+updated: 2026-07-14
+---
+
 # AgentGrit
 
 > Self-learning engine that makes AI agents smarter over time.
 
-AgentGrit closes a feedback loop around AI agents: it captures signals from your sessions (ratings, corrections, sentiment), scores output quality against configurable rubrics, detects recurring failure patterns, promotes learnings into durable rules, optimizes prompts via hill-climbing, and builds a knowledge graph for contextual recall. One install, one package. You choose how much to turn on.
+[![Tests](https://img.shields.io/badge/tests-1117%20pass-brightgreen)]()
+[![npm](https://img.shields.io/npm/v/@agentgrit/core)](https://www.npmjs.com/package/@agentgrit/core)
+
+AgentGrit closes a feedback loop around AI agents: it captures signals from your sessions (ratings, corrections, sentiment), detects recurring failure patterns, promotes learnings into durable rules, and builds a knowledge graph for contextual recall. Every session makes the next one smarter.
+
+**Key metrics:** 1117 tests, 378 graph nodes, 91% domain coverage, precision@5 = 0.76, hybrid BM25+vector+graph retrieval.
+
+**Design principles:**
+1. Nothing hardcoded, everything lifecycled — all thresholds, weights, and domain classification are config-driven or graph-derived
+2. The graph is the source of truth — rules, domains, and correlations live in the graph
+3. Measure before and after every change
 
 It targets Claude Code initially but is designed to be runtime-agnostic. The scoring, pattern detection, and optimization layers work with any LLM trace source.
 
@@ -42,9 +59,9 @@ Hooks fire automatically during Claude Code sessions. No manual work required.
 
 | Signal | How It's Captured | Storage |
 |--------|-------------------|---------|
-| **Rating** | User types `/rate M:N S:N Q:N` (mode, scope, quality on 1-10 scale) | `ratings.jsonl` |
+| **Rating** | Explicit `/rate` command or simple thumbs up/down | `ratings.jsonl` |
 | **Correction** | Regex detects correction language ("stop doing", "that's wrong", "I didn't ask") with noise filtering ("no worries", "not yet") | `corrections.jsonl` |
-| **Sentiment** | Keyword-based scoring of each response (positive/negative/neutral) | Embedded in rating signals |
+| **Sentiment** | LLM-based (Haiku) per-message sentiment + keyword fallback + session-end auto-scoring | Embedded in rating signals |
 | **Skill invocation** | Logs which skills fired, duration, success/failure | `skills.jsonl` |
 | **Tool audit** | Records every tool call with timing | `tool-audit.jsonl` |
 | **Debrief** | End-of-session rule extraction | Via debrief hook |
@@ -141,20 +158,26 @@ The 15% maximum change ratio prevents the optimizer from making drastic rewrites
 
 The knowledge graph stores rules as nodes connected by domain relationships. At session start, the graph injects the most relevant rules based on the current task's domain.
 
-**Building the graph** (`builder.ts`):
+**Building the graph** (`builder.ts` + `domain-propagation.ts`):
 1. Discovers rule files (markdown with YAML frontmatter)
-2. Classifies each rule into domains using keyword patterns (13 domains: verification, escalation, scope, delivery, communication, deployment, security, ui-testing, data, browser, memory, algorithm, delegation)
-3. Builds `same_domain` edges between rules sharing a primary domain (max 4 edges per node)
-4. Incremental: only re-classifies rules whose content hash changed since the last build
-5. Preserves existing edges where both endpoints are unchanged
+2. Classifies each rule into domains using a three-tier system:
+   - **Primary:** BM25 neighbor propagation — infers domains from classified neighbors via weighted graph edges (co_occurred=1.0, reinforces=1.5, sibling=0.8)
+   - **Secondary:** BM25 text similarity — top-3 most-similar classified nodes vote on domain
+   - **Fallback:** Keyword regex patterns (13 domains: verification, escalation, scope, delivery, communication, deployment, security, ui-testing, data, browser, memory, algorithm, delegation)
+3. Achieves 91% domain coverage (up from 53% with keyword-only)
+4. Builds `same_domain` edges between rules sharing a primary domain (max 4 edges per node)
+5. Incremental: only re-classifies rules whose content hash changed since the last build
+6. Tracks `domainSource` per node: "propagation", "bm25", "keyword", "ai", or "override"
 
 **Querying** (`query.ts`): Scores each node by domain overlap (50%), blended edge strength (30%), and activation history (20%). Builds clusters by following `reinforces`, `sibling`, `caused_by_same_root`, and `same_domain` edges. Expands candidates via high-strength embedding edges (>= 0.6). Returns ranked clusters with connected nodes.
 
 **BM25 full-text search** (`bm25.ts`): Builds an inverted index over rule files. Strips frontmatter and markdown formatting, tokenizes, computes IDF using the smooth variant, and scores documents using BM25 (k1=1.5, b=0.75).
 
-**Hybrid retrieval** (`retrieval.ts`): Merges BM25 keyword results and graph domain results using Reciprocal Rank Fusion (RRF, k=60). Each list contributes `1/(k + rank)` per item. Items appearing in both lists get summed scores. The merged list is sorted by RRF score and truncated to the requested limit.
+**Hybrid retrieval** (`retrieval.ts`): 3-way merge of BM25 keyword results, vector similarity, and graph domain expansion using Reciprocal Rank Fusion (RRF, k=60). Configurable weights via `config.json` (defaults: bm25=2x, vector=1x, graph=0.5x). Includes node-type weighting: feedback/steering 1.0x, success 0.8x, reference 0.5x, project 0.3x. RRF weights are auto-tunable via the hill-climbing weight optimizer.
 
-**Session-start context injection** (`context.ts`): Detects domains from the current task text using keyword patterns. Queries the graph and BM25 index, merges results (graph-first, BM25 fills gaps), and returns up to 10 rules for injection into the session context.
+**Session-start context injection** (`context.ts`): Detects domains from the current task text. Queries the graph and BM25 index, merges results via 3-way RRF, and returns up to 10 rules for injection. Also BM25-filters CLAUDE-LEARNED.md rules (top 10 of 50+) for task-specific learned rule injection.
+
+**Weight optimization** (`weight-optimizer.ts`): Hill-climb optimizer tunes RRF weights against the gold set. Perturbs one weight at a time by ±0.25, evaluates precision@5, keeps improvements. Baseline floor enforced at 0.76 — optimizer never degrades below current quality. Optimal weights written to `config.json`.
 
 ### 7. Daemon — Automation
 
@@ -189,7 +212,7 @@ Supports install, uninstall, and status checks. Parses interval strings (`30m`, 
 
 | Command | Description |
 |---------|-------------|
-| `init` | Interactive setup wizard. Creates `~/.agentgrit/`, copies starter rubric, writes config. Accepts `--quick`, `--standard`, or `--full` flags. |
+| `init` | Interactive setup wizard. Creates `~/.agentgrit/`, copies starter rubric, writes config. Accepts `--quick`, `--standard`, `--full`, or `--import backup.json` flags. |
 | `status` | Signal counts, score trends, rule budget utilization |
 | `doctor` | Health check across all five subsystems (capture, scoring, graph, rules, signals) |
 | `inbox` | Review pending rule candidates with tier routing rationale |
@@ -334,13 +357,16 @@ agentgrit/
 │   ├── promote/                  Rule management
 │   │   ├── router.ts                Three-tier routing logic
 │   │   ├── rules.ts                 Rule tracking and correlation
-│   │   ├── budget.ts                Per-tier cap enforcement
-│   │   ├── bridge.ts                Atomic CLAUDE.md writer
+│   │   ├── budget.ts                Per-tier cap enforcement + learned budget
+│   │   ├── bridge.ts                Atomic CLAUDE.md writer (7-day cooling)
+│   │   ├── evict.ts                 Staleness, correlation, duplicate eviction
 │   │   ├── ledger.ts                Promotion history + undo
-│   │   └── review.ts               Weekly learning review
+│   │   ├── review.ts               Weekly learning review
+│   │   └── domain-review.ts        Auto-review rule-domains.json
 │   │
 │   ├── optimize/                 Hill-climbing optimization
 │   │   ├── hill-climb.ts            Generic propose-evaluate engine
+│   │   ├── weight-optimizer.ts      RRF weight tuning via hill-climb
 │   │   ├── prompt-tuner.ts          System prompt optimization
 │   │   ├── skill-tuner.ts           Skill description optimization
 │   │   ├── skill-metrics.ts         Skill effectiveness metrics
@@ -352,7 +378,8 @@ agentgrit/
 │   │   ├── query.ts                 Domain-based graph traversal
 │   │   ├── bm25.ts                  Full-text search index
 │   │   ├── retrieval.ts             Hybrid BM25+graph+RRF retrieval
-│   │   ├── context.ts               Session-start context injection
+│   │   ├── context.ts               Session-start context injection + learned rule filtering
+│   │   ├── domain-propagation.ts    BM25 neighbor domain propagation
 │   │   ├── embedder.ts              Vector embeddings (optional)
 │   │   └── index.ts                 Public API re-exports
 │   │
@@ -441,6 +468,17 @@ All state lives under `~/.agentgrit/` (override with `AGENTGRIT_DIR` env var):
 | `rules.globalBudget` | number | `25` | Max rules in global CLAUDE.md |
 | `rules.projectBudget` | number | `25` | Max rules per project CLAUDE.md |
 | `rules.autoPromote` | boolean | `false` | Auto-promote without inbox review |
+| `rules.learnedBudget` | number | `50` | Max rules in CLAUDE-LEARNED.md |
+| `rules.pendingExpiryDays` | number | `30` | Days before pending rules expire |
+| `thresholds.coolingPeriodDays` | number | `7` | Days before a proposed rule can promote |
+| `thresholds.ratingLowThreshold` | number | `4` | Rating below this = "bad" session |
+| `thresholds.correlationThreshold` | number | `3.0` | Avg rating below this = eviction candidate |
+| `thresholds.similarityThreshold` | number | `0.85` | Jaccard threshold for near-duplicate detection |
+| `thresholds.expansionDecay` | number | `0.5` | Score decay for graph-expanded neighbors |
+| `thresholds.defaultDomains` | string[] | `["verification","delivery","deployment"]` | Fallback domains when detection returns empty |
+| `rrfWeights.bm25` | number | `2` | BM25 weight in hybrid retrieval |
+| `rrfWeights.graph` | number | `0.5` | Graph expansion weight in hybrid retrieval |
+| `rrfWeights.vector` | number | `1` | Vector similarity weight in hybrid retrieval |
 | `daemon.interval` | string | `"30m"` (`"0"` = disabled) | Daemon cycle interval |
 | `daemon.weeklyDay` | string | `"sunday"` | Day for weekly review cycle |
 
@@ -461,28 +499,36 @@ The test suite uses fixture JSONL files with known patterns that must produce sp
 
 ## Roadmap
 
-### v0.1.0 (current)
+### v0.1.4 (current)
 
-- All 7 subsystems implemented: capture, evaluate, detect, promote, optimize, graph, daemon
-- CLI with 13 commands
+- **1117 tests** across 97 files, 0 failures
+- All 7 subsystems: capture, evaluate, detect, promote, optimize, graph, daemon
+- CLI with 13 commands + `init --import` for machine migration
 - Three adoption speeds (quick/standard/full)
 - LLM judge with Gemini, Claude, and OpenAI support
-- Incremental knowledge graph with keyword domain classification
-- BM25 + RRF hybrid retrieval
-- Hill-climbing optimizer for prompts and skills
+- **3-way hybrid retrieval:** BM25 (2x) + vector similarity (1x) + graph expansion (0.5x) via RRF merge
+- **BM25 neighbor domain propagation** — 91% domain coverage (replaces keyword-only classification)
+- **Config-driven thresholds** — all weights, budgets, and thresholds in config.json, not hardcoded
+- **Weight optimizer** — hill-climb tunes RRF weights against gold set, writes to config
+- **Learned rule BM25 filtering** — top 10 of 50+ rules per session, not bulk-loaded
+- **Rule budget enforcement** — learned rules capped at 50, pending rules expire after 30 days
+- **Auto-review** — daemon step validates auto-classified domains against BM25-inferred, promotes to reviewed
+- **7-day cooling period** — proposed rules wait 7 days before promotion (configurable)
+- **LLM sentiment scoring** — inference-based sentiment with keyword fallback
+- Hill-climbing optimizer for prompts, skills, and retrieval weights
 - LaunchAgent (macOS) and systemd (Linux) scheduler
-- Atomic CLAUDE.md writes with promotion ledger and undo
-- Starter rubric with 4 universal dimensions
+- Atomic CLAUDE.md writes with promotion ledger and undo (`--yes` flag for non-interactive)
+- Published on npm as `@agentgrit/core`
 
 ### Planned
 
+- Replace Haiku implicit sentiment with correction-weighted objective scoring (#120)
+- Improve retrieval relevancy — filter noise nodes, seed underrepresented domains (#121)
+- Migration cutover — parallel run, archive PAI hooks, verify (#75)
 - `agentgrit init --bootstrap` — seed from existing Claude Code session transcripts
 - Rubric discovery from correction history
-- Machine migration via `agentgrit export` / `agentgrit init --import`
-- npm publish as `@agentgrit/core`
 - Example rubrics (sales, coding, support)
 - Voyage AI reranking in hybrid retrieval
-- Full embedding-based semantic search
 
 ## License
 
