@@ -171,6 +171,22 @@ describe("minePatterns LLM mode", () => {
     }
   });
 
+  test("useLLM alias enables LLM clustering", async () => {
+    const correctionsFile = join(TMP_DIR, "corrections.jsonl");
+    for (let i = 0; i < 5; i++) {
+      await appendSignal(correctionsFile, makeCorrection(`c${i}`, `sess-${i}`, "wrong approach taken"));
+    }
+
+    const clusters = [
+      { theme: "alias-test", description: "useLLM alias works", severity: 6, phrases: ["wrong approach taken"] },
+    ];
+
+    const patterns = await minePatterns(TMP_DIR, { useLLM: true, infer: mockInference(clusters) });
+    const llmPatterns = patterns.filter((p) => p.type === "llm-semantic-cluster");
+    expect(llmPatterns.length).toBe(1);
+    expect(llmPatterns[0].id).toContain("llm-cluster-alias-test");
+  });
+
   test("LLM mode handles inference throwing an exception", async () => {
     const correctionsFile = join(TMP_DIR, "corrections.jsonl");
     for (let i = 0; i < 5; i++) {

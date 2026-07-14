@@ -87,6 +87,7 @@ export interface Rule {
   lowRatingActivations?: number;
   sessionRatings?: number[];
   lastSeen?: string;
+  proposedAt?: string;
   signals?: {
     bm25Rank?: number;
     vectorRank?: number;

@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { existsSync, mkdirSync, rmSync, readFileSync } from "fs";
 import { join } from "path";
-import { promoteRule, removeRule } from "../../src/promote/bridge";
+import { promoteRule, removeRule, COOLING_PERIOD_DAYS } from "../../src/promote/bridge";
 import { Tier, SCHEMA_VERSION, type Rule } from "../../src/adapters/types";
 import type { InferenceFn } from "../../src/promote/contradiction";
 
@@ -56,7 +56,8 @@ afterEach(() => {
 
 describe("promoteRule", () => {
   test("inserts rule after existing rules in section", async () => {
-    await promoteRule(makeRule("new-rule", "A new behavioral rule"), CLAUDE_MD, noopInference);
+    const result = await promoteRule(makeRule("new-rule", "A new behavioral rule"), CLAUDE_MD, noopInference);
+    expect(result.status).toBe("promoted");
     const content = readFileSync(CLAUDE_MD, "utf-8");
     expect(content).toContain("- **new-rule:** A new behavioral rule");
     expect(content).toContain("- **existing-rule:");
@@ -113,6 +114,37 @@ describe("promoteRule", () => {
     expect(
       promoteRule(makeRule("overflow", "Should not be written"), CLAUDE_MD),
     ).rejects.toThrow("Budget exceeded");
+  });
+
+  test("returns cooling_off when proposedAt is within 7 days", async () => {
+    const rule = makeRule("new-rule", "A cooling rule");
+    rule.proposedAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+    const result = await promoteRule(rule, CLAUDE_MD, noopInference);
+    expect(result.status).toBe("cooling_off");
+    expect(result.reason).toContain("remaining");
+    const content = readFileSync(CLAUDE_MD, "utf-8");
+    expect(content).not.toContain("new-rule");
+  });
+
+  test("promotes when proposedAt is older than 7 days", async () => {
+    const rule = makeRule("mature-rule", "A mature rule");
+    rule.proposedAt = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+    const result = await promoteRule(rule, CLAUDE_MD, noopInference);
+    expect(result.status).toBe("promoted");
+    const content = readFileSync(CLAUDE_MD, "utf-8");
+    expect(content).toContain("- **mature-rule:** A mature rule");
+  });
+
+  test("promotes immediately when proposedAt is not set", async () => {
+    const rule = makeRule("no-date-rule", "No proposed date");
+    const result = await promoteRule(rule, CLAUDE_MD, noopInference);
+    expect(result.status).toBe("promoted");
+    const content = readFileSync(CLAUDE_MD, "utf-8");
+    expect(content).toContain("- **no-date-rule:**");
+  });
+
+  test("COOLING_PERIOD_DAYS constant is 7", () => {
+    expect(COOLING_PERIOD_DAYS).toBe(7);
   });
 });
 

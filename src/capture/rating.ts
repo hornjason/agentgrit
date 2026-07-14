@@ -14,10 +14,13 @@ import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { appendSignal } from "../adapters/jsonl";
+import { inference, type InferenceOptions, type InferenceResult } from "../adapters/inference";
 import { signalPath, resolveSignalDir } from "../adapters/paths";
 import { readSessionContext } from "../graph/context";
 import type { RatingSignal, SentimentSignal } from "../adapters/types";
 import { SCHEMA_VERSION } from "../adapters/types";
+
+export type InferenceFn = (opts: InferenceOptions) => Promise<InferenceResult>;
 
 const RATINGS_FILE = "ratings.jsonl";
 const RESPONSE_CACHE_FILE = "last-response.txt";
@@ -142,6 +145,39 @@ export function scoreSentiment(text: string): {
     summary: `Mixed sentiment (${posCount + negCount} keywords)`,
     confidence: 0.4,
   };
+}
+
+// ── LLM-based sentiment scoring ──
+
+export async function scoreSentimentLLM(
+  text: string,
+  infer: InferenceFn = inference,
+): Promise<{ summary: string; confidence: number } | null> {
+  if (!text.trim()) return null;
+
+  try {
+    const result = await infer({
+      systemPrompt:
+        "Analyze this AI session interaction. Rate sentiment 1-10 and provide a one-sentence summary. " +
+        'Return JSON: {"score": number, "summary": string}',
+      userPrompt: text,
+      level: "fast",
+      expectJson: true,
+    });
+
+    if (!result.success || !result.parsed) return null;
+
+    const parsed = result.parsed as { score?: number; summary?: string };
+    if (typeof parsed.score !== "number" || !parsed.summary) return null;
+
+    const normalizedConfidence = Math.min(0.6 + (parsed.score > 5 ? 0.2 : 0.1), 0.95);
+    return {
+      summary: parsed.summary,
+      confidence: normalizedConfidence,
+    };
+  } catch {
+    return null;
+  }
 }
 
 // ── Composite score from dimensions ──
@@ -328,13 +364,16 @@ export function scoreSession(turns: Turn[]): SessionScoreResult {
 export async function captureRating(
   message: string,
   sessionId: string,
-  opts?: { responsePreview?: string; ruleIds?: string[] },
+  opts?: { responsePreview?: string; ruleIds?: string[]; infer?: InferenceFn },
 ): Promise<RatingSignal | null> {
   const parsed = parseRating(message);
   if (!parsed) return null;
 
   const composite = computeComposite(parsed.mode, parsed.scope, parsed.quality);
-  const sentiment = scoreSentiment(parsed.comment ?? "");
+  const llmSentiment = parsed.comment
+    ? await scoreSentimentLLM(parsed.comment, opts?.infer)
+    : null;
+  const sentiment = llmSentiment ?? scoreSentiment(parsed.comment ?? "");
 
   const ruleIds = opts?.ruleIds ?? readSessionContext()?.ruleIds;
 

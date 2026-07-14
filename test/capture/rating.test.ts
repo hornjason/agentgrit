@@ -5,6 +5,7 @@ import {
   captureRating,
   parseRating,
   scoreSentiment,
+  scoreSentimentLLM,
   computeComposite,
   truncatePreview,
   cacheLastResponse,
@@ -14,6 +15,7 @@ import {
   captureSessionSentiment,
 } from "../../src/capture/rating";
 import type { Turn } from "../../src/capture/rating";
+import type { InferenceOptions, InferenceResult } from "../../src/adapters/inference";
 
 const TMP_DIR = join(import.meta.dir, ".tmp-rating-test");
 
@@ -94,6 +96,115 @@ describe("scoreSentiment", () => {
     const result = scoreSentiment("love it");
     expect(result).not.toBeNull();
     expect(result!.summary).toContain("Positive");
+  });
+});
+
+describe("scoreSentimentLLM", () => {
+  test("returns LLM sentiment when inference succeeds", async () => {
+    const mockInfer = async (): Promise<InferenceResult> => ({
+      success: true,
+      output: '{"score": 8, "summary": "Very positive interaction"}',
+      parsed: { score: 8, summary: "Very positive interaction" },
+      latencyMs: 10,
+      level: "fast",
+      provider: "claude",
+    });
+
+    const result = await scoreSentimentLLM("great work on the feature", mockInfer);
+    expect(result).not.toBeNull();
+    expect(result!.summary).toBe("Very positive interaction");
+    expect(result!.confidence).toBeGreaterThan(0.5);
+  });
+
+  test("returns null when inference fails", async () => {
+    const mockInfer = async (): Promise<InferenceResult> => ({
+      success: false,
+      output: "",
+      error: "unavailable",
+      latencyMs: 0,
+      level: "fast",
+      provider: "claude",
+    });
+
+    const result = await scoreSentimentLLM("some text", mockInfer);
+    expect(result).toBeNull();
+  });
+
+  test("returns null for empty text", async () => {
+    const mockInfer = async (): Promise<InferenceResult> => ({
+      success: true,
+      output: "{}",
+      parsed: {},
+      latencyMs: 10,
+      level: "fast",
+      provider: "claude",
+    });
+
+    const result = await scoreSentimentLLM("", mockInfer);
+    expect(result).toBeNull();
+  });
+
+  test("returns null when parsed JSON lacks required fields", async () => {
+    const mockInfer = async (): Promise<InferenceResult> => ({
+      success: true,
+      output: '{"mood": "good"}',
+      parsed: { mood: "good" },
+      latencyMs: 10,
+      level: "fast",
+      provider: "claude",
+    });
+
+    const result = await scoreSentimentLLM("text", mockInfer);
+    expect(result).toBeNull();
+  });
+
+  test("returns null when inference throws", async () => {
+    const throwingInfer = async (): Promise<InferenceResult> => {
+      throw new Error("network timeout");
+    };
+
+    const result = await scoreSentimentLLM("text", throwingInfer);
+    expect(result).toBeNull();
+  });
+});
+
+describe("captureRating with LLM sentiment", () => {
+  test("uses LLM sentiment when available", async () => {
+    const mockInfer = async (): Promise<InferenceResult> => ({
+      success: true,
+      output: '{"score": 9, "summary": "Excellent session performance"}',
+      parsed: { score: 9, summary: "Excellent session performance" },
+      latencyMs: 10,
+      level: "fast",
+      provider: "claude",
+    });
+
+    const signal = await captureRating(
+      "/rate M:8 S:8 Q:8 amazing work",
+      "test-session",
+      { infer: mockInfer },
+    );
+    expect(signal).not.toBeNull();
+    expect(signal!.sentimentSummary).toBe("Excellent session performance");
+  });
+
+  test("falls back to keyword sentiment when LLM fails", async () => {
+    const failingInfer = async (): Promise<InferenceResult> => ({
+      success: false,
+      output: "",
+      error: "unavailable",
+      latencyMs: 0,
+      level: "fast",
+      provider: "claude",
+    });
+
+    const signal = await captureRating(
+      "/rate M:8 S:8 Q:8 excellent amazing",
+      "test-session",
+      { infer: failingInfer },
+    );
+    expect(signal).not.toBeNull();
+    expect(signal!.sentimentSummary).toContain("Positive");
   });
 });
 

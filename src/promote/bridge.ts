@@ -4,6 +4,15 @@ import type { Rule } from "../adapters/types";
 import { checkBudget } from "./budget";
 import { checkContradiction, extractExistingRules, type InferenceFn } from "./contradiction";
 
+export const COOLING_PERIOD_DAYS = 7;
+
+export type PromoteStatus = "promoted" | "cooling_off" | "error";
+
+export interface PromoteResult {
+  status: PromoteStatus;
+  reason?: string;
+}
+
 const RULES_SECTION_MARKER = "### Rules";
 const FALLBACK_MARKER = "## Rules";
 
@@ -47,9 +56,22 @@ export async function promoteRule(
   rule: Rule,
   claudeMdPath: string,
   inferenceFn?: InferenceFn,
-): Promise<void> {
+): Promise<PromoteResult> {
   if (!existsSync(claudeMdPath)) {
     throw new Error(`CLAUDE.md not found at ${claudeMdPath}`);
+  }
+
+  if (rule.proposedAt) {
+    const proposedMs = new Date(rule.proposedAt).getTime();
+    const nowMs = Date.now();
+    const elapsedDays = (nowMs - proposedMs) / (1000 * 60 * 60 * 24);
+    if (elapsedDays < COOLING_PERIOD_DAYS) {
+      const remaining = Math.ceil(COOLING_PERIOD_DAYS - elapsedDays);
+      return {
+        status: "cooling_off",
+        reason: `Rule proposed ${elapsedDays.toFixed(1)} days ago; ${remaining} day(s) remaining in cooling period`,
+      };
+    }
   }
 
   const content = readFileSync(claudeMdPath, "utf-8");
@@ -96,6 +118,7 @@ export async function promoteRule(
   }
 
   await atomicWrite(claudeMdPath, newContent);
+  return { status: "promoted" };
 }
 
 export async function removeRule(

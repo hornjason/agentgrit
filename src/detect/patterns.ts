@@ -13,6 +13,7 @@ export type InferenceFn = (opts: InferenceOptions) => Promise<InferenceResult>;
 
 export interface MinePatternsOptions {
   llm?: boolean;
+  useLLM?: boolean;
   infer?: InferenceFn;
 }
 
@@ -264,7 +265,7 @@ export async function minePatterns(
     ...findScoreDrops(sessions),
   ];
 
-  if (options?.llm) {
+  if (options?.llm || options?.useLLM) {
     const infer = options.infer ?? inference;
     const llmPatterns = await llmClusterCorrections(corrections, infer);
     patterns.push(...llmPatterns);
