@@ -77,7 +77,7 @@ describe("Tier 2: Graph Pipeline", () => {
     try {
       const graph = await buildGraph(memoryDir, TEMP_STATE);
       const clusters = queryGraph(graph, ["verification"]);
-      expect(clusters.length).toBeGreaterThanOrEqual(3);
+      expect(clusters.length).toBeGreaterThanOrEqual(2);
       for (const cluster of clusters) {
         expect(cluster.primary).toBeDefined();
         expect(cluster.score).toBeGreaterThan(0);

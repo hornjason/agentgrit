@@ -12,7 +12,7 @@ import { propagateDomains } from "./domain-propagation";
 export const DOMAINS = [
   "verification", "escalation", "scope", "delivery", "communication",
   "deployment", "security", "ui-testing", "data", "browser",
-  "memory", "algorithm", "delegation",
+  "memory", "algorithm", "delegation", "architecture",
 ] as const;
 
 type Domain = (typeof DOMAINS)[number];
@@ -164,7 +164,7 @@ export function keywordClassify(name: string, description: string, content: stri
       !/before assert|check before|read before|verify state/.test(text)) return ["deployment"];
   if (/\bquinn\b|playwright.*project|visual.*test|screenshot.*valid/.test(text)) return ["ui-testing"];
   if (/\biframe\b|page\.fill|page\.route|selector.*fail|sso.*redirect|login.*flow|browser.*context/.test(text)) return ["browser"];
-  if (/security scan|security.*gate|security.*review|vulnerability|destructive|force push/.test(text)) return ["security"];
+  if (/security scan|security.*gate|security.*review|vulnerability|destructive|force push|\bauth\b|credential|token.*secret|session.*permission|access.control|encrypt|secret.*key/.test(text)) return ["security"];
   if (/spawn.*agent|agent.*spawn|worktree isolation|pre-brief|handoff|delegate.*code/.test(text)) return ["delegation"];
   if (/escalat|bring in.*specialist|wrong approach|1-2 attempt|after.*fail|stuck.*diagnos/.test(text)) return ["escalation"];
   if (/\bprd\b|\bisc\b|algorithm.*phase|effort level|criteria.*count/.test(text)) return ["algorithm"];
@@ -173,6 +173,7 @@ export function keywordClassify(name: string, description: string, content: stri
   if (/false.*complet|partial.*deliver|incomplete.*deliver|not.*done|self.audit|before.*claiming.*done/.test(text)) return ["delivery"];
   if (/response.*format|output.*format|trailing summary|terse.*response|format.*response/.test(text)) return ["communication"];
   if (/actual.*data|live.*data|measure.*before|read.*before.*plan|real.*numbers/.test(text)) return ["data"];
+  if (/\brefactor\b|abstract.*interface|module.boundary|coupling|cohesion|deep.module|migration.*architecture|\barchitecture\b.*decision|interface.*design/.test(text)) return ["architecture"];
   if (/read.*before.*answer|check.*before.*claim|verify.*before.*answer|look.*before|read.*source.*first/.test(text)) return ["verification"];
 
   return null;

@@ -106,6 +106,21 @@ describe("keywordClassify", () => {
     expect(result).toEqual(["delivery"]);
   });
 
+  test("classifies auth/credential terms as security", () => {
+    expect(keywordClassify("auth-gate", "", "validate auth token before accessing resources")).toEqual(["security"]);
+    expect(keywordClassify("cred-check", "", "never store credential in plain text")).toEqual(["security"]);
+    expect(keywordClassify("secret-mgmt", "", "rotate secret key every 90 days")).toEqual(["security"]);
+    expect(keywordClassify("access", "", "enforce access control on all endpoints")).toEqual(["security"]);
+    expect(keywordClassify("encryption", "", "encrypt sensitive data at rest")).toEqual(["security"]);
+  });
+
+  test("classifies architecture terms", () => {
+    expect(keywordClassify("refactor-rule", "", "refactor the module to reduce coupling")).toEqual(["architecture"]);
+    expect(keywordClassify("design", "", "use abstract interface for module boundary")).toEqual(["architecture"]);
+    expect(keywordClassify("deep-mod", "", "prefer deep module design with cohesion")).toEqual(["architecture"]);
+    expect(keywordClassify("arch-decision", "", "record architecture decision in ADR")).toEqual(["architecture"]);
+  });
+
   test("returns null for ambiguous text", () => {
     const result = keywordClassify("generic", "", "do something nice");
     expect(result).toBeNull();
