@@ -200,7 +200,7 @@ Replace `bun LearningReview.ts` with `agentgrit daemon run`.
 
 ## Phase 1b: Close All Capability Gaps (BEFORE Phase 2 tests)
 
-**11 items total: 5 MISSING gaps (G1-G5) + 6 PARTIAL gaps (P2, P4, P5, P7, P8, P9).**
+**5 items remaining: G1 (LLM sentiment), G5 (time gate), P2 (LLM patterns), P9 (work insights). G2/G3/G4/G6/P4/P5/P7/P8 verified closed 2026-07-14.**
 
 All LLM items use existing `src/adapters/inference.ts` (Haiku via claude CLI, $0 on subscription). Falls back gracefully when inference unavailable.
 
