@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { existsSync, rmSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
-import { hybridRetrieve } from "../../src/graph/retrieval";
+import { hybridRetrieve, RRF_WEIGHTS } from "../../src/graph/retrieval";
 import { buildIndex } from "../../src/graph/bm25";
 import type { Graph } from "../../src/graph/types";
 import type { GraphNode } from "../../src/adapters/types";
@@ -149,8 +149,8 @@ describe("hybridRetrieve", () => {
     const results = hybridRetrieve("deploy", [], graph, index);
     expect(results.length).toBe(1);
 
-    // rank=1, RRF_K=60, bm25 weight=2: score = 2 * 1/(60+1)
-    const expected = 2 / (60 + 1);
+    // rank=1, RRF_K=60, bm25 weight from config: score = weight * 1/(60+1)
+    const expected = RRF_WEIGHTS.bm25 / (60 + 1);
     expect(results[0].rrfScore).toBeCloseTo(expected, 4);
   });
 });

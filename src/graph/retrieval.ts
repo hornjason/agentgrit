@@ -16,8 +16,8 @@ export interface RRFWeights {
 
 const _rrfCfg = loadConfig().rrfWeights;
 export const RRF_WEIGHTS: RRFWeights = {
-  bm25: _rrfCfg?.bm25 ?? 2,
-  graph: _rrfCfg?.graph ?? 0.5,
+  bm25: _rrfCfg?.bm25 ?? 1,
+  graph: _rrfCfg?.graph ?? 1.5,
   vector: _rrfCfg?.vector ?? 1,
 };
 
@@ -103,9 +103,23 @@ export function hybridRetrieve(
   const bm25Results = searchIndex(index, query, 50);
   const bm25List = bm25Results.map((r, i) => ({ id: r.id, rank: i + 1 }));
 
-  // Step 2: Graph domain traversal (top 50)
+  // Step 2: Graph domain traversal (top 50) — include connected nodes
   const clusters: RankedCluster[] = queryGraph(graph, domains, 50);
-  const graphList = clusters.map((c, i) => ({ id: c.primary.id, rank: i + 1 }));
+  const graphSeen = new Set<string>();
+  const graphList: Array<{ id: string; rank: number }> = [];
+  let graphRank = 1;
+  for (const c of clusters) {
+    if (!graphSeen.has(c.primary.id)) {
+      graphList.push({ id: c.primary.id, rank: graphRank++ });
+      graphSeen.add(c.primary.id);
+    }
+    for (const conn of c.connected) {
+      if (!graphSeen.has(conn.node.id)) {
+        graphList.push({ id: conn.node.id, rank: graphRank++ });
+        graphSeen.add(conn.node.id);
+      }
+    }
+  }
 
   if (bm25List.length === 0 && graphList.length === 0) return [];
 
