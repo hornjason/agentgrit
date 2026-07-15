@@ -6,8 +6,16 @@
   "bin": {
     "agentgrit": "dist/agentgrit.js"
   },
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./capture": "./src/capture/index.ts",
+    "./graph": "./src/graph/index.ts",
+    "./adapters/*": "./src/adapters/*"
+  },
   "files": [
     "dist/",
+    "src/",
     "rubrics/",
     "agentgrit.config.ts",
     "README.md",
