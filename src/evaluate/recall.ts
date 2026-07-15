@@ -93,7 +93,8 @@ export interface SessionRecallScore {
 export interface RecallEvalResult {
   evaluatedAt: string; sessionsEvaluated: number; sessionsSkipped: number;
   meanRecall3: number; meanRecall5: number; meanRecall10: number; meanRecall15: number;
-  meanPrecision5: number; meanMrr: number; ci95Recall5: [number, number];
+  meanPrecision5: number; meanMrr: number;
+  ci95Recall15: [number, number]; ci95Recall5: [number, number];
   perSession: SessionRecallScore[];
 }
 
@@ -131,11 +132,12 @@ function mean(v: number[]): number { return v.length === 0 ? 0 : v.reduce((a, b)
 
 export function aggregateRecallScores(sessions: SessionRecallScore[], skipped = 0): RecallEvalResult {
   const r5 = sessions.map((s) => s.recall5);
+  const r15 = sessions.map((s) => s.recall15);
   return {
     evaluatedAt: new Date().toISOString(), sessionsEvaluated: sessions.length, sessionsSkipped: skipped,
     meanRecall3: mean(sessions.map((s) => s.recall3)), meanRecall5: mean(r5),
-    meanRecall10: mean(sessions.map((s) => s.recall10)), meanRecall15: mean(sessions.map((s) => s.recall15)),
+    meanRecall10: mean(sessions.map((s) => s.recall10)), meanRecall15: mean(r15),
     meanPrecision5: mean(sessions.map((s) => s.precision5)), meanMrr: mean(sessions.map((s) => s.mrr)),
-    ci95Recall5: bootstrapCI(r5), perSession: sessions,
+    ci95Recall15: bootstrapCI(r15), ci95Recall5: bootstrapCI(r5), perSession: sessions,
   };
 }
