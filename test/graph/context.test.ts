@@ -482,6 +482,143 @@ describe("getContextRules", () => {
   });
 });
 
+describe("getContextRules diversity cap", () => {
+  test("AC-1: per-domain cap ensures balanced multi-domain results", async () => {
+    // 12 deployment nodes vs 3 ui-testing nodes — deployment should NOT take all 15 slots
+    const deployNodes = Array.from({ length: 12 }, (_, i) =>
+      makeNode(`deploy_${i}`, ["deployment"], `Deployment rule ${i} for containers`),
+    );
+    const uiNodes = [
+      makeNode("ui_playwright", ["ui-testing"], "Quinn playwright visual test screenshot"),
+      makeNode("ui_screenshot", ["ui-testing"], "Screenshot comparison visual regression"),
+      makeNode("ui_browser", ["ui-testing"], "Browser visual test quinn playwright launch"),
+    ];
+    const graph = makeGraph([...deployNodes, ...uiNodes]);
+
+    const files = [...deployNodes, ...uiNodes].map(n => {
+      const f = join(TMP_DIR, `${n.id}.md`);
+      const content = n.domains[0] === "deployment"
+        ? `deployment containers production make rebuild ${n.id}`
+        : `playwright visual test quinn screenshot ${n.id}`;
+      writeFileSync(f, content, "utf-8");
+      return f;
+    });
+    const index = buildIndex(files);
+
+    const rules = await getContextRules(graph, index, ["deployment", "ui-testing"], 15);
+    const domainCounts: Record<string, number> = {};
+    for (const r of rules) {
+      const d = graph.nodes[r.id]?.domains[0] || "unknown";
+      domainCounts[d] = (domainCounts[d] || 0) + 1;
+    }
+    // With 2 domains, cap = ceil(15/2) = 8 per domain
+    expect(domainCounts["deployment"] || 0).toBeLessThanOrEqual(8);
+    // ui-testing should be represented
+    expect(domainCounts["ui-testing"] || 0).toBeGreaterThan(0);
+  });
+
+  test("AC-2: Quinn playwright query gets ui-testing rules in top 3", async () => {
+    // Deploy nodes leak into results via embedding edges from ui-testing nodes
+    const deployNodes = Array.from({ length: 20 }, (_, i) =>
+      makeNode(`deploy_${i}`, ["deployment"], `Deployment containers visual test pipeline rule ${i}`),
+    );
+    const uiNodes = [
+      makeNode("ui_playwright_test", ["ui-testing"], "Quinn playwright visual test screenshot validation"),
+      makeNode("ui_visual_regression", ["ui-testing"], "Playwright page screenshot visual regression testing"),
+      makeNode("ui_quinn_validates", ["ui-testing"], "Quinn validates visual appearance screenshot compare"),
+    ];
+    const graph = makeGraph([...deployNodes, ...uiNodes]);
+    // Embedding edges connect ui-testing → deployment (1-hop expansion leaks deploy nodes in)
+    graph.edges = deployNodes.slice(0, 10).map((n, i) => ({
+      from: uiNodes[i % uiNodes.length].id,
+      to: n.id,
+      relationship: "sibling" as const,
+      strength: 0.8,
+      source: "embedding" as const,
+    }));
+    graph.edgeCount = graph.edges.length;
+
+    const files = [...deployNodes, ...uiNodes].map(n => {
+      const f = join(TMP_DIR, `${n.id}.md`);
+      const content = n.domains[0] === "deployment"
+        ? `deployment visual test pipeline containers fix quinn playwright ${n.id}`
+        : `playwright visual test quinn screenshot validation fix ${n.id}`;
+      writeFileSync(f, content, "utf-8");
+      return f;
+    });
+    const index = buildIndex(files);
+
+    // Single detected domain — deploy leaks via embedding edge expansion + BM25 overlap
+    const rules = await getContextRules(
+      graph, index, ["ui-testing"], 15, undefined,
+      "Fix Quinn playwright visual test",
+    );
+    const top3 = rules.slice(0, 3);
+    const uiInTop3 = top3.filter(r => graph.nodes[r.id]?.domains[0] === "ui-testing").length;
+    expect(uiInTop3).toBeGreaterThanOrEqual(2);
+  });
+
+  test("AC-3: architecture query gets architecture rules in top 3", async () => {
+    // Browser nodes leak via embedding edges from architecture nodes
+    const browserNodes = Array.from({ length: 20 }, (_, i) =>
+      makeNode(`browser_${i}`, ["browser"], `Browser module refactor automation rule ${i}`),
+    );
+    const archNodes = [
+      makeNode("arch_deep_module", ["architecture"], "Deep module boundary architecture principle"),
+      makeNode("arch_shallow_check", ["architecture"], "Shallow module check deletion test interface"),
+      makeNode("arch_adr_compliance", ["architecture"], "ADR compliance architecture decisions check"),
+    ];
+    const graph = makeGraph([...browserNodes, ...archNodes]);
+    graph.edges = browserNodes.slice(0, 10).map((n, i) => ({
+      from: archNodes[i % archNodes.length].id,
+      to: n.id,
+      relationship: "sibling" as const,
+      strength: 0.8,
+      source: "embedding" as const,
+    }));
+    graph.edgeCount = graph.edges.length;
+
+    const files = [...browserNodes, ...archNodes].map(n => {
+      const f = join(TMP_DIR, `${n.id}.md`);
+      const content = n.domains[0] === "browser"
+        ? `browser module refactor boundary deep architecture chrome ${n.id}`
+        : `architecture module boundary deep shallow refactor ${n.id}`;
+      writeFileSync(f, content, "utf-8");
+      return f;
+    });
+    const index = buildIndex(files);
+
+    // Single detected domain — browser leaks via embedding expansion
+    const rules = await getContextRules(
+      graph, index, ["architecture"], 15, undefined,
+      "refactor deep module boundary architecture",
+    );
+    const top3 = rules.slice(0, 3);
+    const archInTop3 = top3.filter(r => graph.nodes[r.id]?.domains[0] === "architecture").length;
+    expect(archInTop3).toBeGreaterThanOrEqual(2);
+  });
+
+  test("AC-4: single-domain query still gets full results", async () => {
+    const deployNodes = Array.from({ length: 20 }, (_, i) =>
+      makeNode(`deploy_${i}`, ["deployment"], `Deployment containers rule ${i}`),
+    );
+    const graph = makeGraph(deployNodes);
+
+    const files = deployNodes.map(n => {
+      const f = join(TMP_DIR, `${n.id}.md`);
+      writeFileSync(f, `deployment containers production make rebuild ${n.id}`, "utf-8");
+      return f;
+    });
+    const index = buildIndex(files);
+
+    const rules = await getContextRules(graph, index, ["deployment"], 15, undefined, "deploy containers");
+    expect(rules.length).toBe(15);
+    // All results should be deployment — no capping needed for single-domain
+    const allDeployment = rules.every(r => graph.nodes[r.id]?.domains[0] === "deployment");
+    expect(allDeployment).toBe(true);
+  });
+});
+
 describe("parseLearnedRules", () => {
   test("parses bullet-point rules from CLAUDE-LEARNED.md format", () => {
     const content = `# PAI Learned Rules

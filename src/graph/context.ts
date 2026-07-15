@@ -152,10 +152,29 @@ export async function getContextRules(
     return NODE_TYPE_WEIGHT[prefix] ?? 1.0;
   }
 
-  const ranked = candidates
+  const scored = candidates
     .map(c => [c.id, c.rrfScore * nodeTypeWeight(c.id)] as [string, number])
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, limit);
+    .sort((a, b) => b[1] - a[1]);
+
+  // 2b. Per-domain diversity cap — prevent any single domain from taking all slots
+  const domainSet = new Set<string>();
+  for (const [id] of scored) {
+    const d = graph.nodes[id]?.domains[0];
+    if (d) domainSet.add(d);
+  }
+  const distinctDomains = Math.max(domainSet.size, 1);
+  const perDomainCap = Math.ceil(limit / distinctDomains);
+
+  const ranked: Array<[string, number]> = [];
+  const domainSlots: Record<string, number> = {};
+  for (const entry of scored) {
+    if (ranked.length >= limit) break;
+    const d = graph.nodes[entry[0]]?.domains[0] || "_none";
+    const used = domainSlots[d] || 0;
+    if (used >= perDomainCap) continue;
+    domainSlots[d] = used + 1;
+    ranked.push(entry);
+  }
 
   // 3. Type-allowlist — defense-in-depth filter
   const ALLOWED_TYPES = new Set(["feedback", "steering", "success", "learned"]);
