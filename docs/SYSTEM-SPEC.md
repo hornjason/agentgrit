@@ -59,7 +59,7 @@ Session signals (ratings, corrections, failures)
 | Work completion | Session learnings extracted | `signals/work-completions.jsonl` |
 | Debrief | Manual `/debrief` extraction | `signals/debriefs.jsonl` |
 
-630+ ratings, 1000+ corrections captured to date.
+643 ratings, 1245 corrections captured to date.
 
 ### 2. Pattern Detection (`src/detect/`)
 
@@ -127,10 +127,10 @@ At session start, inject only the rules relevant to the current task.
 - Graceful fallback when no section cache exists
 - 18 new tests
 
-**Remaining gap:**
-- Ship ceremony docs (HARNESS-GATES 197, BRIEF-TEMPLATES 429, HARNESS-STANDARD 475) still bulk-load for XS tasks
-- Deferring these to on-demand Read() calls would save ~1,101 lines (XS → ~1,210)
-- Requires restructuring SKILL.md — lower priority, diminishing returns
+**Phase 3 (#129): Ceremony docs deferred for XS/S**
+- SKILL.md restructured with size-conditional Read() directives
+- XS tasks skip HARNESS-GATES (197), BRIEF-TEMPLATES (429), HARNESS-STANDARD (475)
+- ~1,100 lines saved for XS tasks
 
 ### 5. Recall Measurement (`src/evaluate/`)
 
@@ -156,7 +156,7 @@ Measured by `RecallEvaluator` over 60-session gold set (34 real + 26 synthetic).
 - **Self-healing** — new graph nodes auto-classified into `rule-domains.json` at session start
 - **Auto-prune** — `pruneTobudget()` runs when over budget cap
 
-**GAP: Eviction doesn't clean rule-domains.json.** Rules evicted from CLAUDE.md leave stale entries in rule-domains.json. Tracked: #123.
+**SHIPPED: Eviction cleanup (#123).** `removeFromRuleDomains()` shared helper removes stale entries from rule-domains.json after eviction.
 
 **SHIPPED: Auto-review of domain classifications (#115).** `reviewDomains()` in `promote/domain-review.ts` compares auto-assigned vs BM25-inferred domains. 26/71 rules promoted to `source: "reviewed"` (36.6%).
 
@@ -164,7 +164,11 @@ Measured by `RecallEvaluator` over 60-session gold set (34 real + 26 synthetic).
 
 **SHIPPED: Interaction-level rule attribution (#122).** Per-rule BM25 correlation with correction context via `attributeRulesToCorrections()`. Rules with similarity > 0.3 get -0.5 penalty per correction. Replaces session-level bulk rating.
 
-**SHIPPED: LLM classification for isolated nodes.** `classifyIsolatedNodes()` in `src/graph/classify-isolated.ts`. Daemon step 3c runs periodically. 19/20 isolated nodes classified on first run. `domainSource = "ai"`. CLI: `agentgrit graph classify`.
+**SHIPPED: LLM classification for isolated nodes.** `classifyIsolatedNodes()` in `src/graph/classify-isolated.ts`. Daemon step 3c runs periodically. 47/54 isolated nodes classified (98% domain coverage). `domainSource = "ai"`. CLI: `agentgrit graph classify`. Classifications survive graph rebuild.
+
+**SHIPPED: Effectiveness tracking (#127).** `trackRuleEffectiveness()` in `src/evaluate/effectiveness.ts`. 67/96 promoted rules effective (70%). CLI: `agentgrit eval effectiveness`.
+
+**SHIPPED: MEMORY.md staleness detection (#128).** `detectStaleMemories()` in `src/promote/staleness.ts`. 16 stale entries detected. CLI: `agentgrit memory stale`.
 
 ## Integration: AgentGrit ↔ Claude Code
 
@@ -203,9 +207,11 @@ AgentGrit is imported at runtime via dynamic `import()`. If unavailable, PAI fal
 | LLM isolated node classification | SHIPPED | `classifyIsolatedNodes()` + daemon step 3c + CLI `graph classify` |
 | Rating bias fix | SHIPPED | Correction-weighted scoring (#120), mutual-exclusive Haiku |
 | Rule attribution | SHIPPED | Per-rule BM25 correlation (#122) |
-| Package exports | OPEN | #124 — index.ts with typed API surface |
-| Claude Code hook templates | OPEN | #125 — `agentgrit init --claude-code` generator |
-| Multi-layer context | PARTIALLY SHIPPED | CLAUDE-LEARNED BM25-filtered (#103), section-level docs (#104). Ship ceremony docs still bulk-load (#129). |
+| Package exports | SHIPPED | #124 — 173 typed exports in src/index.ts |
+| Claude Code hook templates | SHIPPED | #125 — `agentgrit init --claude-code` generates 3 hooks |
+| Multi-layer context | SHIPPED | CLAUDE-LEARNED BM25-filtered (#103), section-level docs (#104), ceremony docs deferred for XS (#129) |
+| Effectiveness tracking | SHIPPED | #127 — 67/96 rules effective (70%), before/after frequency comparison |
+| MEMORY.md lifecycle | SHIPPED | #128 — staleness detection, 16 stale entries identified |
 
 ## Specs & ADRs
 
@@ -228,7 +234,7 @@ The system succeeds when:
 2. **Precision@5:** ≥70% — **MET (0.76)** ✅ Hybrid BM25+vector+graph retrieval + node-type weighting + hub-dampening.
 3. **MRR:** ≥0.90 — **MET (0.96)** ✅ First relevant rule is typically rank 1 or 2.
 4. **Rule budget:** ≤12 universal + ≤20 domain-filtered per session — **MET (11 + ~15)**
-5. **Zero repeat corrections:** same mistake never rated ≤3 twice — **GAP (#127).** 170x repeated corrections not prevented by promoted rules. Effectiveness tracking planned.
+5. **Zero repeat corrections:** same mistake never rated ≤3 twice — **PARTIALLY MET (#127).** 67/96 promoted rules effective (70% reduced source pattern frequency). 29 rules ineffective — need text refinement or more aggressive injection.
 6. **Self-maintaining:** rules added, classified, correlated, and evicted without manual intervention — **MET (eviction #85, attribution #99, LLM classify, domain review #115)**
 7. **Self-improving:** rated sessions automatically improve retrieval quality — **MET (attribution feedback → edge weights → better retrieval #99, correction-weighted scoring #120)**
 
