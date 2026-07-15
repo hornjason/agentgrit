@@ -12,8 +12,7 @@ import { Tier, type Rule, type EmbeddingProvider } from "../adapters/types";
 import { loadConfig } from "../adapters/paths";
 import { searchIndex, tokenize } from "./bm25";
 import { queryTrajectoriesSync } from "../detect/trajectories";
-import { loadVectorCache, computeCentroid, rankByVectorSimilarity } from "./embeddings";
-import { rrfMerge, RRF_WEIGHTS } from "./retrieval";
+import { hybridRetrieve } from "./retrieval";
 
 // ── Default Domains ──
 
@@ -65,9 +64,6 @@ export function sanitizeRuleText(text: string): string {
 
 // ── Get Context Rules ──
 
-const EXPANSION_RELS = new Set(["reinforces", "sibling", "caused_by_same_root", "same_domain", "co_occurred"]);
-const EXPANSION_DECAY = _cfg.thresholds?.expansionDecay ?? 0.5;
-
 export async function getContextRules(
   graph: Graph,
   index: BM25Index,
@@ -80,63 +76,23 @@ export async function getContextRules(
 ): Promise<Rule[]> {
   const domains = currentDomains.length > 0 ? currentDomains : DEFAULT_DOMAINS;
 
-  // 1. BM25 primary — retrieve 3x candidates
+  // 1. Hybrid retrieval — BM25 + domain-scored graph via RRF
   const fetchLimit = Math.max(limit * 3, 30);
   const searchText = queryText || domains.join(" ");
-  const bm25Results = searchIndex(index, searchText, fetchLimit);
 
-  // 2. Vector retrieval — real query embedding when provider available, centroid fallback
-  let vectorScores: Array<{ id: string; score: number }> | null = null;
-  if (vectorCachePath) {
-    const cache = loadVectorCache(vectorCachePath);
-    if (cache && cache.size > 0) {
-      if (embeddingProvider) {
-        const [queryVec] = await embeddingProvider.embed([searchText]);
-        vectorScores = rankByVectorSimilarity(queryVec, cache, fetchLimit);
-      } else {
-        const topBm25Ids = bm25Results.slice(0, 5).map(r => r.id);
-        const centroid = computeCentroid(topBm25Ids, cache);
-        if (centroid) {
-          vectorScores = rankByVectorSimilarity(centroid, cache, fetchLimit);
-        }
-      }
-    }
+  let candidates = hybridRetrieve(searchText, domains, graph, index, fetchLimit);
+
+  // Fallback: if hybrid returns nothing (no domain matches + no BM25 hits), use BM25-only
+  if (candidates.length === 0) {
+    const bm25Results = searchIndex(index, searchText, fetchLimit);
+    candidates = bm25Results.map((r, i) => ({
+      id: r.id,
+      rrfScore: r.score,
+      bm25Rank: i + 1,
+    }));
   }
 
-  // 3. Graph expansion — for each BM25 hit, expand 1-hop via edges
-  const scores = new Map<string, number>();
-
-  // Precompute edge counts for hub-dampening
-  const edgeCounts = new Map<string, number>();
-  for (const edge of graph.edges) {
-    edgeCounts.set(edge.from, (edgeCounts.get(edge.from) || 0) + 1);
-    edgeCounts.set(edge.to, (edgeCounts.get(edge.to) || 0) + 1);
-  }
-
-  for (const hit of bm25Results) {
-    scores.set(hit.id, Math.max(scores.get(hit.id) || 0, hit.score));
-
-    const node = graph.nodes[hit.id];
-    if (!node) continue;
-
-    for (const edge of graph.edges) {
-      if (!EXPANSION_RELS.has(edge.relationship)) continue;
-      let neighborId: string | null = null;
-      if (edge.from === hit.id) neighborId = edge.to;
-      else if (edge.to === hit.id) neighborId = edge.from;
-      if (!neighborId || !graph.nodes[neighborId]) continue;
-
-      let expandedScore = hit.score * EXPANSION_DECAY;
-      // Hub-dampening: suppress high-connectivity nodes
-      const nEdges = edgeCounts.get(neighborId) || 0;
-      if (nEdges >= 10) {
-        expandedScore *= 1 / Math.log2(nEdges);
-      }
-      scores.set(neighborId, Math.max(scores.get(neighborId) || 0, expandedScore));
-    }
-  }
-
-  // 4. 3-way RRF merge when vectors available, otherwise score-based ranking
+  // 2. Apply node-type weighting
   const NODE_TYPE_WEIGHT: Record<string, number> = {
     feedback: 1.0,
     steering: 1.0,
@@ -149,29 +105,12 @@ export async function getContextRules(
     return NODE_TYPE_WEIGHT[prefix] ?? 1.0;
   }
 
-  let ranked: Array<[string, number]>;
+  const ranked = candidates
+    .map(c => [c.id, c.rrfScore * nodeTypeWeight(c.id)] as [string, number])
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit);
 
-  if (vectorScores) {
-    const bm25List = bm25Results.map((r, i) => ({ id: r.id, rank: i + 1 }));
-    const graphList = Array.from(scores.entries())
-      .sort((a, b) => b[1] - a[1])
-      .map(([id], i) => ({ id, rank: i + 1 }));
-    const vectorList = vectorScores.map((r, i) => ({ id: r.id, rank: i + 1 }));
-
-    const merged = rrfMerge(bm25List, graphList, vectorList, RRF_WEIGHTS);
-    ranked = Array.from(merged.values())
-      .map(e => ({ ...e, score: e.score * nodeTypeWeight(e.id) }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit)
-      .map(e => [e.id, e.score] as [string, number]);
-  } else {
-    ranked = Array.from(scores.entries())
-      .map(([id, s]) => [id, s * nodeTypeWeight(id)] as [string, number])
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, limit);
-  }
-
-  // 5. Type-allowlist — defense-in-depth filter
+  // 3. Type-allowlist — defense-in-depth filter
   const ALLOWED_TYPES = new Set(["feedback", "steering", "success", "learned"]);
   const INDEX_NODE_PATTERN = /^(MEMORY|README|INDEX)$/i;
   const filtered = ranked.filter(([id]) => {
@@ -181,7 +120,7 @@ export async function getContextRules(
     return ALLOWED_TYPES.has(t);
   });
 
-  // 6. Build rule objects
+  // 4. Build rule objects
   const resultIds = new Set<string>();
   const rules: Rule[] = [];
 
@@ -202,7 +141,7 @@ export async function getContextRules(
     });
   }
 
-  // 7. Trajectory backfill
+  // 5. Trajectory backfill
   if (signalDir && rules.length < limit) {
     const remaining = limit - rules.length;
     const trajectories = queryTrajectoriesSync(domains, signalDir, remaining);

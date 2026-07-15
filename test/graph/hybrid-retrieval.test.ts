@@ -49,9 +49,9 @@ function makeGraph(nodes: GraphNode[]): Graph {
 }
 
 describe("hybrid BM25+vector retrieval", () => {
-  test("vector cache changes ranking vs BM25-only", async () => {
-    // Set up: verify_before_answering is a BM25 hit for "verify"
-    // incomplete_delivery is NOT a BM25 hit for "verify" but is semantically close
+  test("vector cache param is ignored (vector path removed in favor of domain scoring)", async () => {
+    // Since #133 replaced the vector retrieval path with hybridRetrieve (BM25 + domain-scored graph),
+    // passing a vectorCachePath should have no effect on results
     const f1 = join(TMP_DIR, "verify_before_answering.md");
     writeFileSync(f1, "verify before asserting anything always check source", "utf-8");
     const f2 = join(TMP_DIR, "incomplete_delivery.md");
@@ -66,38 +66,22 @@ describe("hybrid BM25+vector retrieval", () => {
       makeNode("deploy_gate", ["deployment"], "Deploy with make rebuild"),
     ]);
 
-    // BM25-only results
-    const bm25Only = await getContextRules(graph, index, ["verification"], 10, undefined, "verify before answering");
-    const bm25Ids = bm25Only.map(r => r.id);
+    // Results without vector cache
+    const withoutCache = await getContextRules(graph, index, ["verification"], 10, undefined, "verify before answering");
 
-    // Create vector cache where verify_before_answering and incomplete_delivery are close in vector space
+    // Create vector cache (should be ignored)
     const cachePath = join(TMP_DIR, "vector-cache.json");
     const vectors = new Map<string, number[]>();
-    // Make verify and incomplete very similar in vector space (cosine ~0.99)
     vectors.set("verify_before_answering", [0.9, 0.1, 0.05, 0.0]);
     vectors.set("incomplete_delivery", [0.88, 0.12, 0.06, 0.01]);
-    // deploy_gate is far away
     vectors.set("deploy_gate", [0.0, 0.0, 0.1, 0.95]);
     saveVectorCache(vectors, "test", 4, cachePath);
 
-    // Hybrid results
-    const hybrid = await getContextRules(graph, index, ["verification"], 10, undefined, "verify before answering", cachePath);
-    const hybridIds = hybrid.map(r => r.id);
+    // Results with vector cache — should be identical since vector path is removed
+    const withCache = await getContextRules(graph, index, ["verification"], 10, undefined, "verify before answering", cachePath);
 
-    // The hybrid results should include incomplete_delivery (vocabulary gap bridged)
-    expect(hybridIds).toContain("verify_before_answering");
-    expect(hybridIds).toContain("incomplete_delivery");
-
-    // Verify ranking position changed — incomplete_delivery should rank higher in hybrid
-    const bm25Pos = bm25Ids.indexOf("incomplete_delivery");
-    const hybridPos = hybridIds.indexOf("incomplete_delivery");
-    // In BM25-only, incomplete_delivery may not appear or ranks lower
-    // In hybrid, it should appear and rank reasonably high
-    if (bm25Pos >= 0) {
-      expect(hybridPos).toBeLessThanOrEqual(bm25Pos);
-    } else {
-      expect(hybridPos).toBeGreaterThanOrEqual(0);
-    }
+    expect(withCache.map(r => r.id)).toEqual(withoutCache.map(r => r.id));
+    expect(withCache.map(r => r.correlationScore)).toEqual(withoutCache.map(r => r.correlationScore));
   });
 
   test("BM25-only fallback: identical results when no vector cache", async () => {
