@@ -30,12 +30,12 @@ export function detectDomains(text: string): string[] {
   if (/\bquinn\b|playwright|visual.*test|screenshot/.test(lower)) domains.add("ui-testing");
   if (/\biframe\b|page\.fill|page\.route|sso|login.*flow|scraper|browser.*context/.test(lower)) domains.add("browser");
   if (/security scan|security.*gate|security.*review|vulnerability|destructive/.test(lower)) domains.add("security");
-  if (/spawn.*agent|agent.*spawn|worktree|pre-brief|handoff|delegate/.test(lower)) domains.add("delegation");
+  if (/spawn.*agent|agent.*spawn|worktree|pre-brief|handoff|delegate|marcus|brief.*template/.test(lower)) domains.add("delegation");
   if (/escalat|bring in.*specialist|wrong approach|stuck/.test(lower)) domains.add("escalation");
   if (/\bprd\b|\bisc\b|algorithm.*phase|effort level/.test(lower)) domains.add("algorithm");
   if (/feedback_.*\.md|memory\.md|ratings\.jsonl|learning capture/.test(lower)) domains.add("memory");
   if (/minimal.*scope|only.*asked|unrequested|stay.*focused/.test(lower)) domains.add("scope");
-  if (/false.*complet|partial.*deliver|incomplete|not.*done|self.audit/.test(lower)) domains.add("delivery");
+  if (/false.*complet|partial.*deliver|incomplete|not.*done|self.audit|\bship\b|acceptance.*criter|template.*ac|github.*issue/.test(lower)) domains.add("delivery");
   if (/response.*format|output.*format|terse.*response/.test(lower)) domains.add("communication");
   if (/actual.*data|live.*data|measure.*before|read.*before.*plan/.test(lower)) domains.add("data");
   if (/verify|check.*before|read.*before.*answer|look.*before|source.*first/.test(lower)) domains.add("verification");
