@@ -12,6 +12,7 @@ import {
   detectSignalSources,
   inventoryMemoryFiles,
   installHooks,
+  installClaudeCodeHooks,
   countExistingHooks,
 } from "../../src/adapters/discovery";
 
@@ -95,6 +96,10 @@ export async function initCommand(args: string[]): Promise<void> {
     return importInit(resolve(importPath));
   }
 
+  if (args.includes("--claude-code")) {
+    return claudeCodeInit(args);
+  }
+
   const isBootstrap = args.includes("--bootstrap");
 
   if (isBootstrap) {
@@ -102,6 +107,25 @@ export async function initCommand(args: string[]): Promise<void> {
   }
 
   return quickInit(args);
+}
+
+async function claudeCodeInit(args: string[]): Promise<void> {
+  const settingsIdx = args.indexOf("--settings");
+  const settingsPath = settingsIdx !== -1 && args[settingsIdx + 1]
+    ? resolve(args[settingsIdx + 1])
+    : join(homedir(), ".claude", "settings.json");
+
+  console.log("\nagentgrit init --claude-code");
+  console.log("  settings: " + settingsPath + "\n");
+
+  const result = installClaudeCodeHooks(settingsPath);
+
+  console.log("  Hooks installed (" + result.installed + " new, " + result.existing + " existing, " + result.skipped + " skipped)");
+  console.log("\n  Hook events:");
+  console.log("    SessionStart  -> npx agentgrit graph context");
+  console.log("    SessionEnd    -> npx agentgrit capture sentiment");
+  console.log("    PostToolUse   -> npx agentgrit capture tool");
+  console.log("\nClaude Code integration complete.\n");
 }
 
 async function quickInit(args: string[]): Promise<void> {

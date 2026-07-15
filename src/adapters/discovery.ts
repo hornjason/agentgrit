@@ -478,3 +478,80 @@ export function countExistingHooks(settingsPath: string): number {
     return 0;
   }
 }
+
+/**
+ * Install Claude Code integration hooks into settings.json.
+ * Generates hook registrations for:
+ *   - SessionStart: context injection (graph context)
+ *   - SessionEnd: session scoring (sentiment capture)
+ *   - PostToolUse: tool audit capture
+ *
+ * Merges with existing config — never overwrites non-hook settings.
+ */
+export function installClaudeCodeHooks(settingsPath: string): {
+  installed: number;
+  existing: number;
+  skipped: number;
+} {
+  let settings: any = {};
+  if (existsSync(settingsPath)) {
+    try {
+      settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+    } catch {
+      settings = {};
+    }
+  }
+
+  if (!settings.hooks) settings.hooks = {};
+
+  const hookDefs: Array<{
+    event: string;
+    matcher: string;
+    command: string;
+    timeout: number;
+  }> = [
+    { event: "SessionStart", matcher: "", command: "npx agentgrit graph context", timeout: 10000 },
+    { event: "SessionEnd", matcher: "", command: "npx agentgrit capture sentiment", timeout: 10000 },
+    { event: "PostToolUse", matcher: ".*", command: "npx agentgrit capture tool", timeout: 5000 },
+  ];
+
+  let installed = 0;
+  let existing = 0;
+  let skipped = 0;
+
+  for (const def of hookDefs) {
+    if (!settings.hooks[def.event]) {
+      settings.hooks[def.event] = [];
+    }
+
+    const eventHooks: HookEntry[] = settings.hooks[def.event];
+    const alreadyExists = eventHooks.some((entry) =>
+      entry.matcher === def.matcher &&
+      entry.hooks?.some((h) => h.command === def.command),
+    );
+
+    if (alreadyExists) {
+      existing++;
+      continue;
+    }
+
+    const matchingMatcher = eventHooks.find((entry) => entry.matcher === def.matcher);
+    if (matchingMatcher) {
+      matchingMatcher.hooks.push({
+        type: "command",
+        command: def.command,
+        timeout: def.timeout,
+      });
+    } else {
+      eventHooks.push({
+        matcher: def.matcher,
+        hooks: [{ type: "command", command: def.command, timeout: def.timeout }],
+      });
+    }
+    installed++;
+  }
+
+  writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf-8");
+
+  return { installed, existing, skipped };
+}
