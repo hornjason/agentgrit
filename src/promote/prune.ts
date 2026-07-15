@@ -6,6 +6,7 @@ import { checkBudget } from "./budget";
 import { getEvictionCandidates } from "./rules";
 import { removeRule } from "./bridge";
 import { recordPromotion } from "./ledger";
+import { removeFromRuleDomains } from "./evict";
 
 export interface PruneResult {
   removed: string[];
@@ -39,7 +40,7 @@ function extractRulesWithIds(content: string): Rule[] {
 export async function pruneTobudget(
   claudeMdPath: string,
   tier: Tier,
-  options?: { dryRun?: boolean; maxPrune?: number; stateDir?: string; budgetOverride?: number },
+  options?: { dryRun?: boolean; maxPrune?: number; stateDir?: string; budgetOverride?: number; ruleDomainsPath?: string },
 ): Promise<PruneResult> {
   const maxPrune = options?.maxPrune ?? 10;
   const dryRun = options?.dryRun ?? false;
@@ -93,6 +94,11 @@ export async function pruneTobudget(
     current--;
 
     if (afterRemoval.level !== "OVER_BUDGET") break;
+  }
+
+  // Clean up stale entries from rule-domains.json
+  if (!dryRun && removed.length > 0) {
+    removeFromRuleDomains(removed, options?.ruleDomainsPath);
   }
 
   return { removed, remaining: current, wasOverBudget: true };

@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "fs";
 import { Tier } from "../adapters/types";
 import { loadConfig } from "../adapters/paths";
 import { loadRuleStats } from "./rules";
+import { removeFromRuleDomains } from "./evict";
 
 const DEFAULT_CAPS: Record<Tier, number> = {
   [Tier.Global]: 25,
@@ -96,6 +97,7 @@ export function pruneLearnedRules(
   learnedMdPath: string,
   cap: number,
   stateDir?: string,
+  options?: { ruleDomainsPath?: string },
 ): PruneResult {
   if (!existsSync(learnedMdPath)) {
     return { pruned: [], kept: 0, total: 0 };
@@ -128,6 +130,9 @@ export function pruneLearnedRules(
   const lines = content.split("\n");
   const filtered = lines.filter((line) => !pruneLines.has(line));
   writeFileSync(learnedMdPath, filtered.join("\n"), "utf-8");
+
+  // Clean up stale entries from rule-domains.json
+  removeFromRuleDomains(prunedIds, options?.ruleDomainsPath);
 
   return { pruned: prunedIds, kept: total - excess, total };
 }

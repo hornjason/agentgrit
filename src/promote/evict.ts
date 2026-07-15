@@ -177,10 +177,6 @@ export async function evictRules(
   const result: EvictionResult = { evicted: [], skipped: [], errors: [] };
   const dryRun = options?.dryRun ?? false;
 
-  const ruleDomains = loadRuleDomains(
-    options?.ruleDomainsPath ?? join(process.env.HOME ?? "", ".claude", "MEMORY", "LEARNING", "STATE", "rule-domains.json"),
-  );
-
   for (const candidate of candidates) {
     if (candidate.requiresHumanConfirmation) {
       result.skipped.push(candidate.ruleId);
@@ -201,24 +197,42 @@ export async function evictRules(
       // Rule might not exist in CLAUDE-LEARNED.md by exact ID match
     }
 
-    // Remove from rule-domains.json
-    if (ruleDomains && ruleDomains.rules[candidate.ruleId]) {
-      delete ruleDomains.rules[candidate.ruleId];
-    }
-
     result.evicted.push(candidate.ruleId);
   }
 
-  // Persist updated rule-domains.json
-  if (!dryRun && ruleDomains && result.evicted.length > 0) {
-    const rdPath = options?.ruleDomainsPath ?? join(process.env.HOME ?? "", ".claude", "MEMORY", "LEARNING", "STATE", "rule-domains.json");
-    if (existsSync(rdPath)) {
-      ruleDomains.generated_at = new Date().toISOString();
-      writeFileSync(rdPath, JSON.stringify(ruleDomains, null, 2), "utf-8");
-    }
+  // Remove evicted rules from rule-domains.json
+  if (!dryRun && result.evicted.length > 0) {
+    removeFromRuleDomains(result.evicted, options?.ruleDomainsPath);
   }
 
   return result;
+}
+
+/**
+ * Remove evicted rule IDs from rule-domains.json on disk.
+ * Shared by evictRules, pruneLearnedRules, and pruneTobudget.
+ */
+export function removeFromRuleDomains(
+  ruleIds: string[],
+  ruleDomainsPath?: string,
+): void {
+  if (ruleIds.length === 0) return;
+  const rdPath = ruleDomainsPath ?? join(process.env.HOME ?? "", ".claude", "MEMORY", "LEARNING", "STATE", "rule-domains.json");
+  const ruleDomains = loadRuleDomains(rdPath);
+  if (!ruleDomains) return;
+
+  let changed = false;
+  for (const id of ruleIds) {
+    if (ruleDomains.rules[id]) {
+      delete ruleDomains.rules[id];
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    ruleDomains.generated_at = new Date().toISOString();
+    writeFileSync(rdPath, JSON.stringify(ruleDomains, null, 2), "utf-8");
+  }
 }
 
 export function enforceBudget(
