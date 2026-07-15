@@ -10,6 +10,7 @@ import { evaluateRecall, aggregateRecallScores, evaluateSessionRecall } from "..
 import type { RecallResult, SessionRecallScore } from "../../src/evaluate/recall";
 import { inferDomains, domainFallback } from "../../src/evaluate/gold";
 import type { GoldSet, GoldSession } from "../../src/evaluate/gold";
+import { trackRuleEffectiveness } from "../../src/evaluate/effectiveness";
 import type { RubricConfig, Score, Rule, GraphNode } from "../../src/adapters/types";
 import { writeFileSync, mkdirSync } from "fs";
 
@@ -263,10 +264,12 @@ export async function evalCommand(args: string[]): Promise<void> {
     console.log("    agentgrit eval traces [--backfill] [--local]");
     console.log("    agentgrit eval session");
     console.log("    agentgrit eval recall [--generate]");
+    console.log("    agentgrit eval effectiveness");
     console.log("");
-    console.log("  Evaluates traces, sessions, or recall against rubrics.");
+    console.log("  Evaluates traces, sessions, recall, or rule effectiveness.");
     console.log("  Traces loads from algorithm-reflections.jsonl or session transcripts.");
-    console.log("  --generate builds a gold set from the knowledge graph + transcripts.\n");
+    console.log("  --generate builds a gold set from the knowledge graph + transcripts.");
+    console.log("  effectiveness compares correction frequency before/after rule promotion.\n");
     return;
   }
 
@@ -437,8 +440,54 @@ export async function evalCommand(args: string[]): Promise<void> {
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(outputPath, JSON.stringify(result, null, 2));
     console.log(`\n  Results written to: ${outputPath}\n`);
+  } else if (sub === "effectiveness") {
+    console.log(`  Mode: rule effectiveness tracking\n`);
+
+    const signalDir = resolveSignalDir();
+    const stateDir = join(base, "state");
+    const results = trackRuleEffectiveness(stateDir, signalDir);
+
+    if (results.length === 0) {
+      console.log("  No promoted rules found. Promote rules first with 'agentgrit rules promote'.\n");
+      return;
+    }
+
+    console.log(`  Promoted rules evaluated: ${results.length}\n`);
+
+    const effective = results.filter((r) => r.effective);
+    const ineffective = results.filter((r) => !r.effective && (r.beforeFreq > 0 || r.afterFreq > 0));
+    const noData = results.filter((r) => r.beforeFreq === 0 && r.afterFreq === 0);
+
+    if (effective.length > 0) {
+      console.log("  EFFECTIVE (corrections decreased after promotion):");
+      for (const r of effective) {
+        console.log(`    ${r.ruleId}: ${r.beforeFreq} before -> ${r.afterFreq} after (delta: ${r.delta})`);
+      }
+      console.log("");
+    }
+
+    if (ineffective.length > 0) {
+      console.log("  INEFFECTIVE (corrections same or increased):");
+      for (const r of ineffective) {
+        console.log(`    ${r.ruleId}: ${r.beforeFreq} before -> ${r.afterFreq} after (delta: ${r.delta})`);
+      }
+      console.log("");
+    }
+
+    if (noData.length > 0) {
+      console.log("  NO DATA (no matching corrections found):");
+      for (const r of noData) {
+        console.log(`    ${r.ruleId}`);
+      }
+      console.log("");
+    }
+
+    const effectiveRate = results.length > 0
+      ? Math.round((effective.length / results.length) * 100)
+      : 0;
+    console.log(`  Summary: ${effective.length}/${results.length} rules effective (${effectiveRate}%)\n`);
   } else {
     console.log(`  Unknown eval target: ${sub}`);
-    console.log(`  Valid targets: traces, session, recall\n`);
+    console.log(`  Valid targets: traces, session, recall, effectiveness\n`);
   }
 }
