@@ -1,6 +1,6 @@
 import { existsSync } from "fs";
 import { join, resolve } from "path";
-import { detectStaleMemories } from "../../src/promote/staleness";
+import { detectStaleMemories, pruneStaleMemories } from "../../src/promote/staleness";
 import { resolveMemoryDir } from "../../src/adapters/paths";
 
 function printHelp(): void {
@@ -9,6 +9,9 @@ function printHelp(): void {
   console.log("  stale [path]         Show stale entries in MEMORY.md");
   console.log("    --threshold=N      Days before stale (default: 60)");
   console.log("    --json             Output as JSON");
+  console.log("  prune [path]         Archive stale entries from MEMORY.md");
+  console.log("    --threshold=N      Days before stale (default: 60)");
+  console.log("    --dry-run          Show what would be archived without changing files");
   console.log("");
 }
 
@@ -22,6 +25,11 @@ export async function memoryCommand(args: string[]): Promise<void> {
 
   if (sub === "stale") {
     await staleSubcommand(args.slice(1));
+    return;
+  }
+
+  if (sub === "prune") {
+    await pruneSubcommand(args.slice(1));
     return;
   }
 
@@ -96,4 +104,62 @@ async function staleSubcommand(args: string[]): Promise<void> {
   }
 
   console.log(`\n  Total: ${entries.length} entries need attention\n`);
+}
+
+async function pruneSubcommand(args: string[]): Promise<void> {
+  let memoryPath: string | undefined;
+  let thresholdDays = 60;
+  let dryRun = false;
+
+  for (const arg of args) {
+    if (arg.startsWith("--threshold=")) {
+      thresholdDays = parseInt(arg.slice("--threshold=".length), 10);
+      if (isNaN(thresholdDays) || thresholdDays <= 0) {
+        console.error("Invalid threshold — must be a positive integer");
+        return;
+      }
+    } else if (arg === "--dry-run") {
+      dryRun = true;
+    } else if (!arg.startsWith("-")) {
+      memoryPath = resolve(arg);
+    }
+  }
+
+  if (!memoryPath) {
+    const memDir = resolveMemoryDir();
+    const candidate = join(memDir, "MEMORY.md");
+    if (existsSync(candidate)) {
+      memoryPath = candidate;
+    }
+  }
+
+  if (!memoryPath || !existsSync(memoryPath)) {
+    console.error("MEMORY.md not found. Pass a path or configure memoryDir.");
+    return;
+  }
+
+  console.log(`\nagentgrit memory prune (threshold: ${thresholdDays} days${dryRun ? ", dry-run" : ""})\n`);
+  console.log(`  Scanning: ${memoryPath}\n`);
+
+  const result = await pruneStaleMemories(memoryPath, {
+    threshold: thresholdDays,
+    dryRun,
+  });
+
+  if (result.archived.length === 0) {
+    console.log("  No stale entries to prune.\n");
+    return;
+  }
+
+  if (dryRun) {
+    console.log(`  Would archive ${result.archived.length} entries:\n`);
+  } else {
+    console.log(`  Archived ${result.archived.length} entries:\n`);
+  }
+
+  for (const name of result.archived) {
+    console.log(`    ${dryRun ? "[dry-run] " : ""}${name}`);
+  }
+
+  console.log(`\n  Kept: ${result.kept.length} entries\n`);
 }

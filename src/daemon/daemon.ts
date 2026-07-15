@@ -642,6 +642,28 @@ export async function runDaemonCycle(
     result.errors.push(`cleanup: ${err instanceof Error ? err.message : String(err)}`);
   }
 
+  // 7c. Auto-prune stale MEMORY.md entries (gated by config flag)
+  if (config.daemon.autoPrune) {
+    try {
+      const { pruneStaleMemories } = await import("../promote/staleness");
+      const { resolveMemoryDir } = await import("../adapters/paths");
+      const { join } = await import("path");
+      const { existsSync: exists } = await import("fs");
+
+      const memDir = resolveMemoryDir();
+      const memoryPath = join(memDir, "MEMORY.md");
+
+      if (exists(memoryPath)) {
+        const pruneResult = await pruneStaleMemories(memoryPath);
+        if (pruneResult.archived.length > 0) {
+          console.log(`  auto-prune: ${pruneResult.archived.length} stale entries archived`);
+        }
+      }
+    } catch (err) {
+      result.errors.push(`auto-prune: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   // 8. Rule correlation — summarize rule effectiveness stats
   try {
     const { loadRuleStats } = await import("../promote/rules");

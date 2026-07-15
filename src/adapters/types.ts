@@ -229,6 +229,7 @@ export interface AgentGritConfig {
   daemon: {
     interval: string;
     weeklyDay: string;
+    autoPrune?: boolean;
   };
   thresholds?: {
     coolingPeriodDays?: number;

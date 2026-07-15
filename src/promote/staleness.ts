@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from "fs";
+import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "fs";
 import { dirname, join, resolve } from "path";
 
 export interface StaleEntry {
@@ -15,6 +15,22 @@ export interface StaleEntry {
 export interface StalenessOptions {
   /** Number of days before an entry is considered stale (default: 60) */
   thresholdDays?: number;
+}
+
+export interface PruneOptions {
+  /** Path to archive file (default: MEMORY-ARCHIVE.md alongside MEMORY.md) */
+  archivePath?: string;
+  /** If true, report what would be archived without modifying files */
+  dryRun?: boolean;
+  /** Days before stale (default: 60) */
+  threshold?: number;
+}
+
+export interface PruneResult {
+  /** Entry names that were (or would be) archived */
+  archived: string[];
+  /** Entry names that were kept */
+  kept: string[];
 }
 
 const LINK_RE = /- \[([^\]]+)\]\(([^)]+)\)/g;
@@ -61,4 +77,81 @@ export async function detectStaleMemories(
   }
 
   return stale;
+}
+
+/**
+ * Prunes stale entries from MEMORY.md, moving them to MEMORY-ARCHIVE.md.
+ * Calls detectStaleMemories() internally to find stale entries, then
+ * removes their lines from MEMORY.md and appends them to the archive.
+ */
+export async function pruneStaleMemories(
+  memoryMdPath: string,
+  options?: PruneOptions,
+): Promise<PruneResult> {
+  const archivePath = options?.archivePath ??
+    join(dirname(resolve(memoryMdPath)), "MEMORY-ARCHIVE.md");
+  const dryRun = options?.dryRun ?? false;
+  const threshold = options?.threshold;
+
+  const staleEntries = await detectStaleMemories(
+    memoryMdPath,
+    threshold !== undefined ? { thresholdDays: threshold } : undefined,
+  );
+
+  if (staleEntries.length === 0) {
+    // Count all link entries as kept
+    const content = readFileSync(memoryMdPath, "utf-8");
+    const kept: string[] = [];
+    for (const match of content.matchAll(LINK_RE)) {
+      kept.push(match[1]);
+    }
+    return { archived: [], kept };
+  }
+
+  const content = readFileSync(memoryMdPath, "utf-8");
+  const lines = content.split("\n");
+  const staleNames = new Set(staleEntries.map((e) => e.name));
+
+  const keptLines: string[] = [];
+  const archivedLines: string[] = [];
+  const archivedNames: string[] = [];
+  const keptNames: string[] = [];
+
+  for (const line of lines) {
+    const linkMatch = line.match(/- \[([^\]]+)\]\(([^)]+)\)/);
+    if (linkMatch) {
+      const name = linkMatch[1];
+      const rawPath = linkMatch[2];
+      // Skip URLs -- they aren't tracked by staleness
+      if (rawPath.startsWith("http://") || rawPath.startsWith("https://")) {
+        keptLines.push(line);
+        keptNames.push(name);
+        continue;
+      }
+      if (staleNames.has(name)) {
+        archivedLines.push(line);
+        archivedNames.push(name);
+        continue;
+      }
+      keptNames.push(name);
+    }
+    keptLines.push(line);
+  }
+
+  if (!dryRun && archivedLines.length > 0) {
+    // Write updated MEMORY.md
+    writeFileSync(memoryMdPath, keptLines.join("\n"), "utf-8");
+
+    // Append to archive
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const archiveBlock = `\n## Archived ${dateStr}\n${archivedLines.join("\n")}\n`;
+
+    if (existsSync(archivePath)) {
+      appendFileSync(archivePath, archiveBlock, "utf-8");
+    } else {
+      writeFileSync(archivePath, `# Memory Archive\n${archiveBlock}`, "utf-8");
+    }
+  }
+
+  return { archived: archivedNames, kept: keptNames };
 }
