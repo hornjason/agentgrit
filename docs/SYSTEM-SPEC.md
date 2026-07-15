@@ -9,7 +9,7 @@ updated: 2026-07-08
 
 **Version:** 1.1 (2026-07-14)
 **Package:** @agentgrit/core@0.1.4 on npm
-**Tests:** 1166 pass, 0 fail across 99 files
+**Tests:** 1194 pass, 0 fail across 103 files
 
 ## Purpose
 
