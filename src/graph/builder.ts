@@ -89,6 +89,46 @@ function applyDomainOverrides(
   return count;
 }
 
+// ── Rule-Domains Sync ──
+
+export function syncRuleDomains(
+  nodes: Record<string, GraphNode>,
+  ruleDomainsPath: string,
+): { added: number; pruned: number } {
+  let ruleDomains = loadRuleDomains(ruleDomainsPath);
+  if (!ruleDomains) {
+    ruleDomains = { version: 1, reviewed: false, rules: {} };
+  }
+
+  let added = 0;
+  let pruned = 0;
+
+  // Add entries for nodes with domains but no rule-domains.json entry
+  for (const [id, node] of Object.entries(nodes)) {
+    if (node.domains.length === 0) continue;
+    if (ruleDomains.rules[id]) continue;
+    ruleDomains.rules[id] = { domains: [...node.domains], source: "auto" };
+    added++;
+  }
+
+  // Prune entries pointing to nodes not in graph
+  const nodeIds = new Set(Object.keys(nodes));
+  for (const id of Object.keys(ruleDomains.rules)) {
+    if (!nodeIds.has(id)) {
+      delete ruleDomains.rules[id];
+      pruned++;
+    }
+  }
+
+  if (added > 0 || pruned > 0) {
+    const dir = dirname(ruleDomainsPath);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(ruleDomainsPath, JSON.stringify(ruleDomains, null, 2), "utf-8");
+  }
+
+  return { added, pruned };
+}
+
 // ── Graph I/O ──
 
 function graphPath(): string {
@@ -507,6 +547,12 @@ export async function buildGraph(rulesDir: string, stateOutputDir?: string, rule
   // BM25 neighbor propagation + text similarity for unclassified nodes
   propagateDomains(nodes, allEdges);
 
+  // Sync rule-domains.json: add missing entries, prune stale ones
+  const syncResult = syncRuleDomains(nodes, rdPath);
+  if (syncResult.added > 0 || syncResult.pruned > 0) {
+    console.log(`  rule-domains.json sync: ${syncResult.added} added, ${syncResult.pruned} pruned`);
+  }
+
   const graph: Graph = {
     version: "1.0",
     builtAt: new Date().toISOString(),
@@ -639,6 +685,12 @@ export async function buildGraphWithAI(
 
   // BM25 neighbor propagation + text similarity for unclassified nodes
   propagateDomains(nodes, allEdges);
+
+  // Sync rule-domains.json: add missing entries, prune stale ones
+  const syncResultAI = syncRuleDomains(nodes, rdPath);
+  if (syncResultAI.added > 0 || syncResultAI.pruned > 0) {
+    console.log(`  rule-domains.json sync: ${syncResultAI.added} added, ${syncResultAI.pruned} pruned`);
+  }
 
   const graph: Graph = {
     version: "1.0",

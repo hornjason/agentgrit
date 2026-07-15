@@ -170,6 +170,22 @@ Measured by `RecallEvaluator` over 60-session gold set (34 real + 26 synthetic).
 
 **SHIPPED: MEMORY.md staleness detection (#128).** `detectStaleMemories()` in `src/promote/staleness.ts`. 16 stale entries detected. CLI: `agentgrit memory stale`.
 
+### 7. Integration Invariants
+
+**Lesson (2026-07-15):** Component-level tests (108 promotion tests, graph build tests, eviction tests) all passed while end-to-end handoffs were broken. 253 of 379 rules never reached session injection because each component worked in isolation but connections between them had no verification.
+
+**The vertical slice test:** A rule must flow through the complete chain: signal → pattern → promotion → .md file → graph node → rule-domains.json entry → session injection. Any break in this chain makes the rule invisible.
+
+**Integration invariants (enforced by test/integration/handoff-chain.test.ts):**
+1. Every graph node with domains has a corresponding rule-domains.json entry
+2. Every rule-domains.json entry points to an existing graph node
+3. buildGraph() syncs rule-domains.json after node creation
+4. A promoted rule reaches session injection within 2 daemon cycles
+
+**Anti-pattern: component-level audits claiming "self-healing"** — checking that each component runs successfully is necessary but not sufficient. The handoff between components must be tested end-to-end.
+
+**SHIPPED: Graph-build rule-domains sync (#143).** `syncRuleDomains()` in `src/graph/builder.ts` runs after every `buildGraph()` and `buildGraphWithAI()`. Adds entries for nodes with domains but no registration, prunes entries pointing to nonexistent nodes.
+
 ## Integration: AgentGrit ↔ Claude Code
 
 AgentGrit is a library. Claude Code (via PAI hooks) is the consumer.
