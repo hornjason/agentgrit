@@ -16,6 +16,6 @@ export { queryGraph } from "./query";
 export { buildIndex, buildIndexFromDir, searchIndex, tokenize } from "./bm25";
 export { hybridRetrieve } from "./retrieval";
 export { embedRules, semanticSearch, cosine, findEmbeddingEdges } from "./embedder";
-export { getContextRules, detectDomains, resetDetectPatterns, parseLearnedRules, filterLearnedRules } from "./context";
-export { generatePatterns, loadPatterns, loadSeedPatterns, loadCachedPatterns, writeCachedPatterns } from "./generate-patterns";
+export { getContextRules, detectDomains, initHybridDetection, resetDetectPatterns, parseLearnedRules, filterLearnedRules } from "./context";
+export { generatePatterns, loadPatterns, loadSeedPatterns, loadCachedPatterns, writeCachedPatterns, loadHybridPatterns } from "./generate-patterns";
 export type { DomainPattern, CachedPatterns } from "./generate-patterns";

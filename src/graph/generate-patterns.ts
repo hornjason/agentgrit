@@ -12,6 +12,7 @@ export interface DomainPattern {
   pattern: string;
   cascadePattern?: string;
   negativePattern?: string;
+  augmentedTerms?: string[];
   priority: number;
 }
 
@@ -275,4 +276,34 @@ export function generatePatterns(graph: Graph, minRulesPerDomain = 3): DomainPat
 
   patterns.sort((a, b) => a.priority - b.priority);
   return patterns;
+}
+
+export function loadHybridPatterns(graph: Graph): DomainPattern[] {
+  const seeds = loadSeedPatterns();
+  const generated = generatePatterns(graph);
+  const seedMap = new Map(seeds.map(s => [s.domain, s]));
+  const genMap = new Map(generated.map(g => [g.domain, g]));
+
+  const hybrid: DomainPattern[] = [];
+
+  for (const domain of DOMAINS) {
+    const seed = seedMap.get(domain);
+    if (!seed) continue;
+
+    const entry: DomainPattern = { ...seed };
+    const gen = genMap.get(domain);
+
+    if (gen && gen.terms.length > 0) {
+      const seedTermLower = new Set(seed.terms.map(t => t.toLowerCase()));
+      const augTerms = gen.terms.filter(t => !seedTermLower.has(t.toLowerCase()));
+      if (augTerms.length > 0) {
+        entry.augmentedTerms = augTerms;
+      }
+    }
+
+    hybrid.push(entry);
+  }
+
+  hybrid.sort((a, b) => a.priority - b.priority);
+  return hybrid;
 }

@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { existsSync, rmSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
-import { getContextRules, detectDomains, parseLearnedRules, filterLearnedRules, resetDetectPatterns } from "../../src/graph/context";
+import { getContextRules, detectDomains, initHybridDetection, parseLearnedRules, filterLearnedRules, resetDetectPatterns } from "../../src/graph/context";
 import { buildIndex } from "../../src/graph/bm25";
 import type { Graph } from "../../src/graph/types";
 import type { GraphNode } from "../../src/adapters/types";
@@ -87,6 +87,74 @@ describe("detectDomains", () => {
   test("detects ui-testing domain", () => {
     const domains = detectDomains("run playwright visual test");
     expect(domains).toContain("ui-testing");
+  });
+});
+
+describe("hybrid detectDomains", () => {
+  const ISSUE_131_TEXT = "Refine 29 ineffective promoted rules corrections not decreasing agentgrit eval effectiveness shows 67/96 rules effective 70% The 29 ineffective rules either have wrong text too vague to change behavior or are not being injected when the same pattern recurs domain mismatch Need review each refine text or fix domains";
+
+  function buildHybridGraph(): Graph {
+    return makeGraph([
+      makeNode("alg1", ["algorithm"], "algorithm phase prd isc criteria effort level"),
+      makeNode("alg2", ["algorithm"], "promoted rules corrections improve algorithm effectiveness eval"),
+      makeNode("alg3", ["algorithm"], "ineffective rules refine text fix domain mismatch algorithm"),
+      makeNode("alg4", ["algorithm"], "eval effectiveness shows rules effective promoted corrections phase"),
+      makeNode("ver1", ["verification"], "verify check before answer source first look before"),
+      makeNode("ver2", ["verification"], "verify behavior change effective rules domain patterns"),
+      makeNode("ver3", ["verification"], "review verify effectiveness rule injection domain mismatch"),
+      makeNode("ver4", ["verification"], "check verify rules corrections decreasing effectiveness behavior"),
+      makeNode("ui1", ["ui-testing"], "quinn playwright visual test screenshot validation"),
+      makeNode("ui2", ["ui-testing"], "playwright page screenshot visual regression testing"),
+      makeNode("ui3", ["ui-testing"], "quinn validates visual appearance screenshot compare"),
+      makeNode("ui4", ["ui-testing"], "browser visual test quinn playwright launch"),
+    ]);
+  }
+
+  test("seed-only detectDomains misses #131 text", () => {
+    const domains = detectDomains(ISSUE_131_TEXT);
+    expect(domains).not.toContain("algorithm");
+    expect(domains).not.toContain("verification");
+  });
+
+  test("hybrid detectDomains finds algorithm and verification for #131 text", () => {
+    const graph = buildHybridGraph();
+    initHybridDetection(graph);
+    const domains = detectDomains(ISSUE_131_TEXT);
+    expect(domains).toContain("algorithm");
+    expect(domains).toContain("verification");
+  });
+
+  test("hybrid detectDomains does NOT return ui-testing for #131 text", () => {
+    const graph = buildHybridGraph();
+    initHybridDetection(graph);
+    const domains = detectDomains(ISSUE_131_TEXT);
+    expect(domains).not.toContain("ui-testing");
+  });
+
+  test("existing seed-based detections still work with hybrid active", () => {
+    const graph = buildHybridGraph();
+    initHybridDetection(graph);
+    expect(detectDomains("run make rebuild to deploy")).toContain("deployment");
+    expect(detectDomains("verify before answering")).toContain("verification");
+    expect(detectDomains("run security scan on vulnerability")).toContain("security");
+    expect(detectDomains("stay focused on minimal scope")).toContain("scope");
+    expect(detectDomains("spawn agent with worktree isolation")).toContain("delegation");
+    expect(detectDomains("run playwright visual test")).toContain("ui-testing");
+  });
+
+  test("unclassifiable text still returns empty with hybrid", () => {
+    const graph = buildHybridGraph();
+    initHybridDetection(graph);
+    expect(detectDomains("xyzzy foobarbaz")).toEqual([]);
+  });
+
+  test("confidence gate rejects single-term match", () => {
+    const graph = buildHybridGraph();
+    initHybridDetection(graph);
+    const domains = detectDomains("something about quinn");
+    expect(domains).toContain("ui-testing");
+    const domains2 = detectDomains("just a random word");
+    expect(domains2).toEqual([]);
   });
 });
 

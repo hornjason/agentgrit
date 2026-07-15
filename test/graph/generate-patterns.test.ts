@@ -10,6 +10,7 @@ import {
   loadCachedPatterns,
   writeCachedPatterns,
   loadPatterns,
+  loadHybridPatterns,
 } from "../../src/graph/generate-patterns";
 import type { DomainPattern } from "../../src/graph/generate-patterns";
 
@@ -505,5 +506,74 @@ describe("regression: seed vs generated pattern agreement", () => {
     }
 
     expect(rate).toBeGreaterThanOrEqual(0.95);
+  });
+});
+
+describe("loadHybridPatterns", () => {
+  test("returns all 14 domains", () => {
+    const graph = makeGraph([]);
+    const hybrid = loadHybridPatterns(graph);
+    expect(hybrid.length).toBe(14);
+    for (const d of DOMAINS) {
+      expect(hybrid.find(p => p.domain === d)).toBeDefined();
+    }
+  });
+
+  test("preserves seed pattern and cascadePattern", () => {
+    const graph = makeGraph([]);
+    const hybrid = loadHybridPatterns(graph);
+    const seeds = loadSeedPatterns();
+    for (const seed of seeds) {
+      const h = hybrid.find(p => p.domain === seed.domain);
+      expect(h).toBeDefined();
+      expect(h!.pattern).toBe(seed.pattern);
+      expect(h!.cascadePattern).toBe(seed.cascadePattern);
+      expect(h!.negativePattern).toBe(seed.negativePattern);
+    }
+  });
+
+  test("augmentedTerms is undefined for empty graph", () => {
+    const graph = makeGraph([]);
+    const hybrid = loadHybridPatterns(graph);
+    for (const p of hybrid) {
+      expect(p.augmentedTerms).toBeUndefined();
+    }
+  });
+
+  test("populates augmentedTerms when graph has enough nodes", () => {
+    const nodes: GraphNode[] = [];
+    for (let i = 0; i < 5; i++) {
+      nodes.push(makeNode(`sec_${i}`, ["security"], `security scan vulnerability credential rotation assessment review audit ${i}`));
+    }
+    const graph = makeGraph(nodes);
+    const hybrid = loadHybridPatterns(graph);
+    const security = hybrid.find(p => p.domain === "security");
+    expect(security).toBeDefined();
+    expect(security!.augmentedTerms).toBeDefined();
+    expect(security!.augmentedTerms!.length).toBeGreaterThan(0);
+  });
+
+  test("augmentedTerms excludes seed terms", () => {
+    const nodes: GraphNode[] = [];
+    for (let i = 0; i < 5; i++) {
+      nodes.push(makeNode(`sec_${i}`, ["security"], `security scan vulnerability credential rotation assessment review audit ${i}`));
+    }
+    const graph = makeGraph(nodes);
+    const hybrid = loadHybridPatterns(graph);
+    const security = hybrid.find(p => p.domain === "security");
+    const seeds = loadSeedPatterns();
+    const seedSec = seeds.find(s => s.domain === "security")!;
+    const seedTermLower = new Set(seedSec.terms.map(t => t.toLowerCase()));
+    for (const t of security!.augmentedTerms ?? []) {
+      expect(seedTermLower.has(t.toLowerCase())).toBe(false);
+    }
+  });
+
+  test("sorted by priority", () => {
+    const graph = makeGraph([]);
+    const hybrid = loadHybridPatterns(graph);
+    for (let i = 1; i < hybrid.length; i++) {
+      expect(hybrid[i].priority).toBeGreaterThanOrEqual(hybrid[i - 1].priority);
+    }
   });
 });

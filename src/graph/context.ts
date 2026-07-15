@@ -13,7 +13,8 @@ import { loadConfig } from "../adapters/paths";
 import { searchIndex, tokenize } from "./bm25";
 import { queryTrajectoriesSync } from "../detect/trajectories";
 import { hybridRetrieve } from "./retrieval";
-import { loadPatterns } from "./generate-patterns";
+import { loadPatterns, loadHybridPatterns } from "./generate-patterns";
+import type { DomainPattern } from "./generate-patterns";
 
 // ── Default Domains ──
 
@@ -23,6 +24,7 @@ const DEFAULT_DOMAINS = _cfg.thresholds?.defaultDomains ?? ["verification", "del
 // ── Domain Detection from Text ──
 
 let _detectPatterns: Array<{ re: RegExp; domain: string }> | null = null;
+let _hybridPatterns: DomainPattern[] | null = null;
 
 function getDetectPatterns(): Array<{ re: RegExp; domain: string }> {
   if (_detectPatterns) return _detectPatterns;
@@ -34,8 +36,38 @@ function getDetectPatterns(): Array<{ re: RegExp; domain: string }> {
   return _detectPatterns;
 }
 
+export function initHybridDetection(graph: Graph): void {
+  _hybridPatterns = loadHybridPatterns(graph);
+  _detectPatterns = null;
+}
+
 export function resetDetectPatterns(): void {
   _detectPatterns = null;
+  _hybridPatterns = null;
+}
+
+function passesConfidenceGate(text: string, augTerms: string[]): boolean {
+  const lower = text.toLowerCase();
+  let distinctMatches = 0;
+  let totalHits = 0;
+
+  for (const term of augTerms) {
+    const termLower = term.toLowerCase();
+    const isBigram = term.includes(" ");
+    if (lower.includes(termLower)) {
+      distinctMatches++;
+      let idx = 0;
+      while ((idx = lower.indexOf(termLower, idx)) !== -1) {
+        totalHits++;
+        idx += termLower.length;
+      }
+      if (isBigram) return true;
+    }
+  }
+
+  if (distinctMatches >= 2) return true;
+  if (totalHits >= 3) return true;
+  return false;
 }
 
 export function detectDomains(text: string): string[] {
@@ -44,6 +76,16 @@ export function detectDomains(text: string): string[] {
   for (const { re, domain } of getDetectPatterns()) {
     if (re.test(lower)) domains.add(domain);
   }
+
+  if (_hybridPatterns) {
+    for (const p of _hybridPatterns) {
+      if (domains.has(p.domain)) continue;
+      if (p.augmentedTerms && passesConfidenceGate(text, p.augmentedTerms)) {
+        domains.add(p.domain);
+      }
+    }
+  }
+
   return domains.size > 0 ? Array.from(domains) : [];
 }
 
