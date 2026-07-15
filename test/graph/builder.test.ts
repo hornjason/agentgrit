@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { existsSync, rmSync, mkdirSync, writeFileSync, readFileSync } from "fs";
 import { join } from "path";
-import { buildGraph, updateGraph, pruneStaleNodes, parseFrontmatter, inferSeverity, keywordClassify, loadRuleDomains, buildCoOccurrenceEdges } from "../../src/graph/builder";
+import { buildGraph, updateGraph, pruneStaleNodes, parseFrontmatter, inferSeverity, keywordClassify, loadRuleDomains, buildCoOccurrenceEdges, resetClassifyPatterns } from "../../src/graph/builder";
 import type { Graph } from "../../src/graph/types";
 import type { Rule, GraphNode } from "../../src/adapters/types";
 
@@ -35,6 +35,7 @@ beforeEach(() => {
   mkdirSync(RULES_DIR, { recursive: true });
   mkdirSync(STATE_DIR, { recursive: true });
   process.env.AGENTGRIT_DIR = TMP_DIR;
+  resetClassifyPatterns();
 });
 
 afterEach(() => {

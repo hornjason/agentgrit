@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "description": "Handcrafted domain patterns. pattern = broad (Set-based consumers). cascadePattern = specific (first-match-wins cascade). Used as fallback when a domain has fewer than 3 classified rules in the graph.",
+  "patterns": [
+    {
+      "domain": "deployment",
+      "terms": ["makefile", "make rebuild", "make test", "test container", "docker", "podman", "deploy", "rebuild"],
+      "pattern": "makefile|make rebuild|make test|test container|docker|podman|deploy|rebuild",
+      "cascadePattern": "makefile|make rebuild|make test|test container|docker|podman|deploy sequence|rebuild",
+      "negativePattern": "before assert|check before|read before|verify state",
+      "priority": 1
+    },
+    {
+      "domain": "ui-testing",
+      "terms": ["quinn", "playwright", "visual test", "screenshot"],
+      "pattern": "\\bquinn\\b|playwright|visual.*test|screenshot",
+      "cascadePattern": "\\bquinn\\b|playwright.*project|visual.*test|screenshot.*valid",
+      "priority": 2
+    },
+    {
+      "domain": "browser",
+      "terms": ["iframe", "page.fill", "page.route", "selector", "sso", "login flow", "browser context", "scraper"],
+      "pattern": "\\biframe\\b|page\\.fill|page\\.route|sso|login.*flow|scraper|browser.*context",
+      "cascadePattern": "\\biframe\\b|page\\.fill|page\\.route|selector.*fail|sso.*redirect|login.*flow|browser.*context",
+      "priority": 3
+    },
+    {
+      "domain": "security",
+      "terms": ["security scan", "security gate", "security review", "vulnerability", "destructive", "force push", "auth", "credential", "token secret", "session permission", "access control", "encrypt", "secret key"],
+      "pattern": "security scan|security.*gate|security.*review|vulnerability|destructive|force push|\\bauth\\b|credential|token.*secret|session.*permission|access.control|encrypt|secret.*key",
+      "priority": 4
+    },
+    {
+      "domain": "delegation",
+      "terms": ["spawn agent", "agent spawn", "worktree", "pre-brief", "handoff", "delegate", "marcus", "brief template"],
+      "pattern": "spawn.*agent|agent.*spawn|worktree|pre-brief|handoff|delegate|marcus|brief.*template",
+      "cascadePattern": "spawn.*agent|agent.*spawn|worktree isolation|pre-brief|handoff|delegate.*code",
+      "priority": 5
+    },
+    {
+      "domain": "escalation",
+      "terms": ["escalat", "bring in specialist", "wrong approach", "1-2 attempt", "after fail", "stuck"],
+      "pattern": "escalat|bring in.*specialist|wrong approach|stuck",
+      "cascadePattern": "escalat|bring in.*specialist|wrong approach|1-2 attempt|after.*fail|stuck.*diagnos",
+      "priority": 6
+    },
+    {
+      "domain": "algorithm",
+      "terms": ["prd", "isc", "algorithm phase", "effort level", "criteria count"],
+      "pattern": "\\bprd\\b|\\bisc\\b|algorithm.*phase|effort level",
+      "cascadePattern": "\\bprd\\b|\\bisc\\b|algorithm.*phase|effort level|criteria.*count",
+      "priority": 7
+    },
+    {
+      "domain": "memory",
+      "terms": ["feedback_.md", "memory.md", "ratings.jsonl", "learning capture", "failure capture"],
+      "pattern": "feedback_.*\\.md|memory\\.md|ratings\\.jsonl|learning capture",
+      "cascadePattern": "feedback_.*\\.md|memory\\.md|ratings\\.jsonl|learning capture|failure capture",
+      "priority": 8
+    },
+    {
+      "domain": "scope",
+      "terms": ["minimal scope", "only asked", "don't add", "unrequested", "stay focused"],
+      "pattern": "minimal.*scope|only.*asked|unrequested|stay.*focused",
+      "cascadePattern": "minimal.*scope|only.*asked|don.t add|unrequested|no.*cleanup|stay.*focused",
+      "priority": 9
+    },
+    {
+      "domain": "delivery",
+      "terms": ["false complet", "partial deliver", "incomplete", "not done", "self audit", "before claiming done", "ship", "acceptance criter", "template ac", "github issue"],
+      "pattern": "false.*complet|partial.*deliver|incomplete|not.*done|self.audit|\\bship\\b|acceptance.*criter|template.*ac|github.*issue",
+      "cascadePattern": "false.*complet|partial.*deliver|incomplete.*deliver|not.*done|self.audit|before.*claiming.*done",
+      "priority": 10
+    },
+    {
+      "domain": "communication",
+      "terms": ["response format", "output format", "trailing summary", "terse response", "format response"],
+      "pattern": "response.*format|output.*format|terse.*response",
+      "cascadePattern": "response.*format|output.*format|trailing summary|terse.*response|format.*response",
+      "priority": 11
+    },
+    {
+      "domain": "data",
+      "terms": ["actual data", "live data", "measure before", "read before plan", "real numbers"],
+      "pattern": "actual.*data|live.*data|measure.*before|read.*before.*plan",
+      "cascadePattern": "actual.*data|live.*data|measure.*before|read.*before.*plan|real.*numbers",
+      "priority": 12
+    },
+    {
+      "domain": "architecture",
+      "terms": ["refactor", "abstract interface", "module boundary", "coupling", "cohesion", "deep module", "migration architecture", "architecture decision", "interface design"],
+      "pattern": "\\brefactor\\b|abstract.*interface|module.boundary|coupling|cohesion|deep.module|migration.*architecture|\\barchitecture\\b.*decision|interface.*design",
+      "priority": 13
+    },
+    {
+      "domain": "verification",
+      "terms": ["verify", "check before", "read before answer", "look before", "source first"],
+      "pattern": "verify|check.*before|read.*before.*answer|look.*before|source.*first",
+      "cascadePattern": "read.*before.*answer|check.*before.*claim|verify.*before.*answer|look.*before|read.*source.*first",
+      "priority": 14
+    }
+  ]
+}

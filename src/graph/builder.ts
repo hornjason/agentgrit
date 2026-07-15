@@ -6,6 +6,7 @@ import { getBaseDir, stateDir } from "../adapters/paths";
 import type { GraphNode, GraphEdge, Rule } from "../adapters/types";
 import type { Graph } from "./types";
 import { propagateDomains } from "./domain-propagation";
+import { loadPatterns } from "./generate-patterns";
 
 // ── Domain Taxonomy ──
 
@@ -157,25 +158,28 @@ function computeHash(body: string): string {
 
 // ── Keyword Domain Classifier ──
 
+let _classifyPatterns: Array<{ re: RegExp; neg?: RegExp; domain: string }> | null = null;
+
+function getClassifyPatterns(): Array<{ re: RegExp; neg?: RegExp; domain: string }> {
+  if (_classifyPatterns) return _classifyPatterns;
+  const loaded = loadPatterns();
+  _classifyPatterns = loaded.map(p => ({
+    re: new RegExp(p.cascadePattern ?? p.pattern, "i"),
+    neg: p.negativePattern ? new RegExp(p.negativePattern, "i") : undefined,
+    domain: p.domain,
+  }));
+  return _classifyPatterns;
+}
+
+export function resetClassifyPatterns(): void {
+  _classifyPatterns = null;
+}
+
 export function keywordClassify(name: string, description: string, content: string): string[] | null {
   const text = `${name} ${description} ${content}`.toLowerCase();
-
-  if (/makefile|make rebuild|make test|test container|docker|podman|deploy sequence|rebuild/.test(text) &&
-      !/before assert|check before|read before|verify state/.test(text)) return ["deployment"];
-  if (/\bquinn\b|playwright.*project|visual.*test|screenshot.*valid/.test(text)) return ["ui-testing"];
-  if (/\biframe\b|page\.fill|page\.route|selector.*fail|sso.*redirect|login.*flow|browser.*context/.test(text)) return ["browser"];
-  if (/security scan|security.*gate|security.*review|vulnerability|destructive|force push|\bauth\b|credential|token.*secret|session.*permission|access.control|encrypt|secret.*key/.test(text)) return ["security"];
-  if (/spawn.*agent|agent.*spawn|worktree isolation|pre-brief|handoff|delegate.*code/.test(text)) return ["delegation"];
-  if (/escalat|bring in.*specialist|wrong approach|1-2 attempt|after.*fail|stuck.*diagnos/.test(text)) return ["escalation"];
-  if (/\bprd\b|\bisc\b|algorithm.*phase|effort level|criteria.*count/.test(text)) return ["algorithm"];
-  if (/feedback_.*\.md|memory\.md|ratings\.jsonl|learning capture|failure capture/.test(text)) return ["memory"];
-  if (/minimal.*scope|only.*asked|don.t add|unrequested|no.*cleanup|stay.*focused/.test(text)) return ["scope"];
-  if (/false.*complet|partial.*deliver|incomplete.*deliver|not.*done|self.audit|before.*claiming.*done/.test(text)) return ["delivery"];
-  if (/response.*format|output.*format|trailing summary|terse.*response|format.*response/.test(text)) return ["communication"];
-  if (/actual.*data|live.*data|measure.*before|read.*before.*plan|real.*numbers/.test(text)) return ["data"];
-  if (/\brefactor\b|abstract.*interface|module.boundary|coupling|cohesion|deep.module|migration.*architecture|\barchitecture\b.*decision|interface.*design/.test(text)) return ["architecture"];
-  if (/read.*before.*answer|check.*before.*claim|verify.*before.*answer|look.*before|read.*source.*first/.test(text)) return ["verification"];
-
+  for (const { re, neg, domain } of getClassifyPatterns()) {
+    if (re.test(text) && (!neg || !neg.test(text))) return [domain];
+  }
   return null;
 }
 

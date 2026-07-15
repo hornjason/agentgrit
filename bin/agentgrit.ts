@@ -13,6 +13,7 @@ import { inboxCommand } from "./commands/inbox";
 import { initCommand } from "./commands/init";
 import { memoryCommand } from "./commands/memory";
 import { optimizeCommand } from "./commands/optimize";
+import { patternsCommand } from "./commands/patterns";
 import { reviewCommand } from "./commands/review";
 import { rulesCommand } from "./commands/rules";
 import { signalsCommand } from "./commands/signals";
@@ -35,6 +36,7 @@ const HANDLERS: Record<string, (args: string[]) => Promise<void>> = {
   init: initCommand,
   memory: memoryCommand,
   optimize: optimizeCommand,
+  patterns: patternsCommand,
   review: reviewCommand,
   rules: rulesCommand,
   signals: signalsCommand,
@@ -56,6 +58,7 @@ const DESCRIPTIONS: Record<string, string> = {
   init: "Interactive setup wizard",
   memory: "MEMORY.md lifecycle — staleness detection",
   optimize: "Hill-climb optimize prompts or skills",
+  patterns: "Generate or show domain keyword patterns",
   review: "Run manual weekly learning review",
   rules: "List, rebalance, or compact rules",
   signals: "Signal file sizes and rotation",

@@ -11,9 +11,11 @@ export type {
   Embedding,
 } from "./types";
 
-export { buildGraph, updateGraph, readGraph, writeGraphFile, pruneStaleNodes, keywordClassify, parseFrontmatter, inferSeverity, loadRuleDomains, defaultRuleDomainsPath } from "./builder";
+export { buildGraph, updateGraph, readGraph, writeGraphFile, pruneStaleNodes, keywordClassify, resetClassifyPatterns, parseFrontmatter, inferSeverity, loadRuleDomains, defaultRuleDomainsPath } from "./builder";
 export { queryGraph } from "./query";
 export { buildIndex, buildIndexFromDir, searchIndex, tokenize } from "./bm25";
 export { hybridRetrieve } from "./retrieval";
 export { embedRules, semanticSearch, cosine, findEmbeddingEdges } from "./embedder";
-export { getContextRules, detectDomains, parseLearnedRules, filterLearnedRules } from "./context";
+export { getContextRules, detectDomains, resetDetectPatterns, parseLearnedRules, filterLearnedRules } from "./context";
+export { generatePatterns, loadPatterns, loadSeedPatterns, loadCachedPatterns, writeCachedPatterns } from "./generate-patterns";
+export type { DomainPattern, CachedPatterns } from "./generate-patterns";

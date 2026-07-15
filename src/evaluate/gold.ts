@@ -1,4 +1,5 @@
 import type { GraphNode } from "../adapters/types";
+import { loadPatterns } from "../graph/generate-patterns";
 
 // ── Gold Set Types ──
 
@@ -25,23 +26,25 @@ export interface GoldSet {
 
 // ── Auto-Labeling ──
 
-const DOMAIN_PATTERNS: Array<{ pattern: RegExp; domain: string }> = [
-  { pattern: /deploy|container|rebuild|make|port|docker|podman/i, domain: "deployment" },
-  { pattern: /test|playwright|visual|screenshot|spec/i, domain: "ui-testing" },
-  { pattern: /verify|check|assert|inaccurate|wrong|incorrect|correction|mistake|assumed/i, domain: "verification" },
-  { pattern: /scope|minimal|unrequested|bonus/i, domain: "scope" },
-  { pattern: /partial|omission|incomplete|missing|skipped/i, domain: "delivery" },
-  { pattern: /communicate|format|response|tone|approval|conversation|dialog/i, domain: "communication" },
-  { pattern: /security|vulnerabilit|destructive|gate|audit/i, domain: "security" },
-  { pattern: /browser|iframe|selector|sso|scraper|vpn/i, domain: "browser" },
-  { pattern: /data|pipeline|scrape|account|customer|report/i, domain: "data" },
-  { pattern: /delegate|agent|escalat/i, domain: "delegation" },
-  { pattern: /memory|graph|rule|learn|algorithm/i, domain: "memory" },
-];
+let _goldPatterns: Array<{ pattern: RegExp; domain: string }> | null = null;
+
+function getGoldPatterns(): Array<{ pattern: RegExp; domain: string }> {
+  if (_goldPatterns) return _goldPatterns;
+  const loaded = loadPatterns();
+  _goldPatterns = loaded.map(p => ({
+    pattern: new RegExp(p.pattern, "i"),
+    domain: p.domain,
+  }));
+  return _goldPatterns;
+}
+
+export function resetGoldPatterns(): void {
+  _goldPatterns = null;
+}
 
 export function inferDomains(text: string, fallbackDomains = ["verification", "delivery"]): string[] {
   const matched = new Set<string>();
-  for (const { pattern, domain } of DOMAIN_PATTERNS) {
+  for (const { pattern, domain } of getGoldPatterns()) {
     if (pattern.test(text)) matched.add(domain);
   }
   return matched.size > 0 ? [...matched] : fallbackDomains;

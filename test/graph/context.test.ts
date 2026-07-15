@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { existsSync, rmSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
-import { getContextRules, detectDomains, parseLearnedRules, filterLearnedRules } from "../../src/graph/context";
+import { getContextRules, detectDomains, parseLearnedRules, filterLearnedRules, resetDetectPatterns } from "../../src/graph/context";
 import { buildIndex } from "../../src/graph/bm25";
 import type { Graph } from "../../src/graph/types";
 import type { GraphNode } from "../../src/adapters/types";
@@ -11,6 +11,7 @@ const TMP_DIR = join(import.meta.dir, ".tmp-context-test");
 beforeEach(() => {
   if (existsSync(TMP_DIR)) rmSync(TMP_DIR, { recursive: true });
   mkdirSync(TMP_DIR, { recursive: true });
+  resetDetectPatterns();
 });
 
 afterEach(() => {
