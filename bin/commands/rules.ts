@@ -3,7 +3,7 @@ import { join } from "path";
 import { getBaseDir, resolveSignalDir, stateDir } from "../../src/adapters/paths";
 import { Tier, type Rule, SCHEMA_VERSION } from "../../src/adapters/types";
 import { checkBudget, type BudgetStatus } from "../../src/promote/budget";
-import { loadRuleStats } from "../../src/promote/rules";
+import { loadRuleStats, bootstrapRuleStats } from "../../src/promote/rules";
 import { getInboxItems } from "./inbox";
 import { routeRule } from "../../src/promote/router";
 import { promoteRule } from "../../src/promote/bridge";
@@ -438,6 +438,27 @@ export async function rulesCommand(args: string[]): Promise<void> {
     await doCompact(base, args.includes("--yes"));
   } else if (sub === "prune") {
     await doPrune(args.includes("--yes"));
+  } else if (sub === "bootstrap-stats") {
+    const home = process.env.HOME ?? "";
+    const sessionHistoryPath = join(home, ".agentgrit", "state", "session-context-history.jsonl");
+    const ratingsPath = join(home, ".claude", "MEMORY", "LEARNING", "SIGNALS", "ratings.jsonl");
+
+    console.log("  Bootstrapping rule stats from session history...\n");
+    console.log(`  Session history: ${sessionHistoryPath}`);
+    console.log(`  Ratings: ${ratingsPath}\n`);
+
+    const result = bootstrapRuleStats(sessionHistoryPath, ratingsPath);
+
+    console.log(`  Sessions processed: ${result.sessionsProcessed}`);
+    console.log(`  Ratings matched: ${result.ratingsMatched}`);
+    console.log(`  Rules tracked: ${result.rulesTracked}`);
+
+    if (result.rulesTracked > 0) {
+      console.log(`\n  Wrote rule-stats.json with ${result.rulesTracked} entries.`);
+      showCorrelationStats();
+    } else {
+      console.log("\n  No rule stats to bootstrap — no matching sessions/ratings found.");
+    }
   } else if (sub === "classify") {
     showClassify(args.includes("--detail"));
   } else {

@@ -6,7 +6,7 @@ import { buildIndexFromDir } from "../../src/graph/bm25";
 import { getContextRules, initHybridDetection } from "../../src/graph/context";
 import { removeRule } from "../../src/promote/bridge";
 import { findEvictionCandidates, evictRules, removeFromRuleDomains } from "../../src/promote/evict";
-import { persistRuleStats } from "../../src/promote/rules";
+import { persistRuleStats, loadRuleStats } from "../../src/promote/rules";
 import type { RuleStats } from "../../src/promote/rules";
 
 const TMP_DIR = join(import.meta.dir, ".tmp-eviction-lifecycle");
@@ -251,6 +251,69 @@ describe("eviction lifecycle — vertical slice", () => {
     expect(rd["rule_a"]).toBeUndefined();
     expect(rd["rule_b"]).toBeUndefined();
     expect(rd["rule_c"]).toBeDefined();
+  });
+
+  test("full eviction cycle: persist stats → find candidates → evict → cleanup", async () => {
+    const badRule = "feedback_low_performer";
+    const goodRule = "feedback_high_performer";
+
+    // Step 1: Seed CLAUDE-LEARNED.md with both rules
+    seedLearnedMd([badRule, goodRule]);
+    seedRuleDomains({
+      [badRule]: { domains: ["testing"], source: "auto" },
+      [goodRule]: { domains: ["testing"], source: "auto" },
+    });
+
+    // Step 2: Write mock rule stats — bad rule has low correlation
+    const badStats: RuleStats = {
+      ruleId: badRule,
+      injectionCount: 10,
+      avgCorrelatedRating: 2.1,
+      sessionRatings: [2, 2, 2, 3, 1, 2, 3, 2, 2, 2],
+      highRatingActivations: 0,
+      lowRatingActivations: 10,
+      lastSeen: new Date().toISOString(),
+    };
+    const goodStats: RuleStats = {
+      ruleId: goodRule,
+      injectionCount: 10,
+      avgCorrelatedRating: 8.5,
+      sessionRatings: [8, 9, 8, 9, 8, 9, 8, 9, 8, 9],
+      highRatingActivations: 10,
+      lowRatingActivations: 0,
+      lastSeen: new Date().toISOString(),
+    };
+    seedRuleStats([badStats, goodStats]);
+
+    // Step 3: Verify stats persisted correctly
+    const loadedStats = loadRuleStats(STATE_DIR);
+    expect(loadedStats.size).toBe(2);
+    expect(loadedStats.get(badRule)!.avgCorrelatedRating).toBeCloseTo(2.1, 1);
+
+    // Step 4: findEvictionCandidates identifies the bad rule
+    const candidates = findEvictionCandidates({
+      stateDir: STATE_DIR,
+      ruleDomainsPath: RD_PATH,
+      threshold: 3.0,
+      minSessions: 5,
+    });
+    expect(candidates.length).toBe(1);
+    expect(candidates[0].ruleId).toBe(badRule);
+
+    // Step 5: evictRules removes the bad rule from CLAUDE-LEARNED.md
+    const result = await evictRules(candidates, LEARNED_MD, { ruleDomainsPath: RD_PATH });
+    expect(result.evicted).toContain(badRule);
+    expect(result.evicted).not.toContain(goodRule);
+
+    // Step 6: Verify CLAUDE-LEARNED.md no longer has the evicted rule
+    const learnedContent = readFileSync(LEARNED_MD, "utf-8");
+    expect(learnedContent).not.toContain(`- **${badRule}:**`);
+    expect(learnedContent).toContain(`- **${goodRule}:**`);
+
+    // Step 7: Verify rule-domains.json cleaned up
+    const rd = readRuleDomains();
+    expect(rd[badRule]).toBeUndefined();
+    expect(rd[goodRule]).toBeDefined();
   });
 
   test("syncRuleDomains prunes orphaned entries after node removal", async () => {

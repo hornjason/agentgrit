@@ -270,7 +270,7 @@ export async function runDaemonCycle(
     const { checkBudget } = await import("../promote/budget");
     const { promoteRule } = await import("../promote/bridge");
     const { recordPromotion } = await import("../promote/ledger");
-    const { trackRule, getEvictionCandidates } = await import("../promote/rules");
+    const { trackRule, getEvictionCandidates, loadRuleStats, persistRuleStats, correlateRules } = await import("../promote/rules");
     const { writeRuleFile, updateRuleDomains, appendToLearnedMd } = await import("../promote/sync");
     const { defaultRuleDomainsPath } = await import("../graph/builder");
     const { stateDir } = await import("../adapters/paths");
@@ -281,6 +281,7 @@ export async function runDaemonCycle(
     const MAX_PROMOTIONS_PER_CYCLE = 3;
 
     let promoted = 0;
+    const trackedRules: import("../adapters/types").Rule[] = [];
     for (const pattern of result.patterns) {
       if (!pattern.candidateRule || pattern.frequency < 3) continue;
       if (promoted >= MAX_PROMOTIONS_PER_CYCLE) break;
@@ -342,7 +343,7 @@ export async function runDaemonCycle(
           stateDir(),
         );
 
-        trackRule(rule, pattern.severity);
+        trackedRules.push(trackRule(rule, pattern.severity));
 
         // Sync 1: write rule .md so graph build picks it up next cycle
         const rulesDir = join(config.signalDir, "..", "rules");
@@ -362,6 +363,16 @@ export async function runDaemonCycle(
       }
     }
     result.promoted = promoted;
+
+    // Persist tracked rule stats (merge with existing)
+    if (trackedRules.length > 0) {
+      const existingStats = loadRuleStats();
+      const merged = correlateRules(trackedRules);
+      for (const stat of merged) {
+        existingStats.set(stat.ruleId, stat);
+      }
+      persistRuleStats(Array.from(existingStats.values()));
+    }
   } catch (err) {
     result.errors.push(`promote: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -679,6 +690,62 @@ export async function runDaemonCycle(
     } catch (err) {
       result.errors.push(`auto-prune: ${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  // 7d. Attribution — process rated sessions to update rule stats
+  try {
+    const { loadRuleStats: loadStats, persistRuleStats: persistStats } = await import("../promote/rules");
+    const { stateDir: getState } = await import("../adapters/paths");
+    const { join } = await import("path");
+    const { existsSync: exists, readFileSync: readFile, writeFileSync: writeFile } = await import("fs");
+
+    const ratingsPath = join(config.signalDir, "ratings.jsonl");
+    const processedPath = join(getState(), "attribution-cursor.json");
+
+    if (exists(ratingsPath)) {
+      const lines = readFile(ratingsPath, "utf-8").split("\n").filter(Boolean);
+      let cursor = "";
+      if (exists(processedPath)) {
+        try { cursor = JSON.parse(readFile(processedPath, "utf-8")).lastTimestamp ?? ""; } catch {}
+      }
+
+      const statsMap = loadStats();
+      let updated = 0;
+
+      for (const line of lines) {
+        try {
+          const entry = JSON.parse(line);
+          if (!entry.timestamp || !entry.rating) continue;
+          if (cursor && entry.timestamp <= cursor) continue;
+          const ruleIds: string[] = entry.rule_ids ?? [];
+          if (ruleIds.length === 0) continue;
+
+          for (const ruleId of ruleIds) {
+            const existing = statsMap.get(ruleId);
+            const ratings = [...(existing?.sessionRatings ?? []), entry.rating].slice(-20);
+            const avg = ratings.reduce((a: number, b: number) => a + b, 0) / ratings.length;
+            statsMap.set(ruleId, {
+              ruleId,
+              injectionCount: (existing?.injectionCount ?? 0) + 1,
+              avgCorrelatedRating: avg,
+              sessionRatings: ratings,
+              highRatingActivations: (existing?.highRatingActivations ?? 0) + (entry.rating >= 7 ? 1 : 0),
+              lowRatingActivations: (existing?.lowRatingActivations ?? 0) + (entry.rating <= 4 ? 1 : 0),
+              lastSeen: entry.timestamp,
+            });
+          }
+          cursor = entry.timestamp;
+          updated++;
+        } catch {}
+      }
+
+      if (updated > 0) {
+        persistStats(Array.from(statsMap.values()));
+        writeFile(processedPath, JSON.stringify({ lastTimestamp: cursor }), "utf-8");
+      }
+    }
+  } catch (err) {
+    result.errors.push(`attribution: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // 8. Rule correlation — summarize rule effectiveness stats
