@@ -315,16 +315,29 @@ function checkCrossReferences(config: AgentGritConfig): DoctorSection {
   const graphPath = join(stateBase, "knowledge-graph.json");
   const rulesBase = join(config.signalDir, "..", "rules");
 
-  // Check graph nodes vs rule files
-  if (existsSync(graphPath) && existsSync(rulesBase)) {
+  // Check graph nodes vs rule files in BOTH memoryDir and rulesBase
+  if (existsSync(graphPath)) {
     try {
       const graph = JSON.parse(readFileSync(graphPath, "utf-8"));
       const graphNodeIds = new Set(Object.keys(graph.nodes || {}));
-      const ruleFiles = readdirSync(rulesBase).filter((f) => f.endsWith(".md"));
-      const ruleIds = new Set(ruleFiles.map((f) => f.replace(/\.md$/, "")));
 
-      const orphanedNodes = [...graphNodeIds].filter((id) => !ruleIds.has(id));
-      const unindexedRules = [...ruleIds].filter((id) => !graphNodeIds.has(id));
+      // Collect file IDs from BOTH directories
+      const allFileIds = new Set<string>();
+
+      // 1. Check rulesBase (if exists)
+      if (existsSync(rulesBase)) {
+        const ruleFiles = readdirSync(rulesBase).filter((f) => f.endsWith(".md"));
+        ruleFiles.forEach((f) => allFileIds.add(f.replace(/\.md$/, "")));
+      }
+
+      // 2. Check memoryDir (if configured) — this is where the graph is built from
+      if (config.memoryDir && existsSync(config.memoryDir)) {
+        const memoryFiles = readdirSync(config.memoryDir).filter((f) => f.endsWith(".md"));
+        memoryFiles.forEach((f) => allFileIds.add(f.replace(/\.md$/, "")));
+      }
+
+      const orphanedNodes = [...graphNodeIds].filter((id) => !allFileIds.has(id));
+      const unindexedRules = [...allFileIds].filter((id) => !graphNodeIds.has(id));
 
       if (orphanedNodes.length > 0) {
         checks.push({
@@ -346,7 +359,7 @@ function checkCrossReferences(config: AgentGritConfig): DoctorSection {
         checks.push({
           name: "graph-rules-sync",
           status: "ok",
-          message: `Graph and rules directory in sync (${graphNodeIds.size} nodes)`,
+          message: `Graph and rule files in sync (${graphNodeIds.size} nodes)`,
         });
       }
     } catch (err) {
