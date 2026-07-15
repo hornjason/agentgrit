@@ -271,6 +271,8 @@ export async function runDaemonCycle(
     const { promoteRule } = await import("../promote/bridge");
     const { recordPromotion } = await import("../promote/ledger");
     const { trackRule, getEvictionCandidates } = await import("../promote/rules");
+    const { writeRuleFile, updateRuleDomains, appendToLearnedMd } = await import("../promote/sync");
+    const { defaultRuleDomainsPath } = await import("../graph/builder");
     const { stateDir } = await import("../adapters/paths");
     const { join } = await import("path");
     const { existsSync, readFileSync, readdirSync } = await import("fs");
@@ -341,6 +343,21 @@ export async function runDaemonCycle(
         );
 
         trackRule(rule, pattern.severity);
+
+        // Sync 1: write rule .md so graph build picks it up next cycle
+        const rulesDir = join(config.signalDir, "..", "rules");
+        writeRuleFile(rule, rulesDir);
+
+        // Sync 2: update rule-domains.json with keyword-classified domains
+        const rdPath = defaultRuleDomainsPath();
+        updateRuleDomains(rule, rdPath);
+
+        // Sync 3: append to CLAUDE-LEARNED.md for session injection
+        const learnedPath = join(process.env.HOME ?? "", ".claude", "CLAUDE-LEARNED.md");
+        if (existsSync(learnedPath)) {
+          appendToLearnedMd(rule, learnedPath);
+        }
+
         promoted++;
       }
     }
