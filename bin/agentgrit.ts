@@ -11,6 +11,7 @@ import { exportCommand } from "./commands/export";
 import { graphCommand } from "./commands/graph";
 import { inboxCommand } from "./commands/inbox";
 import { initCommand } from "./commands/init";
+import { memoryCommand } from "./commands/memory";
 import { optimizeCommand } from "./commands/optimize";
 import { reviewCommand } from "./commands/review";
 import { rulesCommand } from "./commands/rules";
@@ -32,6 +33,7 @@ const HANDLERS: Record<string, (args: string[]) => Promise<void>> = {
   graph: graphCommand,
   inbox: inboxCommand,
   init: initCommand,
+  memory: memoryCommand,
   optimize: optimizeCommand,
   review: reviewCommand,
   rules: rulesCommand,
@@ -52,6 +54,7 @@ const DESCRIPTIONS: Record<string, string> = {
   graph: "Build, query, or inspect knowledge graph",
   inbox: "Review and approve pending rule candidates",
   init: "Interactive setup wizard",
+  memory: "MEMORY.md lifecycle — staleness detection",
   optimize: "Hill-climb optimize prompts or skills",
   review: "Run manual weekly learning review",
   rules: "List, rebalance, or compact rules",
