@@ -1,0 +1,23 @@
+services:
+  e2e-phase1:
+    build: .
+    command: ./phase1-clean-install.sh
+    volumes:
+      - ~/.config/gcloud:/root/.config/gcloud:ro
+      - ~/.claude.json:/root/.claude.json:ro
+    environment:
+      - GOOGLE_CLOUD_PROJECT=jhorn-pai
+      - GOOGLE_CLOUD_LOCATION=us-east1
+
+  e2e-phase2:
+    build: .
+    command: ./phase2-integration.sh
+    volumes:
+      - ~/.config/gcloud:/root/.config/gcloud:ro
+      - ~/.claude.json:/root/.claude.json:ro
+      - ~/.claude/projects/-Users-jhorn--claude/memory:/real-data/memory:ro
+      - ~/.claude/MEMORY/LEARNING/SIGNALS:/real-data/signals:ro
+      - ~/.claude/MEMORY/LEARNING/RULES:/real-data/rules:ro
+    environment:
+      - GOOGLE_CLOUD_PROJECT=jhorn-pai
+      - GOOGLE_CLOUD_LOCATION=us-east1
