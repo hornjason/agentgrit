@@ -346,7 +346,8 @@ export async function runDaemonCycle(
         trackedRules.push(trackRule(rule, pattern.severity));
 
         // Sync 1: write rule .md so graph build picks it up next cycle
-        const rulesDir = join(config.signalDir, "..", "rules");
+        const { resolveMemoryDir } = await import("../adapters/paths");
+        const rulesDir = resolveMemoryDir();
         writeRuleFile(rule, rulesDir);
 
         // Sync 2: update rule-domains.json with keyword-classified domains
