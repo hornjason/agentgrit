@@ -10,6 +10,7 @@ import { promoteRule } from "../../src/promote/bridge";
 import { recordPromotion } from "../../src/promote/ledger";
 import { randomUUID } from "crypto";
 import { findDuplicates } from "../../src/promote/evict";
+import { backfillLearnedCommand } from "./backfill-learned";
 
 function icon(status: BudgetStatus): string {
   if (status.level === "OK") return "✓";
@@ -472,6 +473,8 @@ export async function rulesCommand(args: string[]): Promise<void> {
     } else {
       console.log("\n  No rule stats to bootstrap — no matching sessions/ratings found.");
     }
+  } else if (sub === "backfill-learned") {
+    await backfillLearnedCommand(args.slice(1));
   } else if (sub === "classify") {
     showClassify(args.includes("--detail"));
   } else {
