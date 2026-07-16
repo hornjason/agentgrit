@@ -98,6 +98,20 @@
       "pattern": "verify|check.*before|read.*before.*answer|look.*before|source.*first",
       "cascadePattern": "read.*before.*answer|check.*before.*claim|verify.*before.*answer|look.*before|read.*source.*first",
       "priority": 14
+    },
+    {
+      "domain": "scoring",
+      "terms": ["scoring", "rating", "signal", "bias", "effectiveness", "correlation", "sentiment", "v2", "scorer", "evaluate"],
+      "pattern": "scoring|\\brating\\b|signal|\\bbias\\b|effectiveness|correlation|sentiment|\\bv2\\b.*scor|scorer|evaluate",
+      "cascadePattern": "scoring.*signal|rating.*bias|effectiveness.*measure|correlation.*track|sentiment.*scor|v2.*scor|scorer.*evaluate",
+      "priority": 15
+    },
+    {
+      "domain": "pipeline",
+      "terms": ["promote", "evict", "daemon", "pipeline", "capture", "pattern", "lifecycle", "candidate", "budget", "prune"],
+      "pattern": "\\bpromote\\b|\\bevict\\b|daemon|pipeline|\\bcapture\\b|pattern.*detect|lifecycle|candidate.*rule|budget|prune",
+      "cascadePattern": "promote.*rule|evict.*stale|daemon.*cycle|pipeline.*health|capture.*pattern|lifecycle.*manage|candidate.*promote|budget.*exceed|prune.*ineffective",
+      "priority": 16
     }
   ]
 }

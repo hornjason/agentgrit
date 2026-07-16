@@ -88,6 +88,16 @@ describe("detectDomains", () => {
     const domains = detectDomains("run playwright visual test");
     expect(domains).toContain("ui-testing");
   });
+
+  test("detects scoring domain from issue 130 text", () => {
+    const domains = detectDomains("v2 scoring signals ratings scorer effectiveness");
+    expect(domains).toContain("scoring");
+  });
+
+  test("detects pipeline domain", () => {
+    const domains = detectDomains("promote rule evict daemon cycle pipeline health");
+    expect(domains).toContain("pipeline");
+  });
 });
 
 describe("hybrid detectDomains", () => {
