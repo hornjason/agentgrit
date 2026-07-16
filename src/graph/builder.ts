@@ -14,6 +14,7 @@ export const DOMAINS = [
   "verification", "escalation", "scope", "delivery", "communication",
   "deployment", "security", "ui-testing", "data", "browser",
   "memory", "algorithm", "delegation", "architecture",
+  "scoring", "pipeline",
 ] as const;
 
 type Domain = (typeof DOMAINS)[number];
