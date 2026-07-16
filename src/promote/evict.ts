@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { loadConfig, statePath } from "../adapters/paths";
 import { loadRuleStats, type RuleStats } from "./rules";
-import { removeRule } from "./bridge";
+import { removeRule, normalizeRuleId } from "./bridge";
 
 const _cfg = loadConfig();
 const EVICTION_FILE = "eviction-candidates.json";
@@ -60,11 +60,49 @@ function isReviewedRule(ruleId: string, ruleDomains: RuleDomainsFile | null): bo
   return entry?.source === "reviewed";
 }
 
+/**
+ * Build a normalized lookup from CLAUDE-LEARNED.md: normalizedId → original bold name.
+ * Also build a reverse map from normalizedId → stat entry, for bidirectional matching.
+ */
+export function buildLearnedStatsLookup(
+  claudeLearnedPath: string,
+  statsMap: Map<string, RuleStats>,
+): { learnedToStatId: Map<string, string>; statIdToLearnedName: Map<string, string> } {
+  const learnedToStatId = new Map<string, string>();
+  const statIdToLearnedName = new Map<string, string>();
+
+  if (!existsSync(claudeLearnedPath)) return { learnedToStatId, statIdToLearnedName };
+
+  const content = readFileSync(claudeLearnedPath, "utf-8");
+  const learnedNameRe = /^- \*\*(.+?)(?:\s*\(from\s.*?\))?:\*\*\s*/;
+
+  const learnedNormMap = new Map<string, string>();
+  for (const line of content.split("\n")) {
+    const m = line.match(learnedNameRe);
+    if (!m) continue;
+    const boldName = m[1].trim();
+    const norm = normalizeRuleId(boldName);
+    learnedNormMap.set(norm, boldName);
+  }
+
+  for (const [statId] of statsMap) {
+    const statNorm = normalizeRuleId(statId);
+    const learnedName = learnedNormMap.get(statNorm);
+    if (learnedName) {
+      learnedToStatId.set(learnedName, statId);
+      statIdToLearnedName.set(statId, learnedName);
+    }
+  }
+
+  return { learnedToStatId, statIdToLearnedName };
+}
+
 export function findEvictionCandidates(options?: {
   stateDir?: string;
   ruleDomainsPath?: string;
   threshold?: number;
   minSessions?: number;
+  claudeLearnedPath?: string;
 }): EvictionCandidate[] {
   const threshold = options?.threshold ?? CORRELATION_THRESHOLD;
   const minSessions = options?.minSessions ?? MIN_SESSIONS;
@@ -74,6 +112,7 @@ export function findEvictionCandidates(options?: {
   );
 
   const candidates: EvictionCandidate[] = [];
+  const candidateIds = new Set<string>();
   const now = Date.now();
 
   for (const stats of statsMap.values()) {
@@ -90,6 +129,7 @@ export function findEvictionCandidates(options?: {
           candidate.requiresHumanConfirmation = true;
         }
         candidates.push(candidate);
+        candidateIds.add(stats.ruleId);
         continue;
       }
     }
@@ -109,6 +149,73 @@ export function findEvictionCandidates(options?: {
     }
 
     candidates.push(candidate);
+    candidateIds.add(stats.ruleId);
+  }
+
+  // Bidirectional: scan CLAUDE-LEARNED.md entries for stat matches and untracked rules
+  if (options?.claudeLearnedPath && existsSync(options.claudeLearnedPath)) {
+    const { learnedToStatId } = buildLearnedStatsLookup(options.claudeLearnedPath, statsMap);
+
+    // Phase 1: learned entries with matching (but bad) stats
+    for (const [learnedName, statId] of learnedToStatId) {
+      if (candidateIds.has(statId)) continue;
+      const stats = statsMap.get(statId);
+      if (!stats) continue;
+
+      let reason: string | null = null;
+      if (stats.lastSeen) {
+        const daysSince = (now - new Date(stats.lastSeen).getTime()) / (1000 * 60 * 60 * 24);
+        if (daysSince > STALE_DAYS) {
+          reason = `stale (via learned match): last seen ${Math.round(daysSince)} days ago`;
+        }
+      }
+      if (!reason && stats.injectionCount >= minSessions && stats.avgCorrelatedRating < threshold) {
+        reason = `learned match: avgCorrelatedRating ${stats.avgCorrelatedRating.toFixed(2)} < ${threshold} across ${stats.injectionCount} sessions`;
+      }
+      if (!reason) continue;
+
+      const candidate: EvictionCandidate = {
+        ruleId: learnedName,
+        avgCorrelatedRating: Math.round(stats.avgCorrelatedRating * 100) / 100,
+        sessionCount: stats.injectionCount,
+        reason,
+      };
+      if (isReviewedRule(statId, ruleDomains)) {
+        candidate.requiresHumanConfirmation = true;
+      }
+      candidates.push(candidate);
+      candidateIds.add(statId);
+    }
+
+    // Phase 2: learned entries with NO stats at all — untracked and old
+    const learnedContent = readFileSync(options.claudeLearnedPath, "utf-8");
+    const dateRe = /^- \*\*(.+?)(?:\s*\(from\s+(?:\S+)\s+(\d{4}-\d{2}-\d{2})\))?:\*\*\s*/;
+    const trackedNorms = new Set<string>();
+    for (const [statId] of statsMap) trackedNorms.add(normalizeRuleId(statId));
+
+    for (const line of learnedContent.split("\n")) {
+      const m = line.match(dateRe);
+      if (!m) continue;
+      const boldName = m[1].trim();
+      const dateStr = m[2];
+      const norm = normalizeRuleId(boldName);
+
+      if (trackedNorms.has(norm)) continue;
+      if (candidateIds.has(boldName)) continue;
+      if (!dateStr) continue;
+
+      const ruleDate = new Date(dateStr + "T00:00:00Z").getTime();
+      const daysSince = (now - ruleDate) / (1000 * 60 * 60 * 24);
+      if (daysSince <= STALE_DAYS) continue;
+
+      candidates.push({
+        ruleId: boldName,
+        avgCorrelatedRating: 0,
+        sessionCount: 0,
+        reason: `untracked: no stats, created ${Math.round(daysSince)} days ago`,
+      });
+      candidateIds.add(boldName);
+    }
   }
 
   candidates.sort((a, b) => a.avgCorrelatedRating - b.avgCorrelatedRating);

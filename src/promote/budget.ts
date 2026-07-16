@@ -3,6 +3,7 @@ import { Tier } from "../adapters/types";
 import { loadConfig } from "../adapters/paths";
 import { loadRuleStats } from "./rules";
 import { removeFromRuleDomains } from "./evict";
+import { normalizeRuleId } from "./bridge";
 
 const DEFAULT_CAPS: Record<Tier, number> = {
   [Tier.Global]: 25,
@@ -113,8 +114,15 @@ export function pruneLearnedRules(
 
   const statsMap = loadRuleStats(stateDir);
 
+  // Build normalized lookup for stats: normalizedId → RuleStats
+  const normalizedStatsMap = new Map<string, typeof statsMap extends Map<string, infer V> ? V : never>();
+  for (const [statId, stats] of statsMap) {
+    normalizedStatsMap.set(normalizeRuleId(statId), stats);
+  }
+
   for (const rule of rules) {
-    const stats = statsMap.get(rule.id);
+    // Try exact match first, then normalized match
+    const stats = statsMap.get(rule.id) ?? normalizedStatsMap.get(normalizeRuleId(rule.id));
     if (stats) {
       rule.correlationScore = stats.avgCorrelatedRating;
     }

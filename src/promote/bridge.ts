@@ -122,6 +122,31 @@ export async function promoteRule(
   return { status: "promoted" };
 }
 
+/**
+ * Normalize a rule ID to a canonical kebab-case form for comparison.
+ * Strips common prefixes (feedback_, success_, project_, traj-),
+ * strips "(from ...)" suffixes, converts underscores/special chars to hyphens.
+ */
+export function normalizeRuleId(id: string): string {
+  let n = id;
+  for (const prefix of ["feedback_", "success_", "project_", "traj-", "traj_"]) {
+    if (n.startsWith(prefix)) {
+      n = n.slice(prefix.length);
+      break;
+    }
+  }
+  n = n.replace(/\s*\(from\s.*?\)\s*$/, "");
+  n = n.toLowerCase();
+  n = n.replace(/[_/]/g, " ");
+  n = n.replace(/[^a-z0-9\s-]/g, "");
+  n = n.replace(/\s+/g, "-");
+  n = n.replace(/-+/g, "-");
+  n = n.replace(/^-|-$/g, "");
+  return n;
+}
+
+const RULE_LINE_RE = /^- \*\*(.+?)(?:\s*\(from\s.*?\))?:\*\*\s*/;
+
 export async function removeRule(
   ruleId: string,
   claudeMdPath: string,
@@ -131,9 +156,23 @@ export async function removeRule(
   }
 
   const content = readFileSync(claudeMdPath, "utf-8");
-  const rulePattern = `- **${ruleId}:**`;
   const lines = content.split("\n");
-  const filtered = lines.filter((line) => !line.startsWith(rulePattern));
+
+  // Try exact match first (fast path)
+  const rulePattern = `- **${ruleId}:**`;
+  let filtered = lines.filter((line) => !line.startsWith(rulePattern));
+
+  // If no exact match, try normalized matching
+  if (filtered.length === lines.length) {
+    const normalizedTarget = normalizeRuleId(ruleId);
+    filtered = lines.filter((line) => {
+      const match = line.match(RULE_LINE_RE);
+      if (!match) return true;
+      const lineName = match[1].trim();
+      const normalizedLine = normalizeRuleId(lineName);
+      return normalizedLine !== normalizedTarget;
+    });
+  }
 
   if (filtered.length === lines.length) {
     throw new Error(`Rule "${ruleId}" not found in ${claudeMdPath}`);

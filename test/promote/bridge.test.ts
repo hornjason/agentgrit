@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { existsSync, mkdirSync, rmSync, readFileSync } from "fs";
 import { join } from "path";
-import { promoteRule, removeRule, COOLING_PERIOD_DAYS } from "../../src/promote/bridge";
+import { promoteRule, removeRule, normalizeRuleId, COOLING_PERIOD_DAYS } from "../../src/promote/bridge";
 import { Tier, SCHEMA_VERSION, type Rule } from "../../src/adapters/types";
 import type { InferenceFn } from "../../src/promote/contradiction";
 
@@ -174,5 +174,47 @@ describe("removeRule", () => {
     expect(
       removeRule("any-rule", badPath),
     ).rejects.toThrow("not found");
+  });
+
+  test("removes rule by normalized ID when stat ID has feedback_ prefix", async () => {
+    const content = readFileSync(CLAUDE_MD, "utf-8");
+    const withLearnedRule = content.replace(
+      "### Rules\n",
+      "### Rules\n- **ac_garbage_test (from session 2026-06-18):** Every AC needs a threshold\n",
+    );
+    await Bun.write(CLAUDE_MD, withLearnedRule);
+
+    await removeRule("feedback_ac_garbage_test", CLAUDE_MD);
+    const after = readFileSync(CLAUDE_MD, "utf-8");
+    expect(after).not.toContain("ac_garbage_test");
+    expect(after).toContain("existing-rule");
+  });
+
+  test("removes rule when CLAUDE-LEARNED uses human-readable name matching stat ID", async () => {
+    const content = readFileSync(CLAUDE_MD, "utf-8");
+    const withHumanRule = content.replace(
+      "### Rules\n",
+      "### Rules\n- **Da Must Verify Before Closing (from debrief 2026-05-26):** Before closing verify\n",
+    );
+    await Bun.write(CLAUDE_MD, withHumanRule);
+
+    await removeRule("feedback_da_must_verify_before_closing", CLAUDE_MD);
+    const after = readFileSync(CLAUDE_MD, "utf-8");
+    expect(after).not.toContain("Da Must Verify");
+    expect(after).toContain("existing-rule");
+  });
+
+  test("exact match takes priority over normalized match", async () => {
+    const content = readFileSync(CLAUDE_MD, "utf-8");
+    const withBothRules = content.replace(
+      "### Rules\n",
+      "### Rules\n- **my-rule:** Exact match version\n- **My Rule:** Human readable version\n",
+    );
+    await Bun.write(CLAUDE_MD, withBothRules);
+
+    await removeRule("my-rule", CLAUDE_MD);
+    const after = readFileSync(CLAUDE_MD, "utf-8");
+    expect(after).not.toContain("Exact match version");
+    expect(after).toContain("My Rule");
   });
 });

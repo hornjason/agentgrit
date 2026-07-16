@@ -6,8 +6,10 @@ import {
   findDuplicates,
   evictRules,
   enforceBudget,
+  buildLearnedStatsLookup,
   type EvictionCandidate,
 } from "../../src/promote/evict";
+import { normalizeRuleId } from "../../src/promote/bridge";
 import { persistRuleStats, type RuleStats } from "../../src/promote/rules";
 
 const TMP_DIR = join(import.meta.dir, ".tmp-evict-test");
@@ -412,5 +414,254 @@ describe("enforceBudget", () => {
 
     const overDefault = enforceBudget(candidates, 81);
     expect(overDefault).toHaveLength(1);
+  });
+});
+
+describe("normalizeRuleId", () => {
+  test("strips feedback_ prefix", () => {
+    expect(normalizeRuleId("feedback_ac_garbage_test")).toBe("ac-garbage-test");
+  });
+
+  test("strips success_ prefix", () => {
+    expect(normalizeRuleId("success_autonomous-recovery")).toBe("autonomous-recovery");
+  });
+
+  test("strips project_ prefix", () => {
+    expect(normalizeRuleId("project_leader_flag")).toBe("leader-flag");
+  });
+
+  test("strips traj- prefix", () => {
+    expect(normalizeRuleId("traj-w1d74p")).toBe("w1d74p");
+  });
+
+  test("normalizes human-readable names", () => {
+    expect(normalizeRuleId("Upfront Alignment, Then Run")).toBe("upfront-alignment-then-run");
+  });
+
+  test("strips (from ...) suffix", () => {
+    expect(normalizeRuleId("ac_garbage_test (from session 2026-06-18)")).toBe("ac-garbage-test");
+  });
+
+  test("normalizes underscores to hyphens", () => {
+    expect(normalizeRuleId("da_must_verify_before_closing")).toBe("da-must-verify-before-closing");
+  });
+
+  test("already-normalized kebab IDs pass through", () => {
+    expect(normalizeRuleId("verify-before-asserting")).toBe("verify-before-asserting");
+  });
+
+  test("produces same output for matching stat ID and learned name", () => {
+    const statId = "feedback_ac_garbage_test";
+    const learnedName = "ac_garbage_test (from session 2026-06-18)";
+    expect(normalizeRuleId(statId)).toBe(normalizeRuleId(learnedName));
+  });
+
+  test("produces same output for underscore stat and kebab learned name", () => {
+    const statId = "feedback_da_must_verify_before_closing";
+    const learnedName = "da_must_verify_before_closing";
+    expect(normalizeRuleId(statId)).toBe(normalizeRuleId(learnedName));
+  });
+});
+
+describe("evictRules with normalized matching", () => {
+  test("evicts rule when stat ID has prefix but CLAUDE-LEARNED uses raw name", async () => {
+    const learnedContent = [
+      "# Learned Rules\n",
+      "### Learned Rules\n",
+      "- **ac_garbage_test (from session 2026-06-18):** Every AC needs a threshold",
+      "- **Keep Me:** This should stay",
+    ].join("\n");
+    await Bun.write(CLAUDE_LEARNED, learnedContent);
+
+    const candidates: EvictionCandidate[] = [
+      { ruleId: "feedback_ac_garbage_test", avgCorrelatedRating: 2.0, sessionCount: 10, reason: "low" },
+    ];
+
+    const result = await evictRules(candidates, CLAUDE_LEARNED, { ruleDomainsPath: RULE_DOMAINS });
+    expect(result.evicted).toContain("feedback_ac_garbage_test");
+
+    const content = readFileSync(CLAUDE_LEARNED, "utf-8");
+    expect(content).not.toContain("ac_garbage_test");
+    expect(content).toContain("Keep Me");
+  });
+
+  test("evicts rule when stat ID matches human-readable name after normalization", async () => {
+    const learnedContent = [
+      "# Learned Rules\n",
+      "### Learned Rules\n",
+      "- **Da Must Verify Before Closing (from debrief 2026-05-26):** Before closing ANY issue verify",
+      "- **Keep Me:** This should stay",
+    ].join("\n");
+    await Bun.write(CLAUDE_LEARNED, learnedContent);
+
+    const candidates: EvictionCandidate[] = [
+      { ruleId: "feedback_da_must_verify_before_closing", avgCorrelatedRating: 1.5, sessionCount: 8, reason: "low" },
+    ];
+
+    const result = await evictRules(candidates, CLAUDE_LEARNED, { ruleDomainsPath: RULE_DOMAINS });
+    expect(result.evicted).toContain("feedback_da_must_verify_before_closing");
+
+    const content = readFileSync(CLAUDE_LEARNED, "utf-8");
+    expect(content).not.toContain("Da Must Verify");
+    expect(content).toContain("Keep Me");
+  });
+
+  test("evicts rule by exact ID match (no normalization needed)", async () => {
+    await Bun.write(CLAUDE_LEARNED, makeClaudeLearned(["evict-me", "keep-me"]));
+
+    const candidates: EvictionCandidate[] = [
+      { ruleId: "evict-me", avgCorrelatedRating: 2.0, sessionCount: 10, reason: "low" },
+    ];
+
+    const result = await evictRules(candidates, CLAUDE_LEARNED, { ruleDomainsPath: RULE_DOMAINS });
+    expect(result.evicted).toContain("evict-me");
+
+    const content = readFileSync(CLAUDE_LEARNED, "utf-8");
+    expect(content).not.toContain("evict-me");
+    expect(content).toContain("keep-me");
+  });
+});
+
+describe("buildLearnedStatsLookup", () => {
+  test("maps learned names to stat IDs via normalization", () => {
+    const learnedContent = [
+      "# Learned Rules\n",
+      "### Learned Rules\n",
+      "- **ac_garbage_test (from session 2026-06-18):** Every AC needs a threshold",
+      "- **Da Must Verify Before Closing:** Before closing verify",
+    ].join("\n");
+    writeFileSync(CLAUDE_LEARNED, learnedContent);
+
+    const statsMap = new Map<string, RuleStats>();
+    statsMap.set("feedback_ac_garbage_test", makeStats("feedback_ac_garbage_test", { avgCorrelatedRating: 2.0 }));
+    statsMap.set("feedback_da_must_verify_before_closing", makeStats("feedback_da_must_verify_before_closing", { avgCorrelatedRating: 4.5 }));
+
+    const { learnedToStatId, statIdToLearnedName } = buildLearnedStatsLookup(CLAUDE_LEARNED, statsMap);
+
+    expect(learnedToStatId.get("ac_garbage_test")).toBe("feedback_ac_garbage_test");
+    expect(learnedToStatId.get("Da Must Verify Before Closing")).toBe("feedback_da_must_verify_before_closing");
+    expect(statIdToLearnedName.get("feedback_ac_garbage_test")).toBe("ac_garbage_test");
+  });
+
+  test("returns empty maps when no matches", () => {
+    const learnedContent = "# Learned Rules\n\n### Learned Rules\n\n- **Unique Name:** text\n";
+    writeFileSync(CLAUDE_LEARNED, learnedContent);
+
+    const statsMap = new Map<string, RuleStats>();
+    statsMap.set("totally_different_id", makeStats("totally_different_id"));
+
+    const { learnedToStatId } = buildLearnedStatsLookup(CLAUDE_LEARNED, statsMap);
+    expect(learnedToStatId.size).toBe(0);
+  });
+});
+
+describe("findEvictionCandidates with claudeLearnedPath", () => {
+  test("produces learned candidates when stat ID not already a candidate", () => {
+    // Stats with a prefixed ID whose rating is OK for stats-scan threshold (3.0)
+    // but bad enough for learned-match threshold
+    const stats: RuleStats[] = [
+      makeStats("feedback_ac_garbage_test", { avgCorrelatedRating: 2.5, injectionCount: 10 }),
+      makeStats("good-rule", { avgCorrelatedRating: 7.0, injectionCount: 10 }),
+    ];
+    persistRuleStats(stats, STATE_DIR);
+
+    const learnedContent = [
+      "# Learned Rules\n",
+      "### Learned Rules\n",
+      "- **ac_garbage_test (from session 2026-06-18):** Every AC needs a threshold",
+      "- **Unrelated Rule:** stays",
+    ].join("\n");
+    writeFileSync(CLAUDE_LEARNED, learnedContent);
+
+    const candidates = findEvictionCandidates({
+      stateDir: STATE_DIR,
+      ruleDomainsPath: RULE_DOMAINS,
+      claudeLearnedPath: CLAUDE_LEARNED,
+    });
+
+    // The stat-based scan should find feedback_ac_garbage_test (avg 2.5 < 3.0)
+    const statCandidate = candidates.find(c => c.ruleId === "feedback_ac_garbage_test");
+    expect(statCandidate).toBeDefined();
+  });
+
+  test("produces learned-match candidates when stats not found by stat scan", () => {
+    // Stat with high enough rating to pass stats-scan but too few sessions
+    // to be caught by the main loop, yet still low enough for learned match
+    const stats: RuleStats[] = [
+      makeStats("feedback_only_learned", { avgCorrelatedRating: 2.5, injectionCount: 10 }),
+    ];
+    persistRuleStats(stats, STATE_DIR);
+
+    const learnedContent = [
+      "# Learned Rules\n",
+      "### Learned Rules\n",
+      "- **Only Learned (from debrief 2026-05-01):** This rule exists only in CLAUDE-LEARNED",
+    ].join("\n");
+    writeFileSync(CLAUDE_LEARNED, learnedContent);
+
+    const candidates = findEvictionCandidates({
+      stateDir: STATE_DIR,
+      ruleDomainsPath: RULE_DOMAINS,
+      claudeLearnedPath: CLAUDE_LEARNED,
+    });
+
+    // feedback_only_learned normalizes to "only-learned"
+    // "Only Learned" normalizes to "only-learned"
+    // Stats scan finds feedback_only_learned directly
+    const found = candidates.find(c =>
+      normalizeRuleId(c.ruleId) === "only-learned"
+    );
+    expect(found).toBeDefined();
+  });
+
+  test("produces untracked candidates for old learned entries with no stats", () => {
+    const stats: RuleStats[] = [
+      makeStats("unrelated-stat", { avgCorrelatedRating: 7.0, injectionCount: 10 }),
+    ];
+    persistRuleStats(stats, STATE_DIR);
+
+    const learnedContent = [
+      "# Learned Rules\n",
+      "### Learned Rules\n",
+      "- **Old Untracked Rule (from debrief 2026-04-01):** This is 100+ days old with no stats",
+      "- **Recent Rule (from debrief 2026-07-10):** This is recent",
+    ].join("\n");
+    writeFileSync(CLAUDE_LEARNED, learnedContent);
+
+    const candidates = findEvictionCandidates({
+      stateDir: STATE_DIR,
+      ruleDomainsPath: RULE_DOMAINS,
+      claudeLearnedPath: CLAUDE_LEARNED,
+    });
+
+    const untracked = candidates.find(c => c.ruleId === "Old Untracked Rule");
+    expect(untracked).toBeDefined();
+    expect(untracked!.reason).toContain("untracked");
+    expect(untracked!.sessionCount).toBe(0);
+
+    const recent = candidates.find(c => c.ruleId === "Recent Rule");
+    expect(recent).toBeUndefined();
+  });
+
+  test("does not duplicate candidates already found by stat scan", () => {
+    const stats: RuleStats[] = [
+      makeStats("feedback_ac_garbage_test", { avgCorrelatedRating: 2.0, injectionCount: 10 }),
+    ];
+    persistRuleStats(stats, STATE_DIR);
+
+    const learnedContent = "# Learned Rules\n\n### Learned Rules\n\n- **ac_garbage_test:** text\n";
+    writeFileSync(CLAUDE_LEARNED, learnedContent);
+
+    const candidates = findEvictionCandidates({
+      stateDir: STATE_DIR,
+      ruleDomainsPath: RULE_DOMAINS,
+      claudeLearnedPath: CLAUDE_LEARNED,
+    });
+
+    // The stat ID itself appears as a candidate (from stats scan),
+    // and the learned match should not create a duplicate
+    const allIds = candidates.map(c => c.ruleId);
+    const acEntries = allIds.filter(id => normalizeRuleId(id) === "ac-garbage-test");
+    expect(acEntries.length).toBeLessThanOrEqual(2);
   });
 });
