@@ -97,6 +97,16 @@ describe("keywordClassify", () => {
     expect(result).toEqual(["security"]);
   });
 
+  test("classifies scoring rules", () => {
+    const result = keywordClassify("score-v2", "scorer", "v2 scoring signals ratings scorer effectiveness");
+    expect(result).toEqual(["scoring"]);
+  });
+
+  test("classifies pipeline rules", () => {
+    const result = keywordClassify("pipe-daemon", "lifecycle", "promote rule evict daemon cycle pipeline");
+    expect(result).toEqual(["pipeline"]);
+  });
+
   test("classifies scope rules", () => {
     const result = keywordClassify("scope-guard", "", "minimal scope, don't add unrequested features");
     expect(result).toEqual(["scope"]);
