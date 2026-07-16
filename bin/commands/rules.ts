@@ -442,6 +442,19 @@ export async function rulesCommand(args: string[]): Promise<void> {
     const home = process.env.HOME ?? "";
     const sessionHistoryPath = join(home, ".agentgrit", "state", "session-context-history.jsonl");
     const ratingsPath = join(home, ".claude", "MEMORY", "LEARNING", "SIGNALS", "ratings.jsonl");
+    const clean = args.includes("--clean");
+
+    if (clean) {
+      const { ruleStatsPath, loadRuleStats: loadStats, persistRuleStats: persistStats } = await import("../../src/promote/rules");
+      const statsPath = ruleStatsPath();
+      if (existsSync(statsPath)) {
+        const existing = loadStats();
+        const before = existing.size;
+        const cleaned = Array.from(existing.values()).filter(s => !s.ruleId.startsWith("rule-"));
+        persistStats(cleaned);
+        console.log(`  Cleaned ${before - cleaned.length} legacy rule-xxxxx entries (${before} → ${cleaned.length}).\n`);
+      }
+    }
 
     console.log("  Bootstrapping rule stats from session history...\n");
     console.log(`  Session history: ${sessionHistoryPath}`);

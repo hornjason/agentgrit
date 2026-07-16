@@ -60,13 +60,49 @@ function isReviewedRule(ruleId: string, ruleDomains: RuleDomainsFile | null): bo
   return entry?.source === "reviewed";
 }
 
+interface GraphNode {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+function loadGraphNodes(graphPath: string): GraphNode[] {
+  if (!existsSync(graphPath)) return [];
+  try {
+    const graph = JSON.parse(readFileSync(graphPath, "utf-8"));
+    return Object.values(graph.nodes ?? {}) as GraphNode[];
+  } catch {
+    return [];
+  }
+}
+
+function significantWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(w => w.length > 3);
+}
+
+function fuzzyWordMatch(needle: string[], haystack: string): boolean {
+  if (needle.length === 0) return false;
+  const haystackLower = haystack.toLowerCase();
+  let hits = 0;
+  for (const w of needle) {
+    if (haystackLower.includes(w)) hits++;
+  }
+  return hits / needle.length > 0.6;
+}
+
 /**
  * Build a normalized lookup from CLAUDE-LEARNED.md: normalizedId → original bold name.
  * Also build a reverse map from normalizedId → stat entry, for bidirectional matching.
+ * Uses three strategies: exact normalization, graph-bridge forward, graph-bridge reverse.
  */
 export function buildLearnedStatsLookup(
   claudeLearnedPath: string,
   statsMap: Map<string, RuleStats>,
+  graphPath?: string,
 ): { learnedToStatId: Map<string, string>; statIdToLearnedName: Map<string, string> } {
   const learnedToStatId = new Map<string, string>();
   const statIdToLearnedName = new Map<string, string>();
@@ -85,12 +121,54 @@ export function buildLearnedStatsLookup(
     learnedNormMap.set(norm, boldName);
   }
 
+  // Strategy 1: direct normalization match
   for (const [statId] of statsMap) {
     const statNorm = normalizeRuleId(statId);
     const learnedName = learnedNormMap.get(statNorm);
     if (learnedName) {
       learnedToStatId.set(learnedName, statId);
       statIdToLearnedName.set(statId, learnedName);
+    }
+  }
+
+  // Strategy 2: graph-bridge matching
+  const gPath = graphPath ?? join(process.env.HOME ?? "", ".agentgrit", "state", "knowledge-graph.json");
+  const graphNodes = loadGraphNodes(gPath);
+  if (graphNodes.length > 0) {
+    const matchedBoldNames = new Set(learnedToStatId.keys());
+    const unmatchedLearned = [...learnedNormMap.entries()].filter(([, boldName]) => !matchedBoldNames.has(boldName));
+
+    // Forward: for each unmatched bold name, find a graph node whose name words appear in it
+    for (const [, boldName] of unmatchedLearned) {
+      for (const node of graphNodes) {
+        const nodeWords = significantWords(node.name);
+        if (fuzzyWordMatch(nodeWords, boldName) && statsMap.has(node.id)) {
+          learnedToStatId.set(boldName, node.id);
+          statIdToLearnedName.set(node.id, boldName);
+          break;
+        }
+      }
+    }
+
+    // Reverse: for each unmatched stat ID, find graph node, fuzzy match description against bold names
+    const matchedStatIds = new Set(statIdToLearnedName.keys());
+    const stillUnmatchedLearned = [...learnedNormMap.entries()].filter(([, boldName]) => !learnedToStatId.has(boldName));
+    if (stillUnmatchedLearned.length > 0) {
+      const nodeById = new Map(graphNodes.map(n => [n.id, n]));
+      for (const [statId] of statsMap) {
+        if (matchedStatIds.has(statId)) continue;
+        const node = nodeById.get(statId);
+        if (!node?.description) continue;
+        const descWords = significantWords(node.description);
+        for (const [, boldName] of stillUnmatchedLearned) {
+          if (learnedToStatId.has(boldName)) continue;
+          if (fuzzyWordMatch(descWords, boldName)) {
+            learnedToStatId.set(boldName, statId);
+            statIdToLearnedName.set(statId, boldName);
+            break;
+          }
+        }
+      }
     }
   }
 

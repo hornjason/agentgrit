@@ -553,6 +553,85 @@ describe("buildLearnedStatsLookup", () => {
     const { learnedToStatId } = buildLearnedStatsLookup(CLAUDE_LEARNED, statsMap);
     expect(learnedToStatId.size).toBe(0);
   });
+
+  test("matches via graph-bridge when normalization fails", () => {
+    // Bold name: "Inspect consumer output after every change"
+    // Stat ID: "feedback_inspect_consumer_output"
+    // Graph node: id=feedback_inspect_consumer_output, name="inspect-consumer-output"
+    // Normalization alone won't match because bold name has extra words
+    const learnedContent = [
+      "# Learned Rules\n",
+      "### Learned Rules\n",
+      '- **Inspect consumer output after every change:** Always check output',
+    ].join("\n");
+    writeFileSync(CLAUDE_LEARNED, learnedContent);
+
+    const statsMap = new Map<string, RuleStats>();
+    statsMap.set("feedback_inspect_consumer_output", makeStats("feedback_inspect_consumer_output"));
+
+    // Create a mock graph file
+    const graphPath = join(TMP_DIR, "knowledge-graph.json");
+    writeFileSync(graphPath, JSON.stringify({
+      nodes: {
+        feedback_inspect_consumer_output: {
+          id: "feedback_inspect_consumer_output",
+          name: "inspect-consumer-output",
+          description: "Always generate and read real consumer output after shipping changes",
+        },
+      },
+    }));
+
+    const { learnedToStatId } = buildLearnedStatsLookup(CLAUDE_LEARNED, statsMap, graphPath);
+    expect(learnedToStatId.get("Inspect consumer output after every change")).toBe("feedback_inspect_consumer_output");
+  });
+
+  test("matches via graph-bridge reverse (description to bold name)", () => {
+    const learnedContent = [
+      "# Learned Rules\n",
+      "### Learned Rules\n",
+      '- **Quality gate before ANY generated output:** Verify quality before sending',
+    ].join("\n");
+    writeFileSync(CLAUDE_LEARNED, learnedContent);
+
+    const statsMap = new Map<string, RuleStats>();
+    statsMap.set("feedback_quality_gate_output", makeStats("feedback_quality_gate_output"));
+
+    const graphPath = join(TMP_DIR, "knowledge-graph.json");
+    writeFileSync(graphPath, JSON.stringify({
+      nodes: {
+        feedback_quality_gate_output: {
+          id: "feedback_quality_gate_output",
+          name: "quality-gate-output",
+          description: "Quality gate before any generated output to verify correctness",
+        },
+      },
+    }));
+
+    const { learnedToStatId } = buildLearnedStatsLookup(CLAUDE_LEARNED, statsMap, graphPath);
+    expect(learnedToStatId.get("Quality gate before ANY generated output")).toBe("feedback_quality_gate_output");
+  });
+
+  test("does not match via graph-bridge when stat ID has no stats", () => {
+    const learnedContent = "# Learned Rules\n\n### Learned Rules\n\n- **Some rule:** text\n";
+    writeFileSync(CLAUDE_LEARNED, learnedContent);
+
+    const statsMap = new Map<string, RuleStats>();
+    // No stats for the node ID
+
+    const graphPath = join(TMP_DIR, "knowledge-graph.json");
+    writeFileSync(graphPath, JSON.stringify({
+      nodes: {
+        feedback_some_rule: {
+          id: "feedback_some_rule",
+          name: "some-rule",
+          description: "Some rule description",
+        },
+      },
+    }));
+
+    const { learnedToStatId } = buildLearnedStatsLookup(CLAUDE_LEARNED, statsMap, graphPath);
+    expect(learnedToStatId.size).toBe(0);
+  });
 });
 
 describe("findEvictionCandidates with claudeLearnedPath", () => {

@@ -152,6 +152,7 @@ export function bootstrapRuleStats(
   // Strategy 1: ratings.jsonl entries that have rule_ids (direct attribution)
   for (const r of ratings) {
     if (!r.rule_ids || r.rule_ids.length === 0 || !r.rating) continue;
+    if (r.rule_ids.every(id => id.startsWith("rule-"))) continue;
     result.ratingsMatched++;
     for (const ruleId of r.rule_ids) {
       const existing = statsMap.get(ruleId);

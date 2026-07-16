@@ -5,6 +5,7 @@ import {
   persistRuleStats,
   loadRuleStats,
   ruleStatsPath,
+  bootstrapRuleStats,
   type RuleStats,
 } from "../../src/promote/rules";
 
@@ -82,5 +83,50 @@ describe("persistRuleStats + loadRuleStats", () => {
     ];
     persistRuleStats(stats, deepDir);
     expect(existsSync(ruleStatsPath(deepDir))).toBe(true);
+  });
+});
+
+describe("bootstrapRuleStats skips legacy IDs", () => {
+  test("skips ratings where all rule_ids start with rule-", () => {
+    const { writeFileSync: wfs } = require("fs");
+    const sessionHistoryPath = join(TMP_DIR, "session-history.jsonl");
+    const ratingsPath = join(TMP_DIR, "ratings.jsonl");
+
+    // Ratings with legacy IDs should be skipped
+    const ratings = [
+      JSON.stringify({ timestamp: "2026-07-01T10:00:00Z", rating: 5, rule_ids: ["rule-abc12", "rule-def34"] }),
+      JSON.stringify({ timestamp: "2026-07-01T11:00:00Z", rating: 7, rule_ids: ["feedback_real_rule"] }),
+    ];
+    wfs(ratingsPath, ratings.join("\n"), "utf-8");
+
+    // Empty session history
+    wfs(sessionHistoryPath, "", "utf-8");
+
+    const result = bootstrapRuleStats(sessionHistoryPath, ratingsPath, STATE_DIR);
+
+    const loaded = loadRuleStats(STATE_DIR);
+    expect(loaded.has("rule-abc12")).toBe(false);
+    expect(loaded.has("rule-def34")).toBe(false);
+    expect(loaded.has("feedback_real_rule")).toBe(true);
+    expect(result.ratingsMatched).toBe(1);
+  });
+
+  test("keeps ratings with mix of legacy and real IDs", () => {
+    const { writeFileSync: wfs } = require("fs");
+    const sessionHistoryPath = join(TMP_DIR, "session-history.jsonl");
+    const ratingsPath = join(TMP_DIR, "ratings.jsonl");
+
+    const ratings = [
+      JSON.stringify({ timestamp: "2026-07-01T10:00:00Z", rating: 6, rule_ids: ["rule-abc12", "feedback_real"] }),
+    ];
+    wfs(ratingsPath, ratings.join("\n"), "utf-8");
+    wfs(sessionHistoryPath, "", "utf-8");
+
+    bootstrapRuleStats(sessionHistoryPath, ratingsPath, STATE_DIR);
+
+    const loaded = loadRuleStats(STATE_DIR);
+    // Mixed entries are kept — both IDs get stats
+    expect(loaded.has("rule-abc12")).toBe(true);
+    expect(loaded.has("feedback_real")).toBe(true);
   });
 });
