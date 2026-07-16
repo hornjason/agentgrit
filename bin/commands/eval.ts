@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, readdirSync, createReadStream } from "fs";
+import { existsSync, readFileSync, readdirSync, createReadStream, statSync } from "fs";
 import { join, basename } from "path";
 import { createInterface } from "readline";
-import { getBaseDir, loadConfig, resolveSignalDir, resolveSignalFile, resolveTranscriptDir } from "../../src/adapters/paths";
+import { getBaseDir, loadConfig, resolveSignalDir, resolveSignalFile, resolveTranscriptDir, resolveMemoryDir } from "../../src/adapters/paths";
 import { loadRubric } from "../../src/evaluate/rubric";
 import { judgeTrace, judgeBatch } from "../../src/evaluate/judge";
 import type { JudgeConfig, Trace } from "../../src/evaluate/judge";
@@ -13,6 +13,9 @@ import type { GoldSet, GoldSession } from "../../src/evaluate/gold";
 import { trackRuleEffectiveness } from "../../src/evaluate/effectiveness";
 import type { RubricConfig, Score, Rule, GraphNode } from "../../src/adapters/types";
 import { writeFileSync, mkdirSync } from "fs";
+import { readGraph } from "../../src/graph/builder";
+import { buildIndexFromDir } from "../../src/graph/bm25";
+import { getContextRules } from "../../src/graph/context";
 
 function getJudgeConfig(): JudgeConfig | null {
   const config = loadConfig();
@@ -253,6 +256,76 @@ function loadRecallScores(base: string): Record<string, string[]> | null {
   } catch { return null; }
 }
 
+interface HistoryEntry {
+  ruleIds: string[];
+  domains: string[];
+  timestamp: string;
+  rulesInjectedCount?: number;
+}
+
+function loadSessionHistory(base: string): HistoryEntry[] {
+  const historyPath = join(base, "state", "session-context-history.jsonl");
+  if (!existsSync(historyPath)) return [];
+  const lines = readFileSync(historyPath, "utf-8").split("\n").filter(l => l.trim());
+  const entries: HistoryEntry[] = [];
+  for (const line of lines) {
+    try { entries.push(JSON.parse(line)); } catch {}
+  }
+  return entries;
+}
+
+function bootstrapRecallScores(base: string): Record<string, string[]> {
+  const history = loadSessionHistory(base);
+  if (history.length === 0) return {};
+
+  const transcriptDir = resolveTranscriptDir();
+  if (!transcriptDir || !existsSync(transcriptDir)) return {};
+
+  const transcriptFiles = readdirSync(transcriptDir).filter(f => f.endsWith(".jsonl"));
+
+  // Build a list of (sessionId, mtime) from transcript files
+  const sessions: Array<{ id: string; mtime: number }> = [];
+  for (const f of transcriptFiles) {
+    const fullPath = join(transcriptDir, f);
+    try {
+      const stat = statSync(fullPath);
+      sessions.push({ id: basename(f, ".jsonl"), mtime: stat.mtimeMs });
+    } catch {}
+  }
+  sessions.sort((a, b) => a.mtime - b.mtime);
+
+  // Match history entries to sessions by closest timestamp
+  const injected: Record<string, string[]> = {};
+  const usedSessions = new Set<string>();
+
+  for (const entry of history) {
+    if (!entry.timestamp || entry.ruleIds.length === 0) continue;
+    const entryTime = new Date(entry.timestamp).getTime();
+    if (isNaN(entryTime)) continue;
+
+    let bestMatch: string | null = null;
+    let bestDelta = Infinity;
+    for (const s of sessions) {
+      if (usedSessions.has(s.id)) continue;
+      const delta = Math.abs(s.mtime - entryTime);
+      if (delta < bestDelta) { bestDelta = delta; bestMatch = s.id; }
+    }
+
+    // Only match if within 2 hours
+    if (bestMatch && bestDelta < 2 * 60 * 60 * 1000) {
+      injected[bestMatch] = entry.ruleIds;
+      usedSessions.add(bestMatch);
+    }
+  }
+
+  const scoresPath = join(base, "state", "recall-scores.json");
+  const stateDir = join(base, "state");
+  if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true });
+  writeFileSync(scoresPath, JSON.stringify({ injected, bootstrappedAt: new Date().toISOString(), entryCount: Object.keys(injected).length }, null, 2));
+
+  return injected;
+}
+
 export async function evalCommand(args: string[]): Promise<void> {
   const base = getBaseDir();
   const sub = args[0];
@@ -263,12 +336,14 @@ export async function evalCommand(args: string[]): Promise<void> {
     console.log("  Usage:");
     console.log("    agentgrit eval traces [--backfill] [--local]");
     console.log("    agentgrit eval session");
-    console.log("    agentgrit eval recall [--generate]");
+    console.log("    agentgrit eval recall [--generate] [--bootstrap] [--live]");
     console.log("    agentgrit eval effectiveness");
     console.log("");
     console.log("  Evaluates traces, sessions, recall, or rule effectiveness.");
     console.log("  Traces loads from algorithm-reflections.jsonl or session transcripts.");
     console.log("  --generate builds a gold set from the knowledge graph + transcripts.");
+    console.log("  --bootstrap builds recall-scores.json from session-context-history.jsonl.");
+    console.log("  --live re-runs getContextRules for each gold session (measures current retrieval).");
     console.log("  effectiveness compares correction frequency before/after rule promotion.\n");
     return;
   }
@@ -397,10 +472,23 @@ export async function evalCommand(args: string[]): Promise<void> {
     console.log("");
   } else if (sub === "recall") {
     const generate = args.includes("--generate");
-    console.log(`  Mode: recall accuracy\n`);
+    const bootstrap = args.includes("--bootstrap");
+    const live = args.includes("--live");
+    console.log(`  Mode: recall accuracy${live ? " (live retrieval)" : ""}${bootstrap ? " (bootstrapping)" : ""}\n`);
+
+    if (bootstrap) {
+      console.log("  Bootstrapping recall-scores.json from session-context-history.jsonl...");
+      const injected = bootstrapRecallScores(base);
+      const count = Object.keys(injected).length;
+      console.log(`  Bootstrapped ${count} session entries into recall-scores.json.\n`);
+      if (count === 0) {
+        console.log("  No sessions could be matched. Check session-context-history.jsonl and transcript directory.\n");
+        return;
+      }
+    }
 
     let goldSet = loadGoldSet(base);
-    if (!goldSet && generate) {
+    if (generate) {
       goldSet = await generateGoldSet(base);
     }
     if (!goldSet) {
@@ -409,13 +497,34 @@ export async function evalCommand(args: string[]): Promise<void> {
       return;
     }
 
-    const recallData = loadRecallScores(base);
+    let recallData = loadRecallScores(base);
     const allRules = loadGraphRules(base);
+
+    // For --live: load graph and BM25 index, re-run retrieval for each session
+    let graph: import("../../src/graph/types").Graph | null = null;
+    let index: import("../../src/graph/types").BM25Index | null = null;
+    if (live) {
+      console.log("  Loading graph and BM25 index for live retrieval...");
+      graph = readGraph();
+      const memoryDir = resolveMemoryDir();
+      index = buildIndexFromDir(memoryDir);
+      console.log(`  Graph: ${Object.keys(graph.nodes).length} nodes, Index built from: ${memoryDir}\n`);
+    }
 
     const sessions: SessionRecallScore[] = [];
     for (const [sessionId, entry] of Object.entries(goldSet)) {
-      const injectedIds = recallData?.[sessionId] ?? [];
-      const score = evaluateSessionRecall(sessionId, entry.description, entry.relevantRules, injectedIds);
+      let retrievedIds: string[];
+
+      if (live && graph && index) {
+        const domains = entry.domains ?? [];
+        const queryText = entry.description ?? sessionId;
+        const retrieved = await getContextRules(graph, index, domains, 15, undefined, queryText);
+        retrievedIds = retrieved.map(r => r.id);
+      } else {
+        retrievedIds = recallData?.[sessionId] ?? [];
+      }
+
+      const score = evaluateSessionRecall(sessionId, entry.description, entry.relevantRules, retrievedIds);
       sessions.push(score);
     }
 
