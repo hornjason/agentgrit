@@ -85,14 +85,27 @@ function gatherMetrics(): ShowcaseMetrics {
 
   const recallEval = readJson(join(state, "recall-eval.json")) as RecallEvalData | null;
 
-  const sorted = [...activeStats].sort((a, b) => b.avgCorrelatedRating - a.avgCorrelatedRating);
+  const graphNodes = graph?.nodes as Record<string, { name?: string; description?: string; domains?: string[] }> | undefined;
+  function resolveRuleName(ruleId: string): string {
+    const node = graphNodes?.[ruleId];
+    if (node?.name && node.name !== ruleId) return node.name;
+    if (node?.description) return node.description.length > 60 ? node.description.substring(0, 57) + "..." : node.description;
+    return ruleId.replace(/^feedback_|^success_|^project_|^traj-/, "").replace(/[_-]/g, " ");
+  }
+
+  const validStats = activeStats.filter((s) => {
+    if (s.ruleId.startsWith("traj-") && !graphNodes?.[s.ruleId]) return false;
+    return true;
+  });
+
+  const sorted = [...validStats].sort((a, b) => b.avgCorrelatedRating - a.avgCorrelatedRating);
   const topPerformers: RulePerformer[] = sorted.slice(0, 5).map((s) => ({
-    id: s.ruleId,
+    id: resolveRuleName(s.ruleId),
     rating: s.avgCorrelatedRating,
     injections: s.injectionCount,
   }));
   const bottomPerformers: RulePerformer[] = sorted.slice(-5).reverse().map((s) => ({
-    id: s.ruleId,
+    id: resolveRuleName(s.ruleId),
     rating: s.avgCorrelatedRating,
     injections: s.injectionCount,
   }));
