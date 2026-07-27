@@ -94,6 +94,12 @@ export async function graphCommand(args: string[]): Promise<void> {
 
   if (sub === "build") {
     await doBuild(base, args.includes("--full"));
+    try {
+      const { generateShowcase } = await import("./showcase");
+      await generateShowcase();
+    } catch {
+      // showcase regeneration is non-critical
+    }
   } else if (sub === "classify") {
     const { readGraph } = await import("../../src/graph/builder");
     const { classifyIsolatedNodes } = await import("../../src/graph/classify-isolated");

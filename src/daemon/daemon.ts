@@ -749,7 +749,15 @@ export async function runDaemonCycle(
     result.errors.push(`attribution: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // 8. Rule correlation — summarize rule effectiveness stats
+  // 8. Showcase — regenerate living dashboard
+  try {
+    const { generateShowcase } = await import("../../bin/commands/showcase");
+    await generateShowcase();
+  } catch {
+    // showcase generation is non-critical
+  }
+
+  // 9. Rule correlation — summarize rule effectiveness stats
   try {
     const { loadRuleStats } = await import("../promote/rules");
     const statsMap = loadRuleStats();

@@ -18,6 +18,7 @@ import { reviewCommand } from "./commands/review";
 import { rulesCommand } from "./commands/rules";
 import { signalsCommand } from "./commands/signals";
 import { statusCommand } from "./commands/status";
+import { showcaseCommand } from "./commands/showcase";
 import { undoCommand } from "./commands/undo";
 import { upgradeCommand } from "./commands/upgrade";
 
@@ -39,6 +40,7 @@ const HANDLERS: Record<string, (args: string[]) => Promise<void>> = {
   patterns: patternsCommand,
   review: reviewCommand,
   rules: rulesCommand,
+  showcase: showcaseCommand,
   signals: signalsCommand,
   status: statusCommand,
   undo: undoCommand,
@@ -61,6 +63,7 @@ const DESCRIPTIONS: Record<string, string> = {
   patterns: "Generate or show domain keyword patterns",
   review: "Run manual weekly learning review",
   rules: "List, rebalance, or compact rules",
+  showcase: "Generate living system dashboard (HTML)",
   signals: "Signal file sizes and rotation",
   status: "Signal counts, score trends, rule budget",
   undo: "Undo recent rule promotions",

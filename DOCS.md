@@ -2,7 +2,7 @@
 doc-type: reference
 status: active
 owner: jason
-updated: 2026-07-06
+updated: 2026-07-16
 ---
 
 # AgentGrit — Documentation Index
@@ -25,6 +25,7 @@ updated: 2026-07-06
 | Check what's open, broken, or in progress | [GitHub Issues](https://github.com/hornjason/agentgrit/issues) |
 | Run tests | `bun test` (all) or `bun test --isolate test/unit/` (unit only) |
 | Run the daemon | `agentgrit daemon run` |
+| Show AgentGrit to someone | `docs/showcase-spec.md` |
 | Check system health | `agentgrit doctor` |
 | See rule budget status | `agentgrit rules budget` |
 | Optimize prompts or skills | `agentgrit optimize --target prompts` or `--target skills --skill <name>` |
