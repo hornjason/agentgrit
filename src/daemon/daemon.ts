@@ -871,7 +871,7 @@ export async function runWeeklyReview(
       }
     }
 
-    if (allToEvict.length > 0 && exists(learnedPath)) {
+    if (allToEvict.length > 0 && exists(learnedPath) && config.rules.autoEvict) {
       result.evictionResult = await evictRules(allToEvict, learnedPath);
     }
   } catch (err) {

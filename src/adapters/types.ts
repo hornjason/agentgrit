@@ -225,6 +225,7 @@ export interface AgentGritConfig {
     learnedBudget?: number;
     pendingExpiryDays?: number;
     autoPromote: boolean;
+    autoEvict?: boolean;
   };
   daemon: {
     interval: string;
