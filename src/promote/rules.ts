@@ -172,7 +172,7 @@ export function bootstrapRuleStats(
     for (const ruleId of r.rule_ids) {
       const existing = statsMap.get(ruleId);
       const sessionRatings = [...(existing?.sessionRatings ?? []), r.rating].slice(-MAX_SESSION_RATINGS);
-      const avg = sessionRatings.reduce((a, b) => a + b, 0) / sessionRatings.length;
+      const avg = computeDecayedAverage(sessionRatings);
       statsMap.set(ruleId, {
         ruleId,
         injectionCount: (existing?.injectionCount ?? 0) + 1,
@@ -211,7 +211,7 @@ export function bootstrapRuleStats(
     for (const ruleId of session.ruleIds) {
       const existing = statsMap.get(ruleId);
       const sessionRatings = [...(existing?.sessionRatings ?? []), closestRating.rating].slice(-MAX_SESSION_RATINGS);
-      const avg = sessionRatings.reduce((a, b) => a + b, 0) / sessionRatings.length;
+      const avg = computeDecayedAverage(sessionRatings);
       statsMap.set(ruleId, {
         ruleId,
         injectionCount: (existing?.injectionCount ?? 0) + 1,

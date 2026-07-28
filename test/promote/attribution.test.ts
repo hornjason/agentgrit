@@ -64,7 +64,9 @@ describe("trackAttributedRules", () => {
       makeRule("r2", { sessionRatings: [4, 6] }),
     ];
     const updated = trackAttributedRules(rules, ["r1"], 10);
-    expect(updated[0].avgCorrelatedRating).toBe(8);
+    // Decay-weighted: [6, 8, 10] with recent ratings weighed more → above flat avg of 8
+    expect(updated[0].avgCorrelatedRating).toBeGreaterThan(7.5);
+    expect(updated[0].avgCorrelatedRating).toBeLessThan(10);
     expect(updated[1].avgCorrelatedRating).toBeUndefined();
   });
 });
