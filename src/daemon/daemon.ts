@@ -695,7 +695,7 @@ export async function runDaemonCycle(
 
   // 7d. Attribution — process rated sessions to update rule stats
   try {
-    const { loadRuleStats: loadStats, persistRuleStats: persistStats } = await import("../promote/rules");
+    const { loadRuleStats: loadStats, persistRuleStats: persistStats, computeDecayedAverage } = await import("../promote/rules");
     const { stateDir: getState } = await import("../adapters/paths");
     const { join } = await import("path");
     const { existsSync: exists, readFileSync: readFile, writeFileSync: writeFile } = await import("fs");
@@ -724,7 +724,7 @@ export async function runDaemonCycle(
           for (const ruleId of ruleIds) {
             const existing = statsMap.get(ruleId);
             const ratings = [...(existing?.sessionRatings ?? []), entry.rating].slice(-20);
-            const avg = ratings.reduce((a: number, b: number) => a + b, 0) / ratings.length;
+            const avg = computeDecayedAverage(ratings);
             statsMap.set(ruleId, {
               ruleId,
               injectionCount: (existing?.injectionCount ?? 0) + 1,
@@ -871,7 +871,7 @@ export async function runWeeklyReview(
       }
     }
 
-    if (allToEvict.length > 0 && exists(learnedPath)) {
+    if (allToEvict.length > 0 && exists(learnedPath) && config.rules.autoEvict) {
       result.evictionResult = await evictRules(allToEvict, learnedPath);
     }
   } catch (err) {

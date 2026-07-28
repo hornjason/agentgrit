@@ -322,9 +322,17 @@ export interface SessionContext {
   rulesInjectedCount: number;
   rulesInjectedKB: number;
   totalContextLines: number;
+  toolCallPatterns?: string[];
+  filePathsTouched?: string[];
 }
 
-export function writeSessionContext(rules: Rule[], domains: string[], domainSource: "metadata" | "keyword" | "bm25" = "keyword", totalContextLines: number = 0): void {
+export function writeSessionContext(
+  rules: Rule[],
+  domains: string[],
+  domainSource: "metadata" | "keyword" | "bm25" = "keyword",
+  totalContextLines: number = 0,
+  extra?: { toolCallPatterns?: string[]; filePathsTouched?: string[] },
+): void {
   const filePath = statePath(SESSION_CONTEXT_FILE);
   const dir = dirname(filePath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -341,6 +349,8 @@ export function writeSessionContext(rules: Rule[], domains: string[], domainSour
     rulesInjectedCount,
     rulesInjectedKB,
     totalContextLines,
+    ...(extra?.toolCallPatterns && { toolCallPatterns: extra.toolCallPatterns }),
+    ...(extra?.filePathsTouched && { filePathsTouched: extra.filePathsTouched }),
   };
 
   writeFileSync(filePath, JSON.stringify(context, null, 2), "utf-8");
@@ -385,6 +395,34 @@ export function readSessionHistory(limit: number = 10): SessionContext[] {
   } catch {
     return [];
   }
+}
+
+export function computeRelevanceScore(ruleText: string, sessionContext: SessionContext): number {
+  const ruleWords = new Set(
+    ruleText.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(w => w.length > 3),
+  );
+  if (ruleWords.size === 0) return 0;
+
+  const contextWords = new Set<string>();
+  for (const src of [
+    sessionContext.toolCallPatterns ?? [],
+    sessionContext.filePathsTouched ?? [],
+    sessionContext.domains,
+  ]) {
+    for (const item of src) {
+      for (const w of item.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/)) {
+        if (w.length > 3) contextWords.add(w);
+      }
+    }
+  }
+  if (contextWords.size === 0) return 0;
+
+  let intersection = 0;
+  for (const w of ruleWords) {
+    if (contextWords.has(w)) intersection++;
+  }
+  const union = new Set([...ruleWords, ...contextWords]).size;
+  return union === 0 ? 0 : intersection / union;
 }
 
 // ── Learning Readback ──

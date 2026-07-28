@@ -1,10 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { stateDir } from "../adapters/paths";
+import { loadConfig } from "../adapters/paths";
 import type { Rule } from "../adapters/types";
 
 const MAX_SESSION_RATINGS = 20;
 const RULE_STATS_FILE = "rule-stats.json";
+const _rulesCfg = loadConfig();
+const DEFAULT_DECAY_HALF_LIFE = _rulesCfg.thresholds?.decayHalfLife ?? 10;
 
 export interface RuleStats {
   ruleId: string;
@@ -14,6 +17,21 @@ export interface RuleStats {
   highRatingActivations: number;
   lowRatingActivations: number;
   lastSeen: string;
+  noisePenalty?: number;
+}
+
+export function computeDecayedAverage(ratings: number[], halfLife: number = DEFAULT_DECAY_HALF_LIFE): number {
+  if (ratings.length === 0) return 0;
+  const lambda = Math.log(2) / halfLife;
+  let weightedSum = 0;
+  let totalWeight = 0;
+  for (let i = 0; i < ratings.length; i++) {
+    const ageIndex = ratings.length - 1 - i;
+    const weight = Math.exp(-lambda * ageIndex);
+    weightedSum += ratings[i] * weight;
+    totalWeight += weight;
+  }
+  return totalWeight > 0 ? weightedSum / totalWeight : 0;
 }
 
 export function trackRule(rule: Rule, sessionRating: number): Rule {
@@ -21,10 +39,7 @@ export function trackRule(rule: Rule, sessionRating: number): Rule {
   const ratings = [...(rule.sessionRatings ?? []), sessionRating].slice(
     -MAX_SESSION_RATINGS,
   );
-  const avg =
-    ratings.length > 0
-      ? ratings.reduce((a, b) => a + b, 0) / ratings.length
-      : 0;
+  const avg = computeDecayedAverage(ratings);
 
   return {
     ...rule,
@@ -157,7 +172,7 @@ export function bootstrapRuleStats(
     for (const ruleId of r.rule_ids) {
       const existing = statsMap.get(ruleId);
       const sessionRatings = [...(existing?.sessionRatings ?? []), r.rating].slice(-MAX_SESSION_RATINGS);
-      const avg = sessionRatings.reduce((a, b) => a + b, 0) / sessionRatings.length;
+      const avg = computeDecayedAverage(sessionRatings);
       statsMap.set(ruleId, {
         ruleId,
         injectionCount: (existing?.injectionCount ?? 0) + 1,
@@ -196,7 +211,7 @@ export function bootstrapRuleStats(
     for (const ruleId of session.ruleIds) {
       const existing = statsMap.get(ruleId);
       const sessionRatings = [...(existing?.sessionRatings ?? []), closestRating.rating].slice(-MAX_SESSION_RATINGS);
-      const avg = sessionRatings.reduce((a, b) => a + b, 0) / sessionRatings.length;
+      const avg = computeDecayedAverage(sessionRatings);
       statsMap.set(ruleId, {
         ruleId,
         injectionCount: (existing?.injectionCount ?? 0) + 1,

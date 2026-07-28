@@ -213,6 +213,77 @@ describe("findEvictionCandidates", () => {
     });
     expect(customCandidates).toHaveLength(1);
   });
+
+  test("quality floor flags rules with avg < 4.0 after 10+ sessions", () => {
+    const stats: RuleStats[] = [
+      makeStats("floor-rule", {
+        avgCorrelatedRating: 3.5,
+        injectionCount: 12,
+      }),
+      makeStats("above-floor", {
+        avgCorrelatedRating: 4.5,
+        injectionCount: 15,
+      }),
+      makeStats("too-few-sessions", {
+        avgCorrelatedRating: 2.0,
+        injectionCount: 8,
+      }),
+    ];
+    persistRuleStats(stats, STATE_DIR);
+
+    const candidates = findEvictionCandidates({ stateDir: STATE_DIR, ruleDomainsPath: RULE_DOMAINS });
+    const floor = candidates.find(c => c.ruleId === "floor-rule");
+    expect(floor).toBeDefined();
+    expect(floor!.reason).toContain("below-quality-floor");
+
+    const above = candidates.find(c => c.ruleId === "above-floor");
+    expect(above).toBeUndefined();
+
+    // too-few-sessions: has avg 2.0 < 3.0 threshold and 8 >= 5 sessions, caught by correlation
+    // but NOT by quality floor (needs 10+)
+    const tooFew = candidates.find(c => c.ruleId === "too-few-sessions");
+    expect(tooFew).toBeDefined();
+    expect(tooFew!.reason).toContain("avgCorrelatedRating");
+  });
+
+  test("quality floor fires independently of budget", () => {
+    const stats: RuleStats[] = [
+      makeStats("floor-low", {
+        avgCorrelatedRating: 3.8,
+        injectionCount: 11,
+      }),
+    ];
+    persistRuleStats(stats, STATE_DIR);
+
+    // 3.8 is above correlation threshold (3.0) but below quality floor (4.0)
+    const candidates = findEvictionCandidates({ stateDir: STATE_DIR, ruleDomainsPath: RULE_DOMAINS });
+    const found = candidates.find(c => c.ruleId === "floor-low");
+    expect(found).toBeDefined();
+    expect(found!.reason).toContain("below-quality-floor");
+  });
+
+  test("flags rules with noisePenalty >= 1.0", () => {
+    const stats: RuleStats[] = [
+      makeStats("noisy-rule", {
+        avgCorrelatedRating: 7.0,
+        injectionCount: 15,
+        noisePenalty: 1.2,
+      }),
+      makeStats("clean-rule", {
+        avgCorrelatedRating: 7.0,
+        injectionCount: 15,
+        noisePenalty: 0.5,
+      }),
+    ];
+    persistRuleStats(stats, STATE_DIR);
+
+    const candidates = findEvictionCandidates({ stateDir: STATE_DIR, ruleDomainsPath: RULE_DOMAINS });
+    const noisy = candidates.find(c => c.ruleId === "noisy-rule");
+    expect(noisy).toBeDefined();
+    expect(noisy!.reason).toContain("noise");
+    const clean = candidates.find(c => c.ruleId === "clean-rule");
+    expect(clean).toBeUndefined();
+  });
 });
 
 describe("findDuplicates", () => {

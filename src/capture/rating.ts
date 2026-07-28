@@ -521,6 +521,30 @@ export async function captureRating(
       for (const stat of allStats) {
         statsMap.set(stat.ruleId, stat);
       }
+
+      // Noise penalty: score relevance of each rule against session context
+      try {
+        const { computeRelevanceScore } = await import("../graph/context");
+        const { readGraph } = await import("../graph/builder");
+        const fullContext = readSessionContext();
+        if (fullContext && (fullContext.toolCallPatterns?.length || fullContext.filePathsTouched?.length)) {
+          const graph = readGraph();
+          for (const ruleId of ruleIds) {
+            const node = graph.nodes[ruleId];
+            const ruleText = node?.description || node?.name || "";
+            if (!ruleText) continue;
+            const relevance = computeRelevanceScore(ruleText, fullContext);
+            if (relevance < 0.1) {
+              const stat = statsMap.get(ruleId);
+              if (stat) {
+                stat.noisePenalty = (stat.noisePenalty ?? 0) + 0.1;
+                statsMap.set(ruleId, stat);
+              }
+            }
+          }
+        }
+      } catch { /* noise penalty is non-critical */ }
+
       persistRuleStats(Array.from(statsMap.values()));
     } catch { /* non-critical — don't fail the rating capture */ }
   }

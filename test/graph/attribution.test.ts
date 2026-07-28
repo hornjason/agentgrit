@@ -2,7 +2,7 @@ import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { updateEdgeWeightsFromRating } from "../../src/graph/attribution";
+import { updateEdgeWeightsFromRating, proportionalAdjustment } from "../../src/graph/attribution";
 import type { SessionContext } from "../../src/graph/context";
 import type { Graph } from "../../src/graph/types";
 
@@ -59,7 +59,8 @@ describe("updateEdgeWeightsFromRating", () => {
     const updated = JSON.parse(readFileSync(graphPath, "utf-8")) as Graph;
     const coEdge = updated.edges.find(e => e.relationship === "co_occurred")!;
     expect(coEdge.strength).toBeGreaterThan(0.5);
-    expect(coEdge.strength).toBeCloseTo(0.55, 2);
+    // Rating 9 = +15% → 0.5 * 1.15 = 0.575
+    expect(coEdge.strength).toBeCloseTo(0.575, 2);
   });
 
   test("decreases edge weight for low-rated session (rating 2)", () => {
@@ -73,7 +74,8 @@ describe("updateEdgeWeightsFromRating", () => {
     const updated = JSON.parse(readFileSync(graphPath, "utf-8")) as Graph;
     const coEdge = updated.edges.find(e => e.relationship === "co_occurred")!;
     expect(coEdge.strength).toBeLessThan(0.5);
-    expect(coEdge.strength).toBeCloseTo(0.45, 2);
+    // Rating 2 = -15% → 0.5 * 0.85 = 0.425
+    expect(coEdge.strength).toBeCloseTo(0.425, 2);
   });
 
   test("does not change edge weight for mid-range rating (rating 5)", () => {
@@ -115,6 +117,58 @@ describe("updateEdgeWeightsFromRating", () => {
     expect(coEdge.strength).toBeGreaterThanOrEqual(0.1);
   });
 
+  test("rating 6 applies +5% adjustment", () => {
+    const graphPath = join(tmpDir, "graph.json");
+    const graph = makeGraph(1.0);
+    writeFileSync(graphPath, JSON.stringify(graph, null, 2));
+
+    const ctx = makeSessionContext(["r1"]);
+    updateEdgeWeightsFromRating(ctx, 6, graphPath);
+
+    const updated = JSON.parse(readFileSync(graphPath, "utf-8")) as Graph;
+    const coEdge = updated.edges.find(e => e.relationship === "co_occurred")!;
+    expect(coEdge.strength).toBeCloseTo(1.05, 2);
+  });
+
+  test("rating 4 applies -5% adjustment", () => {
+    const graphPath = join(tmpDir, "graph.json");
+    const graph = makeGraph(1.0);
+    writeFileSync(graphPath, JSON.stringify(graph, null, 2));
+
+    const ctx = makeSessionContext(["r1"]);
+    updateEdgeWeightsFromRating(ctx, 4, graphPath);
+
+    const updated = JSON.parse(readFileSync(graphPath, "utf-8")) as Graph;
+    const coEdge = updated.edges.find(e => e.relationship === "co_occurred")!;
+    expect(coEdge.strength).toBeCloseTo(0.95, 2);
+  });
+
+  test("rating 7 applies +10% adjustment", () => {
+    const graphPath = join(tmpDir, "graph.json");
+    const graph = makeGraph(1.0);
+    writeFileSync(graphPath, JSON.stringify(graph, null, 2));
+
+    const ctx = makeSessionContext(["r1"]);
+    updateEdgeWeightsFromRating(ctx, 7, graphPath);
+
+    const updated = JSON.parse(readFileSync(graphPath, "utf-8")) as Graph;
+    const coEdge = updated.edges.find(e => e.relationship === "co_occurred")!;
+    expect(coEdge.strength).toBeCloseTo(1.1, 2);
+  });
+
+  test("rating 8 applies +15% adjustment", () => {
+    const graphPath = join(tmpDir, "graph.json");
+    const graph = makeGraph(1.0);
+    writeFileSync(graphPath, JSON.stringify(graph, null, 2));
+
+    const ctx = makeSessionContext(["r1"]);
+    updateEdgeWeightsFromRating(ctx, 8, graphPath);
+
+    const updated = JSON.parse(readFileSync(graphPath, "utf-8")) as Graph;
+    const coEdge = updated.edges.find(e => e.relationship === "co_occurred")!;
+    expect(coEdge.strength).toBeCloseTo(1.15, 2);
+  });
+
   test("does not modify same_domain edges", () => {
     const graphPath = join(tmpDir, "graph.json");
     const graph = makeGraph(0.5);
@@ -126,5 +180,44 @@ describe("updateEdgeWeightsFromRating", () => {
     const updated = JSON.parse(readFileSync(graphPath, "utf-8")) as Graph;
     const domainEdge = updated.edges.find(e => e.relationship === "same_domain")!;
     expect(domainEdge.strength).toBe(0.5);
+  });
+});
+
+describe("proportionalAdjustment", () => {
+  test("rating 5 returns 0 (neutral)", () => {
+    expect(proportionalAdjustment(5)).toBe(0);
+  });
+
+  test("rating 6 returns +5%", () => {
+    expect(proportionalAdjustment(6)).toBe(0.05);
+  });
+
+  test("rating 4 returns -5%", () => {
+    expect(proportionalAdjustment(4)).toBe(-0.05);
+  });
+
+  test("rating 7 returns +10%", () => {
+    expect(proportionalAdjustment(7)).toBe(0.10);
+  });
+
+  test("rating 3 returns -10%", () => {
+    expect(proportionalAdjustment(3)).toBe(-0.10);
+  });
+
+  test("rating 8 returns +15%", () => {
+    expect(proportionalAdjustment(8)).toBe(0.15);
+  });
+
+  test("rating 2 returns -15%", () => {
+    expect(proportionalAdjustment(2)).toBe(-0.15);
+  });
+
+  test("rating 9+ caps at +15%", () => {
+    expect(proportionalAdjustment(9)).toBe(0.15);
+    expect(proportionalAdjustment(10)).toBe(0.15);
+  });
+
+  test("rating 1 caps at -15%", () => {
+    expect(proportionalAdjustment(1)).toBe(-0.15);
   });
 });

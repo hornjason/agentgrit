@@ -256,6 +256,26 @@ describe("daemon cleanup step", () => {
   });
 });
 
+describe("autoEvict config", () => {
+  test("autoEvict=false prevents eviction execution in weekly review", async () => {
+    const { runWeeklyReview } = await import("../../src/daemon/daemon");
+    const config = makeConfig({
+      rules: { globalBudget: 25, projectBudget: 25, autoPromote: false, autoEvict: false },
+    });
+    const result = await runWeeklyReview(config);
+    expect(result.evictionResult).toBeNull();
+  });
+
+  test("autoEvict=undefined prevents eviction execution in weekly review", async () => {
+    const { runWeeklyReview } = await import("../../src/daemon/daemon");
+    const config = makeConfig({
+      rules: { globalBudget: 25, projectBudget: 25, autoPromote: false },
+    });
+    const result = await runWeeklyReview(config);
+    expect(result.evictionResult).toBeNull();
+  });
+});
+
 describe("doctor dedup", () => {
   test("doctorCommand uses src/daemon/doctor runDoctor", async () => {
     const srcDoctor = await import("../../src/daemon/doctor");

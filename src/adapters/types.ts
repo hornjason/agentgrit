@@ -225,6 +225,7 @@ export interface AgentGritConfig {
     learnedBudget?: number;
     pendingExpiryDays?: number;
     autoPromote: boolean;
+    autoEvict?: boolean;
   };
   daemon: {
     interval: string;
@@ -249,6 +250,9 @@ export interface AgentGritConfig {
     frustrationWeight?: number;
     thumbsUpScore?: number;
     thumbsDownScore?: number;
+    decayHalfLife?: number;
+    qualityFloorThreshold?: number;
+    qualityFloorMinSessions?: number;
   };
   rrfWeights?: {
     bm25?: number;
