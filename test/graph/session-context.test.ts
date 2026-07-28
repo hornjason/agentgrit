@@ -5,6 +5,7 @@ import {
   writeSessionContext,
   readSessionContext,
   getContextRules,
+  computeRelevanceScore,
   type SessionContext,
 } from "../../src/graph/context";
 import { buildIndex } from "../../src/graph/bm25";
@@ -238,5 +239,90 @@ describe("readSessionContext", () => {
     mkdirSync(stateDir, { recursive: true });
     writeFileSync(join(stateDir, "session-context.json"), "not json{{{");
     expect(readSessionContext()).toBeNull();
+  });
+});
+
+describe("writeSessionContext with extra fields", () => {
+  test("persists toolCallPatterns and filePathsTouched", () => {
+    writeSessionContext(
+      [{ id: "rule-x", text: "text", tier: "graph" as any, tags: [], created: "", correlationScore: 0, sourceSignals: [], schemaVersion: 1 }],
+      ["deployment"],
+      "keyword",
+      0,
+      { toolCallPatterns: ["Bash", "Read"], filePathsTouched: ["src/index.ts"] },
+    );
+    const data = JSON.parse(
+      readFileSync(join(TMP_DIR, "state", "session-context.json"), "utf-8"),
+    ) as SessionContext;
+    expect(data.toolCallPatterns).toEqual(["Bash", "Read"]);
+    expect(data.filePathsTouched).toEqual(["src/index.ts"]);
+  });
+
+  test("omits extra fields when not provided", () => {
+    writeSessionContext(
+      [{ id: "rule-x", text: "text", tier: "graph" as any, tags: [], created: "", correlationScore: 0, sourceSignals: [], schemaVersion: 1 }],
+      ["deployment"],
+    );
+    const data = JSON.parse(
+      readFileSync(join(TMP_DIR, "state", "session-context.json"), "utf-8"),
+    ) as SessionContext;
+    expect(data.toolCallPatterns).toBeUndefined();
+    expect(data.filePathsTouched).toBeUndefined();
+  });
+});
+
+describe("computeRelevanceScore", () => {
+  function makeCtx(overrides: Partial<SessionContext> = {}): SessionContext {
+    return {
+      ruleIds: [],
+      domains: [],
+      domain_source: "keyword",
+      timestamp: new Date().toISOString(),
+      ttl: 86400000,
+      rulesInjectedCount: 0,
+      rulesInjectedKB: 0,
+      totalContextLines: 0,
+      ...overrides,
+    };
+  }
+
+  test("returns 0 for empty rule text", () => {
+    const ctx = makeCtx({ domains: ["deployment"], toolCallPatterns: ["Bash"] });
+    expect(computeRelevanceScore("", ctx)).toBe(0);
+  });
+
+  test("returns 0 for empty context", () => {
+    expect(computeRelevanceScore("verify deployment containers", makeCtx())).toBe(0);
+  });
+
+  test("returns high score for overlapping terms", () => {
+    const ctx = makeCtx({
+      domains: ["deployment"],
+      toolCallPatterns: ["Bash"],
+      filePathsTouched: ["src/deployment/container.ts"],
+    });
+    const score = computeRelevanceScore("verify deployment container rebuild", ctx);
+    expect(score).toBeGreaterThan(0);
+  });
+
+  test("returns 0 for completely unrelated text", () => {
+    const ctx = makeCtx({
+      domains: ["deployment"],
+      toolCallPatterns: ["Bash"],
+      filePathsTouched: ["src/server.ts"],
+    });
+    const score = computeRelevanceScore("quantum physics entanglement theory", ctx);
+    expect(score).toBe(0);
+  });
+
+  test("score is Jaccard similarity (0 to 1)", () => {
+    const ctx = makeCtx({
+      domains: ["verification"],
+      toolCallPatterns: ["Read", "Edit"],
+      filePathsTouched: ["src/verify.ts"],
+    });
+    const score = computeRelevanceScore("verify before asserting claims about code", ctx);
+    expect(score).toBeGreaterThanOrEqual(0);
+    expect(score).toBeLessThanOrEqual(1);
   });
 });

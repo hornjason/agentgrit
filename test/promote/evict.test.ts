@@ -213,6 +213,29 @@ describe("findEvictionCandidates", () => {
     });
     expect(customCandidates).toHaveLength(1);
   });
+
+  test("flags rules with noisePenalty >= 1.0", () => {
+    const stats: RuleStats[] = [
+      makeStats("noisy-rule", {
+        avgCorrelatedRating: 7.0,
+        injectionCount: 15,
+        noisePenalty: 1.2,
+      }),
+      makeStats("clean-rule", {
+        avgCorrelatedRating: 7.0,
+        injectionCount: 15,
+        noisePenalty: 0.5,
+      }),
+    ];
+    persistRuleStats(stats, STATE_DIR);
+
+    const candidates = findEvictionCandidates({ stateDir: STATE_DIR, ruleDomainsPath: RULE_DOMAINS });
+    const noisy = candidates.find(c => c.ruleId === "noisy-rule");
+    expect(noisy).toBeDefined();
+    expect(noisy!.reason).toContain("noise");
+    const clean = candidates.find(c => c.ruleId === "clean-rule");
+    expect(clean).toBeUndefined();
+  });
 });
 
 describe("findDuplicates", () => {

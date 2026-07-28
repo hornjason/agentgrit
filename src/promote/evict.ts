@@ -212,6 +212,21 @@ export function findEvictionCandidates(options?: {
       }
     }
 
+    if ((stats.noisePenalty ?? 0) >= 1.0 && !candidateIds.has(stats.ruleId)) {
+      const candidate: EvictionCandidate = {
+        ruleId: stats.ruleId,
+        avgCorrelatedRating: Math.round(stats.avgCorrelatedRating * 100) / 100,
+        sessionCount: stats.injectionCount,
+        reason: `noise: injected ${stats.injectionCount} times without relevance`,
+      };
+      if (isReviewedRule(stats.ruleId, ruleDomains)) {
+        candidate.requiresHumanConfirmation = true;
+      }
+      candidates.push(candidate);
+      candidateIds.add(stats.ruleId);
+      continue;
+    }
+
     if (stats.injectionCount < minSessions) continue;
     if (stats.avgCorrelatedRating >= threshold) continue;
 

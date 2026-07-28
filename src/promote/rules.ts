@@ -17,6 +17,7 @@ export interface RuleStats {
   highRatingActivations: number;
   lowRatingActivations: number;
   lastSeen: string;
+  noisePenalty?: number;
 }
 
 export function computeDecayedAverage(ratings: number[], halfLife: number = DEFAULT_DECAY_HALF_LIFE): number {
