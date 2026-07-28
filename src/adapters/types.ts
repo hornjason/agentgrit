@@ -249,6 +249,9 @@ export interface AgentGritConfig {
     frustrationWeight?: number;
     thumbsUpScore?: number;
     thumbsDownScore?: number;
+    decayHalfLife?: number;
+    qualityFloorThreshold?: number;
+    qualityFloorMinSessions?: number;
   };
   rrfWeights?: {
     bm25?: number;

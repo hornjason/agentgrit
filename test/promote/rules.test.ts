@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { trackRule, getEvictionCandidates, correlateRules } from "../../src/promote/rules";
+import { trackRule, getEvictionCandidates, correlateRules, computeDecayedAverage } from "../../src/promote/rules";
 import { Tier, SCHEMA_VERSION, type Rule } from "../../src/adapters/types";
 
 function makeRule(id: string, overrides: Partial<Rule> = {}): Rule {
@@ -29,10 +29,12 @@ describe("trackRule", () => {
     expect(updated.sessionRatings).toContain(7);
   });
 
-  test("computes average correlated rating", () => {
+  test("computes decay-weighted average correlated rating", () => {
     let rule = makeRule("r1", { sessionRatings: [6, 8] });
     rule = trackRule(rule, 10);
-    expect(rule.avgCorrelatedRating).toBe(8);
+    // Decay-weighted: newest ratings weigh more than older ones
+    expect(rule.avgCorrelatedRating).toBeGreaterThan(8);
+    expect(rule.avgCorrelatedRating).toBeLessThan(10);
   });
 
   test("caps session ratings at 20", () => {
@@ -118,6 +120,49 @@ describe("getEvictionCandidates", () => {
     ];
     const candidates = getEvictionCandidates(rules);
     expect(candidates[0].id).toBe("stale");
+  });
+});
+
+describe("computeDecayedAverage", () => {
+  test("returns 0 for empty ratings", () => {
+    expect(computeDecayedAverage([])).toBe(0);
+  });
+
+  test("single rating returns the rating itself", () => {
+    expect(computeDecayedAverage([7])).toBeCloseTo(7, 5);
+  });
+
+  test("equal ratings return that value regardless of decay", () => {
+    expect(computeDecayedAverage([5, 5, 5, 5, 5])).toBeCloseTo(5, 5);
+  });
+
+  test("recent ratings weighted more heavily", () => {
+    // [3, 3, 3, 3, 9] — the 9 is newest and should pull average above flat mean of 4.2
+    const flatAvg = (3 + 3 + 3 + 3 + 9) / 5;
+    const decayed = computeDecayedAverage([3, 3, 3, 3, 9]);
+    expect(decayed).toBeGreaterThan(flatAvg);
+  });
+
+  test("old ratings weighted less heavily", () => {
+    // [9, 3, 3, 3, 3] — the 9 is oldest and should pull average below flat mean of 4.2
+    const flatAvg = (9 + 3 + 3 + 3 + 3) / 5;
+    const decayed = computeDecayedAverage([9, 3, 3, 3, 3]);
+    expect(decayed).toBeLessThan(flatAvg);
+  });
+
+  test("custom halfLife affects decay rate", () => {
+    const ratings = [1, 1, 1, 1, 1, 1, 1, 1, 1, 10];
+    const shortHalf = computeDecayedAverage(ratings, 3);
+    const longHalf = computeDecayedAverage(ratings, 50);
+    // Shorter halfLife = more weight on recent = higher (since 10 is newest)
+    expect(shortHalf).toBeGreaterThan(longHalf);
+  });
+
+  test("very large halfLife approximates flat average", () => {
+    const ratings = [2, 4, 6, 8, 10];
+    const flatAvg = ratings.reduce((a, b) => a + b, 0) / ratings.length;
+    const decayed = computeDecayedAverage(ratings, 10000);
+    expect(decayed).toBeCloseTo(flatAvg, 1);
   });
 });
 
