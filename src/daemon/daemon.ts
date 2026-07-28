@@ -695,7 +695,7 @@ export async function runDaemonCycle(
 
   // 7d. Attribution — process rated sessions to update rule stats
   try {
-    const { loadRuleStats: loadStats, persistRuleStats: persistStats, computeDecayedAverage } = await import("../promote/rules");
+    const { processRatingAttribution } = await import("../capture/rating");
     const { stateDir: getState } = await import("../adapters/paths");
     const { join } = await import("path");
     const { existsSync: exists, readFileSync: readFile, writeFileSync: writeFile } = await import("fs");
@@ -710,7 +710,6 @@ export async function runDaemonCycle(
         try { cursor = JSON.parse(readFile(processedPath, "utf-8")).lastTimestamp ?? ""; } catch {}
       }
 
-      const statsMap = loadStats();
       let updated = 0;
 
       for (const line of lines) {
@@ -721,27 +720,13 @@ export async function runDaemonCycle(
           const ruleIds: string[] = entry.rule_ids ?? [];
           if (ruleIds.length === 0) continue;
 
-          for (const ruleId of ruleIds) {
-            const existing = statsMap.get(ruleId);
-            const ratings = [...(existing?.sessionRatings ?? []), entry.rating].slice(-20);
-            const avg = computeDecayedAverage(ratings);
-            statsMap.set(ruleId, {
-              ruleId,
-              injectionCount: (existing?.injectionCount ?? 0) + 1,
-              avgCorrelatedRating: avg,
-              sessionRatings: ratings,
-              highRatingActivations: (existing?.highRatingActivations ?? 0) + (entry.rating >= 7 ? 1 : 0),
-              lowRatingActivations: (existing?.lowRatingActivations ?? 0) + (entry.rating <= 4 ? 1 : 0),
-              lastSeen: entry.timestamp,
-            });
-          }
+          await processRatingAttribution(entry.rating, ruleIds);
           cursor = entry.timestamp;
           updated++;
         } catch {}
       }
 
       if (updated > 0) {
-        persistStats(Array.from(statsMap.values()));
         writeFile(processedPath, JSON.stringify({ lastTimestamp: cursor }), "utf-8");
       }
     }

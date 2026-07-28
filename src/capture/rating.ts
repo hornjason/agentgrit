@@ -493,6 +493,85 @@ export function scoreSessionObjective(
   };
 }
 
+// ── Shared attribution pipeline ──
+
+export async function processRatingAttribution(
+  rating: number,
+  ruleIds: string[],
+): Promise<void> {
+  if (ruleIds.length === 0) return;
+
+  const { trackAttributedRules, loadRuleStats, persistRuleStats, correlateRules } = await import("../promote/rules");
+  const statsMap = loadRuleStats();
+  const pseudoRules: import("../adapters/types").Rule[] = ruleIds.map((id) => {
+    const existing = statsMap.get(id);
+    return {
+      id,
+      text: "",
+      tier: "global" as import("../adapters/types").Tier,
+      tags: [],
+      created: "",
+      correlationScore: 0,
+      sourceSignals: [],
+      schemaVersion: 1,
+      injectionCount: existing?.injectionCount,
+      avgCorrelatedRating: existing?.avgCorrelatedRating,
+      sessionRatings: existing?.sessionRatings,
+      highRatingActivations: existing?.highRatingActivations,
+      lowRatingActivations: existing?.lowRatingActivations,
+      lastSeen: existing?.lastSeen,
+    };
+  });
+  const updated = trackAttributedRules(pseudoRules, ruleIds, rating);
+  const allStats = correlateRules(updated);
+  for (const stat of allStats) {
+    const prev = statsMap.get(stat.ruleId);
+    if (prev?.noisePenalty) stat.noisePenalty = prev.noisePenalty;
+    statsMap.set(stat.ruleId, stat);
+  }
+
+  // Noise penalty: score relevance of each rule against session context
+  try {
+    const { computeRelevanceScore } = await import("../graph/context");
+    const { readGraph } = await import("../graph/builder");
+    const fullContext = readSessionContext();
+    let effectiveContext = fullContext;
+    if (fullContext && !fullContext.toolCallPatterns?.length) {
+      const audit = readToolAuditForSession(fullContext.timestamp);
+      if (audit.toolNames.length > 0) {
+        effectiveContext = { ...fullContext, toolCallPatterns: audit.toolNames };
+      }
+    }
+    if (effectiveContext && (effectiveContext.toolCallPatterns?.length || effectiveContext.filePathsTouched?.length)) {
+      const graph = readGraph();
+      for (const ruleId of ruleIds) {
+        const node = graph.nodes[ruleId];
+        const ruleText = node?.description || node?.name || "";
+        if (!ruleText) continue;
+        const relevance = computeRelevanceScore(ruleText, effectiveContext);
+        if (relevance < 0.1) {
+          const stat = statsMap.get(ruleId);
+          if (stat) {
+            stat.noisePenalty = (stat.noisePenalty ?? 0) + 0.1;
+            statsMap.set(ruleId, stat);
+          }
+        }
+      }
+    }
+  } catch { /* noise penalty is non-critical */ }
+
+  // Edge weight attribution
+  try {
+    const { updateEdgeWeightsFromRating } = await import("../graph/attribution");
+    const ctx = readSessionContext();
+    if (ctx) {
+      updateEdgeWeightsFromRating(ctx, rating);
+    }
+  } catch { /* edge weights non-critical */ }
+
+  persistRuleStats(Array.from(statsMap.values()));
+}
+
 // ── Capture explicit rating (writes signal) ──
 
 export async function captureRating(
@@ -532,64 +611,7 @@ export async function captureRating(
 
   if (ruleIds && ruleIds.length > 0) {
     try {
-      const { trackAttributedRules, loadRuleStats, persistRuleStats, correlateRules } = await import("../promote/rules");
-      const statsMap = loadRuleStats();
-      const pseudoRules: import("../adapters/types").Rule[] = ruleIds.map((id) => {
-        const existing = statsMap.get(id);
-        return {
-          id,
-          text: "",
-          tier: "global" as import("../adapters/types").Tier,
-          tags: [],
-          created: "",
-          correlationScore: 0,
-          sourceSignals: [],
-          schemaVersion: 1,
-          injectionCount: existing?.injectionCount,
-          avgCorrelatedRating: existing?.avgCorrelatedRating,
-          sessionRatings: existing?.sessionRatings,
-          highRatingActivations: existing?.highRatingActivations,
-          lowRatingActivations: existing?.lowRatingActivations,
-          lastSeen: existing?.lastSeen,
-        };
-      });
-      const updated = trackAttributedRules(pseudoRules, ruleIds, composite);
-      const allStats = correlateRules(updated);
-      for (const stat of allStats) {
-        statsMap.set(stat.ruleId, stat);
-      }
-
-      // Noise penalty: score relevance of each rule against session context
-      try {
-        const { computeRelevanceScore } = await import("../graph/context");
-        const { readGraph } = await import("../graph/builder");
-        const fullContext = readSessionContext();
-        let effectiveContext = fullContext;
-        if (fullContext && !fullContext.toolCallPatterns?.length) {
-          const audit = readToolAuditForSession(fullContext.timestamp);
-          if (audit.toolNames.length > 0) {
-            effectiveContext = { ...fullContext, toolCallPatterns: audit.toolNames };
-          }
-        }
-        if (effectiveContext && (effectiveContext.toolCallPatterns?.length || effectiveContext.filePathsTouched?.length)) {
-          const graph = readGraph();
-          for (const ruleId of ruleIds) {
-            const node = graph.nodes[ruleId];
-            const ruleText = node?.description || node?.name || "";
-            if (!ruleText) continue;
-            const relevance = computeRelevanceScore(ruleText, effectiveContext);
-            if (relevance < 0.1) {
-              const stat = statsMap.get(ruleId);
-              if (stat) {
-                stat.noisePenalty = (stat.noisePenalty ?? 0) + 0.1;
-                statsMap.set(ruleId, stat);
-              }
-            }
-          }
-        }
-      } catch { /* noise penalty is non-critical */ }
-
-      persistRuleStats(Array.from(statsMap.values()));
+      await processRatingAttribution(composite, ruleIds);
     } catch { /* non-critical — don't fail the rating capture */ }
   }
 
