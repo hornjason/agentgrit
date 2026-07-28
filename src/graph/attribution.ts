@@ -3,6 +3,19 @@ import type { SessionContext } from "./context";
 import type { Graph } from "./types";
 import { readGraph, writeGraphFile } from "./builder";
 
+export function proportionalAdjustment(rating: number): number {
+  if (rating === 5) return 0;
+  if (rating === 6) return 0.05;
+  if (rating === 4) return -0.05;
+  if (rating === 7) return 0.10;
+  if (rating === 3) return -0.10;
+  if (rating === 8) return 0.15;
+  if (rating === 2) return -0.15;
+  if (rating >= 9) return 0.15;
+  if (rating <= 1) return -0.15;
+  return 0;
+}
+
 export function updateEdgeWeightsFromRating(
   sessionContext: SessionContext,
   rating: number,
@@ -22,18 +35,14 @@ export function updateEdgeWeightsFromRating(
     if (edge.relationship !== "co_occurred") continue;
     if (!ruleIdSet.has(edge.from) && !ruleIdSet.has(edge.to)) continue;
 
-    if (rating >= 7) {
-      const newStrength = Math.min(2.0, edge.strength * 1.1);
-      if (newStrength !== edge.strength) {
-        edge.strength = Math.round(newStrength * 10000) / 10000;
-        changed = true;
-      }
-    } else if (rating <= 3) {
-      const newStrength = Math.max(0.1, edge.strength * 0.9);
-      if (newStrength !== edge.strength) {
-        edge.strength = Math.round(newStrength * 10000) / 10000;
-        changed = true;
-      }
+    const adjustment = proportionalAdjustment(rating);
+    if (adjustment === 0) continue;
+
+    const factor = 1 + adjustment;
+    const newStrength = Math.min(2.0, Math.max(0.1, edge.strength * factor));
+    if (newStrength !== edge.strength) {
+      edge.strength = Math.round(newStrength * 10000) / 10000;
+      changed = true;
     }
   }
 
