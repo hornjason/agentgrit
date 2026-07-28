@@ -12,6 +12,8 @@ const MIN_SESSIONS = 5;
 const SIMILARITY_THRESHOLD = _cfg.thresholds?.similarityThreshold ?? 0.85;
 const MIN_TEXT_LENGTH = 20;
 const STALE_DAYS = 60;
+const QUALITY_FLOOR_THRESHOLD = _cfg.thresholds?.qualityFloorThreshold ?? 4.0;
+const QUALITY_FLOOR_MIN_SESSIONS = _cfg.thresholds?.qualityFloorMinSessions ?? 10;
 
 export interface EvictionCandidate {
   ruleId: string;
@@ -241,6 +243,25 @@ export function findEvictionCandidates(options?: {
       candidate.requiresHumanConfirmation = true;
     }
 
+    candidates.push(candidate);
+    candidateIds.add(stats.ruleId);
+  }
+
+  // Quality floor: independent check for rules with low avg after sufficient sessions
+  for (const stats of statsMap.values()) {
+    if (candidateIds.has(stats.ruleId)) continue;
+    if (stats.injectionCount < QUALITY_FLOOR_MIN_SESSIONS) continue;
+    if (stats.avgCorrelatedRating >= QUALITY_FLOOR_THRESHOLD) continue;
+
+    const candidate: EvictionCandidate = {
+      ruleId: stats.ruleId,
+      avgCorrelatedRating: Math.round(stats.avgCorrelatedRating * 100) / 100,
+      sessionCount: stats.injectionCount,
+      reason: `below-quality-floor: avgCorrelatedRating ${stats.avgCorrelatedRating.toFixed(2)} < ${QUALITY_FLOOR_THRESHOLD} after ${stats.injectionCount} sessions`,
+    };
+    if (isReviewedRule(stats.ruleId, ruleDomains)) {
+      candidate.requiresHumanConfirmation = true;
+    }
     candidates.push(candidate);
     candidateIds.add(stats.ruleId);
   }
