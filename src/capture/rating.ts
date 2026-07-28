@@ -11,7 +11,7 @@
  */
 
 import { randomUUID } from "crypto";
-import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { appendSignal } from "../adapters/jsonl";
 import { inference, type InferenceOptions, type InferenceResult } from "../adapters/inference";
@@ -26,6 +26,43 @@ const RATINGS_FILE = "ratings.jsonl";
 const RESPONSE_CACHE_FILE = "last-response.txt";
 const MAX_RESPONSE_PREVIEW = 500;
 const MAX_CACHE_SIZE = 2000;
+const DEFAULT_TOOL_AUDIT_PATH = join(
+  process.env.HOME || "~",
+  ".claude/MEMORY/LEARNING/SIGNALS/tool-audit.jsonl",
+);
+
+interface ToolAuditEntry {
+  ts: string;
+  tool: string;
+  ok: boolean;
+}
+
+export function readToolAuditForSession(
+  sessionTimestamp: string,
+  auditPath: string = DEFAULT_TOOL_AUDIT_PATH,
+): { toolNames: string[] } {
+  if (!existsSync(auditPath)) return { toolNames: [] };
+
+  try {
+    const raw = readFileSync(auditPath, "utf-8");
+    const sessionTs = new Date(sessionTimestamp).getTime();
+    const seen = new Set<string>();
+
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const entry = JSON.parse(line) as ToolAuditEntry;
+        if (new Date(entry.ts).getTime() >= sessionTs && entry.tool) {
+          seen.add(entry.tool);
+        }
+      } catch { /* skip malformed lines */ }
+    }
+
+    return { toolNames: Array.from(seen) };
+  } catch {
+    return { toolNames: [] };
+  }
+}
 
 // ── Dimension rating pattern ──
 
@@ -527,13 +564,20 @@ export async function captureRating(
         const { computeRelevanceScore } = await import("../graph/context");
         const { readGraph } = await import("../graph/builder");
         const fullContext = readSessionContext();
-        if (fullContext && (fullContext.toolCallPatterns?.length || fullContext.filePathsTouched?.length)) {
+        let effectiveContext = fullContext;
+        if (fullContext && !fullContext.toolCallPatterns?.length) {
+          const audit = readToolAuditForSession(fullContext.timestamp);
+          if (audit.toolNames.length > 0) {
+            effectiveContext = { ...fullContext, toolCallPatterns: audit.toolNames };
+          }
+        }
+        if (effectiveContext && (effectiveContext.toolCallPatterns?.length || effectiveContext.filePathsTouched?.length)) {
           const graph = readGraph();
           for (const ruleId of ruleIds) {
             const node = graph.nodes[ruleId];
             const ruleText = node?.description || node?.name || "";
             if (!ruleText) continue;
-            const relevance = computeRelevanceScore(ruleText, fullContext);
+            const relevance = computeRelevanceScore(ruleText, effectiveContext);
             if (relevance < 0.1) {
               const stat = statsMap.get(ruleId);
               if (stat) {
