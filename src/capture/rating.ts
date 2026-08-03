@@ -66,7 +66,7 @@ export function readToolAuditForSession(
 
 // ── Dimension rating pattern ──
 
-const RATE_PATTERN = /^\/rate\s+M:(\d+)\s+S:(\d+)\s+Q:(\d+)(?:\s+(.+))?$/i;
+const RATE_PATTERN = /^\/rate\s+M:(\d+(?:\.\d+)?)\s+S:(\d+(?:\.\d+)?)\s+Q:(\d+(?:\.\d+)?)(?:\s+(.+))?$/i;
 
 // ── Sentiment keyword sets ──
 
@@ -154,9 +154,9 @@ export function parseRating(message: string): RatingParseResult | null {
   const match = message.trim().match(RATE_PATTERN);
   if (!match) return null;
 
-  const mode = parseInt(match[1], 10);
-  const scope = parseInt(match[2], 10);
-  const quality = parseInt(match[3], 10);
+  const mode = Math.round(parseFloat(match[1]));
+  const scope = Math.round(parseFloat(match[2]));
+  const quality = Math.round(parseFloat(match[3]));
 
   if ([mode, scope, quality].some((v) => v < 1 || v > 10)) return null;
 
