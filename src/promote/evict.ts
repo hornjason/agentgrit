@@ -387,16 +387,197 @@ export function findDuplicates(
   return duplicates;
 }
 
+const CRITICAL_SECTION_RE = /^### Critical Rules\b/;
+const CRITICAL_RULE_LINE_RE = /^- \*\*(.+?)(?:\s*\(from\s.*?\))?:\*\*\s*(.*)/;
+
+/**
+ * Parse Critical Rules from CLAUDE.md and generate demotion candidates.
+ * Safety constraint SC-A1: ALL candidates have requiresHumanConfirmation: true.
+ */
+export function findCriticalRuleCandidates(
+  claudeMdPath: string,
+  options?: {
+    stateDir?: string;
+    threshold?: number;
+    minSessions?: number;
+  },
+): EvictionCandidate[] {
+  if (!existsSync(claudeMdPath)) return [];
+
+  const content = readFileSync(claudeMdPath, "utf-8");
+  const lines = content.split("\n");
+
+  // Find the Critical Rules section
+  let inSection = false;
+  const criticalRuleIds: string[] = [];
+
+  for (const line of lines) {
+    if (CRITICAL_SECTION_RE.test(line)) {
+      inSection = true;
+      continue;
+    }
+    if (inSection && (line.startsWith("## ") || line.startsWith("### ") || line.startsWith("---"))) {
+      break;
+    }
+    if (inSection) {
+      const match = line.match(CRITICAL_RULE_LINE_RE);
+      if (match) {
+        criticalRuleIds.push(match[1].trim());
+      }
+    }
+  }
+
+  if (criticalRuleIds.length === 0) return [];
+
+  // Cross-reference with rule-stats.json for quality scores
+  const threshold = options?.threshold ?? CORRELATION_THRESHOLD;
+  const minSessions = options?.minSessions ?? MIN_SESSIONS;
+  const statsMap = loadRuleStats(options?.stateDir);
+  const candidates: EvictionCandidate[] = [];
+  const now = Date.now();
+
+  for (const ruleId of criticalRuleIds) {
+    // Try direct match and normalized match against stats
+    let stats = statsMap.get(ruleId);
+    if (!stats) {
+      const normTarget = normalizeRuleId(ruleId);
+      for (const [statId, s] of statsMap) {
+        if (normalizeRuleId(statId) === normTarget) {
+          stats = s;
+          break;
+        }
+      }
+    }
+    if (!stats) continue;
+    if (stats.injectionCount < minSessions) continue;
+
+    let reason: string | null = null;
+
+    // Check staleness
+    if (stats.lastSeen) {
+      const daysSince = (now - new Date(stats.lastSeen).getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSince > STALE_DAYS) {
+        reason = `critical-stale: last seen ${Math.round(daysSince)} days ago`;
+      }
+    }
+
+    // Check low correlation
+    if (!reason && stats.avgCorrelatedRating < threshold) {
+      reason = `critical-low-correlation: avgCorrelatedRating ${stats.avgCorrelatedRating.toFixed(2)} < ${threshold}`;
+    }
+
+    // Check quality floor
+    if (!reason && stats.injectionCount >= QUALITY_FLOOR_MIN_SESSIONS && stats.avgCorrelatedRating < QUALITY_FLOOR_THRESHOLD) {
+      reason = `critical-below-quality-floor: avgCorrelatedRating ${stats.avgCorrelatedRating.toFixed(2)} < ${QUALITY_FLOOR_THRESHOLD}`;
+    }
+
+    if (!reason) continue;
+
+    // SC-A1: ALL Critical Rule candidates MUST have requiresHumanConfirmation: true
+    candidates.push({
+      ruleId,
+      avgCorrelatedRating: Math.round(stats.avgCorrelatedRating * 100) / 100,
+      sessionCount: stats.injectionCount,
+      reason,
+      requiresHumanConfirmation: true,
+    });
+  }
+
+  candidates.sort((a, b) => a.avgCorrelatedRating - b.avgCorrelatedRating);
+  return candidates;
+}
+
+/**
+ * Check if a rule ID exists in the Critical Rules section of a CLAUDE.md file.
+ * Returns the full rule line text if found, null otherwise.
+ */
+function findRuleInCriticalSection(ruleId: string, claudeMdPath: string): string | null {
+  if (!existsSync(claudeMdPath)) return null;
+
+  const content = readFileSync(claudeMdPath, "utf-8");
+  const lines = content.split("\n");
+  const normTarget = normalizeRuleId(ruleId);
+
+  let inSection = false;
+  for (const line of lines) {
+    if (CRITICAL_SECTION_RE.test(line)) {
+      inSection = true;
+      continue;
+    }
+    if (inSection && (line.startsWith("## ") || line.startsWith("### ") || line.startsWith("---"))) {
+      break;
+    }
+    if (inSection) {
+      const match = line.match(CRITICAL_RULE_LINE_RE);
+      if (match) {
+        const lineRuleId = match[1].trim();
+        if (lineRuleId === ruleId || normalizeRuleId(lineRuleId) === normTarget) {
+          return match[2].trim(); // Return the rule text
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Append a demoted Critical Rule to CLAUDE-LEARNED.md with a demotion comment.
+ */
+function appendDemotedRule(ruleId: string, ruleText: string, learnedPath: string): void {
+  const today = new Date().toISOString().split("T")[0];
+  const demotionLine = `- **${ruleId}:** ${ruleText} <!-- demoted from Critical on ${today} -->`;
+
+  if (!existsSync(learnedPath)) {
+    writeFileSync(learnedPath, `# Learned Rules\n\n### Learned Rules\n\n${demotionLine}\n`);
+    return;
+  }
+
+  const content = readFileSync(learnedPath, "utf-8");
+
+  // Don't add duplicate
+  if (content.includes(`- **${ruleId}:`)) return;
+
+  const lastRuleIdx = content.lastIndexOf("\n- **");
+  if (lastRuleIdx === -1) {
+    // No existing rules — append after section header
+    const sectionIdx = content.indexOf("### Learned Rules");
+    if (sectionIdx === -1) {
+      // No section header — just append
+      writeFileSync(learnedPath, content + "\n" + demotionLine + "\n");
+      return;
+    }
+    const afterSection = content.indexOf("\n", sectionIdx);
+    if (afterSection === -1) {
+      writeFileSync(learnedPath, content + "\n" + demotionLine + "\n");
+      return;
+    }
+    const newContent = content.slice(0, afterSection + 1) + demotionLine + "\n" + content.slice(afterSection + 1);
+    writeFileSync(learnedPath, newContent);
+    return;
+  }
+
+  const endOfLastRule = content.indexOf("\n", lastRuleIdx + 1);
+  if (endOfLastRule === -1) {
+    writeFileSync(learnedPath, content + "\n" + demotionLine + "\n");
+    return;
+  }
+
+  const newContent = content.slice(0, endOfLastRule + 1) + demotionLine + "\n" + content.slice(endOfLastRule + 1);
+  writeFileSync(learnedPath, newContent);
+}
+
 export async function evictRules(
   candidates: EvictionCandidate[],
   claudeLearnedPath: string,
   options?: {
     ruleDomainsPath?: string;
     dryRun?: boolean;
+    claudeMdPath?: string;
   },
 ): Promise<EvictionResult> {
   const result: EvictionResult = { evicted: [], skipped: [], errors: [] };
   const dryRun = options?.dryRun ?? false;
+  const claudeMdPath = options?.claudeMdPath;
 
   for (const candidate of candidates) {
     if (candidate.requiresHumanConfirmation) {
@@ -409,7 +590,25 @@ export async function evictRules(
       continue;
     }
 
-    // Remove from CLAUDE-LEARNED.md
+    // Check if this rule exists in CLAUDE.md Critical Rules section — demote path
+    if (claudeMdPath) {
+      const criticalRuleText = findRuleInCriticalSection(candidate.ruleId, claudeMdPath);
+      if (criticalRuleText !== null) {
+        try {
+          // Remove from CLAUDE.md
+          await removeRule(candidate.ruleId, claudeMdPath);
+          // Append to CLAUDE-LEARNED.md with demotion comment
+          appendDemotedRule(candidate.ruleId, criticalRuleText, claudeLearnedPath);
+          result.evicted.push(candidate.ruleId);
+          continue;
+        } catch (err) {
+          result.errors.push(`demotion failed for ${candidate.ruleId}: ${err instanceof Error ? err.message : String(err)}`);
+          continue;
+        }
+      }
+    }
+
+    // Remove from CLAUDE-LEARNED.md (existing behavior)
     try {
       if (existsSync(claudeLearnedPath)) {
         await removeRule(candidate.ruleId, claudeLearnedPath);

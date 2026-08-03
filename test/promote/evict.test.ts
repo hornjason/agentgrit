@@ -7,6 +7,7 @@ import {
   evictRules,
   enforceBudget,
   buildLearnedStatsLookup,
+  findCriticalRuleCandidates,
   type EvictionCandidate,
 } from "../../src/promote/evict";
 import { normalizeRuleId } from "../../src/promote/bridge";
@@ -813,5 +814,193 @@ describe("findEvictionCandidates with claudeLearnedPath", () => {
     const allIds = candidates.map(c => c.ruleId);
     const acEntries = allIds.filter(id => normalizeRuleId(id) === "ac-garbage-test");
     expect(acEntries.length).toBeLessThanOrEqual(2);
+  });
+});
+
+const CLAUDE_MD = join(TMP_DIR, "CLAUDE.md");
+
+function makeClaudeMd(criticalRules: string[]): string {
+  const rules = criticalRules.map(id => `- **${id}:** Critical rule text for ${id}`);
+  return [
+    "# PAI Config\n",
+    "## Universal Rules\n",
+    "Some universal rules here.\n",
+    "### Critical Rules (Zero Exceptions)\n",
+    rules.join("\n"),
+    "\n",
+    "## Other Section\n",
+    "Other content here.\n",
+  ].join("\n");
+}
+
+describe("findCriticalRuleCandidates", () => {
+  test("parses Critical Rules section and returns candidates with requiresHumanConfirmation", () => {
+    writeFileSync(CLAUDE_MD, makeClaudeMd(["rule-alpha", "rule-beta"]));
+
+    const statsMap = new Map<string, RuleStats>();
+    statsMap.set("rule-alpha", makeStats("rule-alpha", { avgCorrelatedRating: 2.0, injectionCount: 10 }));
+    statsMap.set("rule-beta", makeStats("rule-beta", { avgCorrelatedRating: 7.0, injectionCount: 10 }));
+    persistRuleStats(Array.from(statsMap.values()), STATE_DIR);
+
+    const candidates = findCriticalRuleCandidates(CLAUDE_MD, {
+      stateDir: STATE_DIR,
+    });
+
+    // All Critical Rule candidates MUST have requiresHumanConfirmation: true (SC-A1)
+    for (const c of candidates) {
+      expect(c.requiresHumanConfirmation).toBe(true);
+    }
+    // Should find at least rule-alpha (low rating)
+    expect(candidates.length).toBeGreaterThanOrEqual(1);
+    const alpha = candidates.find(c => c.ruleId === "rule-alpha");
+    expect(alpha).toBeDefined();
+  });
+
+  test("all candidates always have requiresHumanConfirmation true — safety constraint SC-A1", () => {
+    writeFileSync(CLAUDE_MD, makeClaudeMd(["auto-rule", "reviewed-rule"]));
+
+    const statsMap = new Map<string, RuleStats>();
+    statsMap.set("auto-rule", makeStats("auto-rule", { avgCorrelatedRating: 1.0, injectionCount: 15 }));
+    statsMap.set("reviewed-rule", makeStats("reviewed-rule", { avgCorrelatedRating: 1.5, injectionCount: 12 }));
+    persistRuleStats(Array.from(statsMap.values()), STATE_DIR);
+
+    const candidates = findCriticalRuleCandidates(CLAUDE_MD, {
+      stateDir: STATE_DIR,
+    });
+
+    expect(candidates.length).toBe(2);
+    // SC-A1: EVERY single Critical Rule candidate must have requiresHumanConfirmation = true
+    // regardless of whether it was reviewed or auto-classified
+    for (const c of candidates) {
+      expect(c.requiresHumanConfirmation).toBe(true);
+    }
+  });
+
+  test("returns empty array when CLAUDE.md has no Critical Rules section", () => {
+    writeFileSync(CLAUDE_MD, "# PAI Config\n\n## Universal Rules\n\nSome content.\n");
+
+    const candidates = findCriticalRuleCandidates(CLAUDE_MD, {
+      stateDir: STATE_DIR,
+    });
+    expect(candidates).toHaveLength(0);
+  });
+
+  test("returns empty array when CLAUDE.md does not exist", () => {
+    const candidates = findCriticalRuleCandidates(join(TMP_DIR, "nonexistent.md"), {
+      stateDir: STATE_DIR,
+    });
+    expect(candidates).toHaveLength(0);
+  });
+});
+
+describe("evictRules with claudeMdPath — Critical Rules demotion", () => {
+  test("demotes rule from CLAUDE.md Critical section to CLAUDE-LEARNED.md with comment", async () => {
+    // Set up CLAUDE.md with a Critical Rule
+    writeFileSync(CLAUDE_MD, makeClaudeMd(["demote-me", "keep-critical"]));
+    // Set up CLAUDE-LEARNED.md
+    writeFileSync(CLAUDE_LEARNED, makeClaudeLearned(["existing-learned"]));
+
+    // Candidate WITHOUT requiresHumanConfirmation → should be demoted
+    const candidates: EvictionCandidate[] = [
+      {
+        ruleId: "demote-me",
+        avgCorrelatedRating: 2.0,
+        sessionCount: 10,
+        reason: "low correlation",
+      },
+    ];
+
+    const result = await evictRules(candidates, CLAUDE_LEARNED, {
+      claudeMdPath: CLAUDE_MD,
+      ruleDomainsPath: RULE_DOMAINS,
+    });
+    expect(result.evicted).toContain("demote-me");
+
+    // Verify removed from CLAUDE.md
+    const claudeMdContent = readFileSync(CLAUDE_MD, "utf-8");
+    expect(claudeMdContent).not.toContain("demote-me");
+    expect(claudeMdContent).toContain("keep-critical");
+
+    // Verify appended to CLAUDE-LEARNED.md with demotion comment
+    const learnedContent = readFileSync(CLAUDE_LEARNED, "utf-8");
+    expect(learnedContent).toContain("demote-me");
+    expect(learnedContent).toContain("demoted from Critical");
+    expect(learnedContent).toContain("existing-learned");
+  });
+
+  test("skips demotion when requiresHumanConfirmation is true", async () => {
+    writeFileSync(CLAUDE_MD, makeClaudeMd(["protected-rule"]));
+    writeFileSync(CLAUDE_LEARNED, makeClaudeLearned(["existing-learned"]));
+
+    const candidates: EvictionCandidate[] = [
+      {
+        ruleId: "protected-rule",
+        avgCorrelatedRating: 2.0,
+        sessionCount: 10,
+        reason: "low correlation",
+        requiresHumanConfirmation: true,
+      },
+    ];
+
+    const result = await evictRules(candidates, CLAUDE_LEARNED, {
+      claudeMdPath: CLAUDE_MD,
+      ruleDomainsPath: RULE_DOMAINS,
+    });
+    expect(result.skipped).toContain("protected-rule");
+    expect(result.evicted).toHaveLength(0);
+
+    // Verify CLAUDE.md unchanged
+    const claudeMdContent = readFileSync(CLAUDE_MD, "utf-8");
+    expect(claudeMdContent).toContain("protected-rule");
+
+    // Verify CLAUDE-LEARNED.md unchanged
+    const learnedContent = readFileSync(CLAUDE_LEARNED, "utf-8");
+    expect(learnedContent).not.toContain("protected-rule");
+  });
+
+  test("demotion only affects rules actually in CLAUDE.md Critical section", async () => {
+    writeFileSync(CLAUDE_MD, makeClaudeMd(["critical-rule"]));
+    writeFileSync(CLAUDE_LEARNED, makeClaudeLearned(["learned-only-rule"]));
+
+    // Candidate that exists in CLAUDE-LEARNED but NOT in CLAUDE.md Critical
+    const candidates: EvictionCandidate[] = [
+      {
+        ruleId: "learned-only-rule",
+        avgCorrelatedRating: 2.0,
+        sessionCount: 10,
+        reason: "low correlation",
+      },
+    ];
+
+    const result = await evictRules(candidates, CLAUDE_LEARNED, {
+      claudeMdPath: CLAUDE_MD,
+      ruleDomainsPath: RULE_DOMAINS,
+    });
+
+    // Should still evict from CLAUDE-LEARNED.md (existing behavior)
+    expect(result.evicted).toContain("learned-only-rule");
+    const learnedContent = readFileSync(CLAUDE_LEARNED, "utf-8");
+    expect(learnedContent).not.toContain("learned-only-rule");
+
+    // CLAUDE.md should be untouched (rule wasn't there)
+    const claudeMdContent = readFileSync(CLAUDE_MD, "utf-8");
+    expect(claudeMdContent).toContain("critical-rule");
+  });
+
+  test("without claudeMdPath, existing eviction behavior is unchanged", async () => {
+    writeFileSync(CLAUDE_LEARNED, makeClaudeLearned(["evict-me"]));
+
+    const candidates: EvictionCandidate[] = [
+      { ruleId: "evict-me", avgCorrelatedRating: 2.0, sessionCount: 10, reason: "low" },
+    ];
+
+    // No claudeMdPath — existing behavior
+    const result = await evictRules(candidates, CLAUDE_LEARNED, {
+      ruleDomainsPath: RULE_DOMAINS,
+    });
+    expect(result.evicted).toContain("evict-me");
+
+    const content = readFileSync(CLAUDE_LEARNED, "utf-8");
+    expect(content).not.toContain("evict-me");
   });
 });

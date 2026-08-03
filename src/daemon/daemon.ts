@@ -857,7 +857,10 @@ export async function runWeeklyReview(
     }
 
     if (allToEvict.length > 0 && exists(learnedPath) && config.rules.autoEvict) {
-      result.evictionResult = await evictRules(allToEvict, learnedPath);
+      const claudeMdPath = join(home, ".claude", "CLAUDE.md");
+      result.evictionResult = await evictRules(allToEvict, learnedPath, {
+        claudeMdPath: exists(claudeMdPath) ? claudeMdPath : undefined,
+      });
     }
   } catch (err) {
     result.errors.push(`eviction: ${err instanceof Error ? err.message : String(err)}`);
