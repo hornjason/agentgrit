@@ -1,4 +1,84 @@
+---
+doc-type: reference
+status: active
+owner: jason
+updated: 2026-08-05
+---
+
 # Changelog
+
+## [0.1.7] — 2026-08-05
+
+Version bump + hardcoded VERSION string fix.
+
+### Fixes
+- `bin/agentgrit.ts` VERSION constant now matches package.json (was stuck at 0.1.4)
+
+## [0.1.6] — 2026-08-05
+
+Precision rebalance — retuned hybrid retrieval weights and wired vector search into the context injection pipeline. Closes #173.
+
+### Breaking Changes
+- RRF weight defaults changed from `{bm25: 1, graph: 1.5, vector: 1}` → `{bm25: 2, graph: 0.5, vector: 1}`. If you relied on the old defaults without config overrides, retrieval ranking will shift toward BM25 keyword relevance. Set `rrfWeights` in `~/.agentgrit/config.json` to restore old behavior.
+
+### Improvements
+- **Vector search wired into getContextRules()** — accepts `vectorCachePath` + `embeddingProvider` params, computes query embeddings via all-MiniLM-L6-v2, feeds ranked vector results into RRF merge (#173)
+- **Weight optimizer threading fix** — `optimizeRRFWeights()` now passes candidate weights to `getContextRules()` instead of always using defaults
+- **Grid-searched optimal weights** — 100 weight combinations evaluated against 34-session gold set; graph@1.5 was the worst setting, BM25 should dominate
+
+### Stats
+- 1367 tests across 112 files
+
+## [0.1.5] — 2026-07-28
+
+Major release — E2E testing infrastructure, retrieval quality improvements, rule lifecycle hardening, and 7 new CLI commands.
+
+### New Features
+- **Migration pipeline dashboard** — `agentgrit dashboard` generates HTML dashboard showing pipeline health (#167)
+- **Living showcase dashboard** — `agentgrit showcase` generates a system health dashboard (#156)
+- **Docker-based E2E test suite** — containerized end-to-end tests for the full capture→promote pipeline (#155)
+- **Backfill learned rules** — `agentgrit backfill-learned` imports CLAUDE-LEARNED.md rule files (#154)
+- **Claude Code hook generator** — `agentgrit init --claude-code` generates hook templates for settings.json integration (#125)
+- **Rule effectiveness tracking** — before/after correction frequency per rule (#127)
+- **Hybrid pattern detection** — confidence-gated pattern mining with BM25 agreement (#139)
+
+### Retrieval Quality
+- **Per-domain diversity cap** — max 3 rules per domain per source in retrieval results (#144)
+- **Domain overlap scoring** — wired into getContextRules() via hybridRetrieve (#133)
+- **Auto-generated BM25 patterns** — replace hardcoded keyword regexes with data-driven patterns (#132, #138)
+- **Expanded domain taxonomy** — added scoring and pipeline domains
+- **RRF weight tuning** — balance weights + include cluster connected nodes (#136)
+- **Recall measurement pipeline** — bootstrap + live retrieval evaluation
+- **Detect delivery/delegation domains** — detectDomains() expanded for ship queries (#133)
+
+### Rule Lifecycle
+- **Critical Rules demotion path** — eviction system can demote critical rules (#165)
+- **Shared attribution pipeline** — extracted and wired into daemon (#161, #162)
+- **Rule noise elimination** — close 5 feedback loop gaps (#157, #158)
+- **Sync rule artifacts on promotion** — .md, rule-domains.json, CLAUDE-LEARNED.md all updated atomically (#140)
+- **Auto-generate rule-domains.json** — created on first daemon run (#137)
+- **Sync rule-domains.json during graph build** — keeps graph and domain map consistent (#143)
+- **Auto-prune stale MEMORY.md entries** — wired as daemon action (#134)
+- **Normalize rule IDs for eviction** — fixes matching edge cases (#148)
+- **Persist rule stats** — wire eviction pipeline with durable state (#147)
+- **Clean up orphaned promotions** — removed 31 orphans (#141)
+
+### Fixes
+- Float score parsing in `parseRating` — accepts decimal ratings (#166)
+- Resolve rule IDs to human names in showcase
+- Filter orphaned `traj-*` entries from trajectories
+- Graph-bridge matching + legacy ID cleanup in rule-stats (#153)
+- writeRuleFile targets memoryDir not signalDir/../rules
+- Doctor checks memoryDir + rulesBase for orphaned nodes
+- E2E script reliability (removed set -e, wired hooks manually, fixed pipefail crash)
+
+### Testing
+- End-to-end lifecycle tests for rule promotion and eviction (#145)
+- `--force` flag for auto-domains command (#142)
+- Full spec audit — domain coverage 98%
+
+### Stats
+- 1306 tests across 103 files (up from 665)
 
 ## [0.1.4] — 2026-07-05
 

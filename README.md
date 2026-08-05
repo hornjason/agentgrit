@@ -2,19 +2,19 @@
 doc-type: reference
 status: active
 owner: jason
-updated: 2026-07-14
+updated: 2026-08-05
 ---
 
 # AgentGrit
 
 > Self-learning engine that makes AI agents smarter over time.
 
-[![Tests](https://img.shields.io/badge/tests-1117%20pass-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-1367%20pass-brightgreen)]()
 [![npm](https://img.shields.io/npm/v/@agentgrit/core)](https://www.npmjs.com/package/@agentgrit/core)
 
 AgentGrit closes a feedback loop around AI agents: it captures signals from your sessions (ratings, corrections, sentiment), detects recurring failure patterns, promotes learnings into durable rules, and builds a knowledge graph for contextual recall. Every session makes the next one smarter.
 
-**Key metrics:** 1117 tests, 378 graph nodes, 91% domain coverage, precision@5 = 0.76, hybrid BM25+vector+graph retrieval.
+**Key metrics:** 1367 tests, 404 graph nodes, 16 domains, 98% domain coverage, hybrid BM25+vector+graph retrieval with config-driven RRF weights.
 
 **Design principles:**
 1. Nothing hardcoded, everything lifecycled — all thresholds, weights, and domain classification are config-driven or graph-derived
@@ -499,22 +499,25 @@ The test suite uses fixture JSONL files with known patterns that must produce sp
 
 ## Roadmap
 
-### v0.1.4 (current)
+### v0.1.7 (current)
 
-- **1117 tests** across 97 files, 0 failures
+- **1367 tests** across 112 files
 - All 7 subsystems: capture, evaluate, detect, promote, optimize, graph, daemon
-- CLI with 13 commands + `init --import` for machine migration
+- CLI with 20+ commands + `init --import` for machine migration
 - Three adoption speeds (quick/standard/full)
 - LLM judge with Gemini, Claude, and OpenAI support
 - **3-way hybrid retrieval:** BM25 (2x) + vector similarity (1x) + graph expansion (0.5x) via RRF merge
-- **BM25 neighbor domain propagation** — 91% domain coverage (replaces keyword-only classification)
+- **Grid-searched RRF weights** — 100 combos evaluated against gold set, optimal written to config
+- **Vector search in context injection** — all-MiniLM-L6-v2 query embeddings fed into RRF merge
+- **BM25 neighbor domain propagation** — 98% domain coverage across 16 domains
 - **Config-driven thresholds** — all weights, budgets, and thresholds in config.json, not hardcoded
-- **Weight optimizer** — hill-climb tunes RRF weights against gold set, writes to config
-- **Learned rule BM25 filtering** — top 10 of 50+ rules per session, not bulk-loaded
-- **Rule budget enforcement** — learned rules capped at 50, pending rules expire after 30 days
-- **Auto-review** — daemon step validates auto-classified domains against BM25-inferred, promotes to reviewed
-- **7-day cooling period** — proposed rules wait 7 days before promotion (configurable)
-- **LLM sentiment scoring** — inference-based sentiment with keyword fallback
+- **Per-domain diversity cap** — max 3 rules per domain per source in retrieval
+- **Rule effectiveness tracking** — before/after correction frequency per rule
+- **Critical Rules demotion path** — eviction system can demote even critical rules
+- **Docker E2E test suite** — containerized end-to-end pipeline tests
+- **Migration pipeline dashboard** — `agentgrit dashboard` for pipeline health
+- **Living showcase dashboard** — `agentgrit showcase` for system health
+- **Hybrid pattern detection** — confidence-gated with BM25 agreement
 - Hill-climbing optimizer for prompts, skills, and retrieval weights
 - LaunchAgent (macOS) and systemd (Linux) scheduler
 - Atomic CLAUDE.md writes with promotion ledger and undo (`--yes` flag for non-interactive)
@@ -522,10 +525,10 @@ The test suite uses fixture JSONL files with known patterns that must produce sp
 
 ### Planned
 
-- Replace Haiku implicit sentiment with correction-weighted objective scoring (#120)
-- Improve retrieval relevancy — filter noise nodes, seed underrepresented domains (#121)
+- CI/CD pipeline — automated changelog, release notes, npm publish on tag
 - Migration cutover — parallel run, archive PAI hooks, verify (#75)
-- `agentgrit init --bootstrap` — seed from existing Claude Code session transcripts
+- Gold set rebuild with full task context for accurate eval
+- VERSION constant should read from package.json
 - Rubric discovery from correction history
 - Example rubrics (sales, coding, support)
 - Voyage AI reranking in hybrid retrieval
