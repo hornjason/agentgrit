@@ -16,8 +16,8 @@ export interface RRFWeights {
 
 const _rrfCfg = loadConfig().rrfWeights;
 export const RRF_WEIGHTS: RRFWeights = {
-  bm25: _rrfCfg?.bm25 ?? 1,
-  graph: _rrfCfg?.graph ?? 1.5,
+  bm25: _rrfCfg?.bm25 ?? 2,
+  graph: _rrfCfg?.graph ?? 0.5,
   vector: _rrfCfg?.vector ?? 1,
 };
 
@@ -98,6 +98,8 @@ export function hybridRetrieve(
   graph: Graph,
   index: BM25Index,
   limit: number = 15,
+  vectorList?: Array<{ id: string; rank: number }>,
+  weights?: RRFWeights,
 ): RetrievalResult[] {
   // Step 1: BM25 keyword search (top 50)
   const bm25Results = searchIndex(index, query, 50);
@@ -121,10 +123,10 @@ export function hybridRetrieve(
     }
   }
 
-  if (bm25List.length === 0 && graphList.length === 0) return [];
+  if (bm25List.length === 0 && graphList.length === 0 && !vectorList?.length) return [];
 
-  // Step 3: RRF merge (uses global RRF_WEIGHTS)
-  const merged = rrfMerge(bm25List, graphList, undefined, RRF_WEIGHTS);
+  // Step 3: RRF merge
+  const merged = rrfMerge(bm25List, graphList, vectorList, weights ?? RRF_WEIGHTS);
 
   // Sort by RRF score descending
   const sorted = Array.from(merged.values())

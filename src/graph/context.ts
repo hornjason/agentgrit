@@ -12,7 +12,8 @@ import { Tier, type Rule, type EmbeddingProvider } from "../adapters/types";
 import { loadConfig } from "../adapters/paths";
 import { searchIndex, tokenize } from "./bm25";
 import { queryTrajectoriesSync } from "../detect/trajectories";
-import { hybridRetrieve } from "./retrieval";
+import { hybridRetrieve, type RRFWeights } from "./retrieval";
+import { loadVectorCache, rankByVectorSimilarity } from "./embeddings";
 import { loadPatterns, loadHybridPatterns } from "./generate-patterns";
 import type { DomainPattern } from "./generate-patterns";
 
@@ -120,14 +121,27 @@ export async function getContextRules(
   queryText?: string,
   vectorCachePath?: string,
   embeddingProvider?: EmbeddingProvider,
+  rrfWeights?: RRFWeights,
 ): Promise<Rule[]> {
   const domains = currentDomains.length > 0 ? currentDomains : DEFAULT_DOMAINS;
 
-  // 1. Hybrid retrieval — BM25 + domain-scored graph via RRF
+  // 1. Hybrid retrieval — BM25 + vector + domain-scored graph via RRF
   const fetchLimit = Math.max(limit * 3, 30);
   const searchText = queryText || domains.join(" ");
 
-  let candidates = hybridRetrieve(searchText, domains, graph, index, fetchLimit);
+  let vectorList: Array<{ id: string; rank: number }> | undefined;
+  if (vectorCachePath && embeddingProvider) {
+    const cache = loadVectorCache(vectorCachePath);
+    if (cache && cache.size > 0) {
+      const [queryVec] = await embeddingProvider.embed([searchText]);
+      if (queryVec) {
+        const vectorResults = rankByVectorSimilarity(queryVec, cache, fetchLimit);
+        vectorList = vectorResults.map((r, i) => ({ id: r.id, rank: i + 1 }));
+      }
+    }
+  }
+
+  let candidates = hybridRetrieve(searchText, domains, graph, index, fetchLimit, vectorList, rrfWeights);
 
   // Fallback: if hybrid returns nothing (no domain matches + no BM25 hits), use BM25-only
   if (candidates.length === 0) {

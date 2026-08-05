@@ -1,6 +1,6 @@
 {
   "name": "@agentgrit/core",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "type": "module",
   "description": "Self-learning engine that makes AI agents smarter over time",
   "bin": {
