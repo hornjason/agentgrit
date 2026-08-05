@@ -2,14 +2,16 @@
 doc-type: spec
 status: active
 owner: jason
-updated: 2026-07-08
+updated: 2026-08-05
 ---
 
 # AgentGrit System Spec
 
-**Version:** 1.1 (2026-07-14)
+**Version:** 1.3 (2026-08-05)
 **Package:** @agentgrit/core@0.1.4 on npm
-**Tests:** 1194 pass, 0 fail across 103 files
+**Tests:** 1361 pass, 15 fail (112 files)
+**Graph:** 403 nodes, 946 edges, 16 domains
+**Metrics:** precision@5: 0.541, recall@5: 0.736, recall@15: 0.939
 
 ## Purpose
 
@@ -81,8 +83,8 @@ Session signals (ratings, corrections, failures)
 At session start, inject only the rules relevant to the current task.
 
 **Current pipeline (hybrid BM25+vector, shipped 2026-07-13):**
-1. **BM25 primary** — search task text against 383 memory files, retrieve 3x candidates
-2. **Vector similarity** — compute query embedding (all-MiniLM-L6-v2 via transformers.js), cosine against 382 pre-computed node vectors
+1. **BM25 primary** — search task text against 403 memory files, retrieve 3x candidates
+2. **Vector similarity** — compute query embedding (all-MiniLM-L6-v2 via transformers.js), cosine against 403 pre-computed node vectors
 3. **Graph expansion** — 1-hop neighbors via co_occurred + reinforces edges
 4. **3-way RRF merge** — BM25 (2x weight) + vector (0.5x) + graph (1x) via `rrfMerge()` in retrieval.ts
 5. **Node-type weighting** — feedback/steering 1.0x, success 0.8x, reference 0.5x, project 0.3x
@@ -90,7 +92,7 @@ At session start, inject only the rules relevant to the current task.
 7. **Top-K selection** — return top 10-15 rules
 8. **Attribution feedback** — rated sessions update co-occurrence edge weights automatically
 
-**Performance (measured 2026-07-13):** precision@5 = 0.76, MRR = 0.96, recall@5 = 0.37, recall@15 = 0.61.
+**Performance (measured 2026-08-05):** precision@5 = 0.541, recall@5 = 0.736, recall@15 = 0.939.
 
 **Architecture decisions:**
 - ADR-001 (`docs/adr/ADR-001-correlation-driven-rule-injection.md`) — correlation-driven injection
@@ -136,16 +138,16 @@ At session start, inject only the rules relevant to the current task.
 
 | Metric | Current (2026-07-14) | Target | Status |
 |--------|---------------------|--------|--------|
-| recall@15 (primary) | 0.61 | ≥ 0.55 | ✅ MET |
-| recall@5 (secondary) | 0.37 | — | Secondary; top-5 is tight with 15+ relevant rules |
-| precision@5 | 0.76 | ≥ 0.70 | ✅ MET |
+| recall@15 (primary) | 0.939 | ≥ 0.55 | ✅ MET |
+| recall@5 (secondary) | 0.736 | — | Secondary; top-5 is tight with 15+ relevant rules |
+| precision@5 | 0.541 | ≥ 0.70 | ⚠️ BELOW TARGET |
 | MRR | 0.96 | ≥ 0.90 | ✅ MET |
 | Universal rules | 11 | ≤ 12 | ✅ MET |
 | Session rule load | ~15 rules | ≤ 20 | ✅ MET |
 
 Measured by `RecallEvaluator` over 60-session gold set (34 real + 26 synthetic). `session-context.json` records which rules were loaded and which domain detection method was used (`domain_source: "metadata" | "keyword" | "bm25" | "propagation" | "ai"`).
 
-**Precision gap: CLOSED.** Achieved 0.76 via hybrid BM25+vector+graph retrieval + node-type weighting + hub-dampening. **Recall target: REVISED (#126)** — recall@15 >= 0.55 is the primary recall metric (currently 0.61). recall@5 retained as secondary diagnostic.
+**Precision gap: REOPENED.** Previously achieved 0.76 via hybrid retrieval, but recall optimizations broadened retrieval — precision dropped to 0.541 (below 0.70 target). Needs rebalancing. **Recall target: MET (#126)** — recall@15 = 0.939 (target ≥ 0.55). recall@5 = 0.736 as secondary diagnostic.
 
 ### 6. Rule Lifecycle Management
 
@@ -188,22 +190,24 @@ Measured by `RecallEvaluator` over 60-session gold set (34 real + 26 synthetic).
 
 ## Integration: AgentGrit ↔ Claude Code
 
-AgentGrit is a library. Claude Code (via PAI hooks) is the consumer.
+AgentGrit ships with built-in Claude Code integration via `agentgrit init --claude-code`.
 
 ```
 Claude Code session
-    → PAI hook (GraphContext.hook.ts) calls AgentGrit APIs
-    → AgentGrit returns domain-filtered rules
-    → PAI writes GRAPH-CONTEXT.md files
-    → Agent briefs reference per-role context files
+    → AgentGrit hooks fire automatically
+    → SessionStart: detect domains, inject relevant rules
+    → During session: capture signals (corrections, tool usage)
+    → SessionEnd: score session, extract patterns, update attribution
 ```
 
-**PAI owns:** Hooks, agent roster (Marcus/Quinn/Rook), personality (Rayford), ship workflow gates, CLAUDE.md
-**AgentGrit owns:** Learning loop engine, graph, BM25, rule management, daemon, CLI
+**Hook generation:** `generateHookConfig()` in `src/adapters/claude-code.ts` produces hook registrations written to `~/.claude/settings.json`.
 
-AgentGrit is imported at runtime via dynamic `import()`. If unavailable, PAI falls back to local graph queries. AgentGrit availability never blocks session start.
+**What AgentGrit provides:** Learning loop engine, knowledge graph, hybrid retrieval, rule management, daemon, CLI, hook generation.
+**What Claude Code provides:** Session runtime, tool execution, conversation context.
 
-## Current State (2026-07-13)
+AgentGrit hooks are self-contained — they import from `@agentgrit/core` and call exported APIs directly. No external framework required. If AgentGrit is unavailable at session start, Claude Code runs normally without learning loop features.
+
+## Current State (2026-08-05)
 
 | Area | Status | Reference |
 |------|--------|-----------|
@@ -246,12 +250,12 @@ AgentGrit is imported at runtime via dynamic `import()`. If unavailable, PAI fal
 ## Success Metrics
 
 The system succeeds when:
-1. **Recall@15 (primary):** ≥55% target — **MET (0.61)** ✅ With 15+ relevant rules per task, top-5 can only capture a fraction (0.37). recall@15 is the primary recall metric; recall@5 retained as secondary diagnostic.
-2. **Precision@5:** ≥70% — **MET (0.76)** ✅ Hybrid BM25+vector+graph retrieval + node-type weighting + hub-dampening.
+1. **Recall@15 (primary):** ≥55% target — **MET (0.939)** ✅ Significant improvement from hybrid retrieval tuning. recall@5 = 0.736 as secondary diagnostic.
+2. **Precision@5:** ≥70% — **BELOW TARGET (0.541)** ⚠️ Recall gains came at precision cost. Retrieval is broader but less focused — needs rebalancing.
 3. **MRR:** ≥0.90 — **MET (0.96)** ✅ First relevant rule is typically rank 1 or 2.
 4. **Rule budget:** ≤12 universal + ≤20 domain-filtered per session — **MET (11 + ~15)**
 5. **Zero repeat corrections:** same mistake never rated ≤3 twice — **PARTIALLY MET (#127).** 67/96 promoted rules effective (70% reduced source pattern frequency). 29 rules ineffective — need text refinement or more aggressive injection.
 6. **Self-maintaining:** rules added, classified, correlated, and evicted without manual intervention — **MET (eviction #85, attribution #99, LLM classify, domain review #115)**
 7. **Self-improving:** rated sessions automatically improve retrieval quality — **MET (attribution feedback → edge weights → better retrieval #99, correction-weighted scoring #120)**
 
-**Measurement note (2026-07-13):** Precision measured on 60-session gold set (34 real + 26 synthetic, all audited for under-labeling). Hybrid retrieval: BM25 (2x weight) + vector similarity (0.5x) + graph expansion (1x). Node-type weighting: feedback/steering 1.0x, success 0.8x, reference 0.5x, project 0.3x. 382 pre-computed vectors via all-MiniLM-L6-v2.
+**Measurement note (2026-08-05):** Measured on 60-session gold set (34 real + 26 synthetic, all audited for under-labeling). Hybrid retrieval: BM25 (2x weight) + vector similarity (0.5x) + graph expansion (1x). Node-type weighting: feedback/steering 1.0x, success 0.8x, reference 0.5x, project 0.3x. 403 pre-computed vectors via all-MiniLM-L6-v2.

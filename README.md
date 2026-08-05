@@ -2,19 +2,19 @@
 doc-type: reference
 status: active
 owner: jason
-updated: 2026-07-14
+updated: 2026-08-05
 ---
 
 # AgentGrit
 
 > Self-learning engine that makes AI agents smarter over time.
 
-[![Tests](https://img.shields.io/badge/tests-1117%20pass-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-1361%20pass-brightgreen)]()
 [![npm](https://img.shields.io/npm/v/@agentgrit/core)](https://www.npmjs.com/package/@agentgrit/core)
 
 AgentGrit closes a feedback loop around AI agents: it captures signals from your sessions (ratings, corrections, sentiment), detects recurring failure patterns, promotes learnings into durable rules, and builds a knowledge graph for contextual recall. Every session makes the next one smarter.
 
-**Key metrics:** 1117 tests, 378 graph nodes, 91% domain coverage, precision@5 = 0.76, hybrid BM25+vector+graph retrieval.
+**Key metrics:** 1361 tests, 403 graph nodes, 16 domains, precision@5 = 0.541, recall@15 = 0.939, hybrid BM25+vector+graph retrieval.
 
 **Design principles:**
 1. Nothing hardcoded, everything lifecycled — all thresholds, weights, and domain classification are config-driven or graph-derived
@@ -177,7 +177,7 @@ The knowledge graph stores rules as nodes connected by domain relationships. At 
 
 **Session-start context injection** (`context.ts`): Detects domains from the current task text. Queries the graph and BM25 index, merges results via 3-way RRF, and returns up to 10 rules for injection. Also BM25-filters CLAUDE-LEARNED.md rules (top 10 of 50+) for task-specific learned rule injection.
 
-**Weight optimization** (`weight-optimizer.ts`): Hill-climb optimizer tunes RRF weights against the gold set. Perturbs one weight at a time by ±0.25, evaluates precision@5, keeps improvements. Baseline floor enforced at 0.76 — optimizer never degrades below current quality. Optimal weights written to `config.json`.
+**Weight optimization** (`weight-optimizer.ts`): Hill-climb optimizer tunes RRF weights against the gold set. Perturbs one weight at a time by ±0.25, evaluates precision@5, keeps improvements. Baseline floor prevents optimizer from degrading below current quality. Optimal weights written to `config.json`.
 
 ### 7. Daemon — Automation
 
@@ -407,6 +407,20 @@ agentgrit/
 └── tsconfig.json
 ```
 
+### Standalone Hooks
+
+`agentgrit init --claude-code` generates three ready-to-use Claude Code hooks and registers them in `~/.claude/settings.json`:
+
+| Hook | Event | What It Does |
+|------|-------|-------------|
+| **SessionStart** | `session_start` | Detects domains from git status + recent context, injects relevant rules via hybrid BM25+vector+graph retrieval |
+| **PostToolCall** | `post_tool_call` | Captures tool usage, correction signals, and sentiment during the session |
+| **SessionEnd** | `session_end` | Auto-scores the session (corrections/approvals/reprompts), extracts rule candidates, updates attribution |
+
+These hooks work out of the box with zero configuration beyond `agentgrit init --claude-code`. They call AgentGrit's exported APIs directly (`getContextRules()`, `captureRating()`, `scoreSession()`) and can be extended for advanced use cases.
+
+Hook registration is produced by `generateHookConfig()` in `src/adapters/claude-code.ts`.
+
 ### Data Flow
 
 ```
@@ -501,7 +515,7 @@ The test suite uses fixture JSONL files with known patterns that must produce sp
 
 ### v0.1.4 (current)
 
-- **1117 tests** across 97 files, 0 failures
+- **1361 tests** across 112 files
 - All 7 subsystems: capture, evaluate, detect, promote, optimize, graph, daemon
 - CLI with 13 commands + `init --import` for machine migration
 - Three adoption speeds (quick/standard/full)
@@ -511,6 +525,7 @@ The test suite uses fixture JSONL files with known patterns that must produce sp
 - **Config-driven thresholds** — all weights, budgets, and thresholds in config.json, not hardcoded
 - **Weight optimizer** — hill-climb tunes RRF weights against gold set, writes to config
 - **Learned rule BM25 filtering** — top 10 of 50+ rules per session, not bulk-loaded
+- **Retrieval metrics:** precision@5 = 0.541, recall@15 = 0.939 (60-session gold set)
 - **Rule budget enforcement** — learned rules capped at 50, pending rules expire after 30 days
 - **Auto-review** — daemon step validates auto-classified domains against BM25-inferred, promotes to reviewed
 - **7-day cooling period** — proposed rules wait 7 days before promotion (configurable)
