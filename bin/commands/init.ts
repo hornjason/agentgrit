@@ -120,11 +120,20 @@ async function claudeCodeInit(args: string[]): Promise<void> {
 
   const result = installClaudeCodeHooks(settingsPath);
 
+  if (result.backupPath) {
+    console.log("  Backup: " + result.backupPath);
+  }
   console.log("  Hooks installed (" + result.installed + " new, " + result.existing + " existing, " + result.skipped + " skipped)");
-  console.log("\n  Hook events:");
-  console.log("    SessionStart  -> npx agentgrit graph context");
-  console.log("    SessionEnd    -> npx agentgrit capture sentiment");
-  console.log("    PostToolUse   -> npx agentgrit capture tool");
+  console.log("\n  Hook events (9 hooks):");
+  console.log("    SessionStart      -> npx agentgrit graph context");
+  console.log("    UserPromptSubmit  -> npx agentgrit capture rating");
+  console.log("    UserPromptSubmit  -> npx agentgrit capture correction");
+  console.log("    UserPromptSubmit  -> npx agentgrit capture sentiment");
+  console.log("    PostToolUse       -> npx agentgrit capture tool");
+  console.log("    PostToolUse       -> npx agentgrit capture skill");
+  console.log("    Stop              -> npx agentgrit capture assertions");
+  console.log("    SessionEnd        -> npx agentgrit capture session");
+  console.log("    SessionEnd        -> npx agentgrit capture debrief");
   console.log("\nClaude Code integration complete.\n");
 }
 

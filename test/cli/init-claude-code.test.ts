@@ -70,8 +70,23 @@ describe("init --claude-code", () => {
     );
     expect(hasToolAudit).toBe(true);
 
+    // UserPromptSubmit hooks present (rating, correction, sentiment)
+    expect(settings.hooks.UserPromptSubmit).toBeDefined();
+    const userPromptHooks = settings.hooks.UserPromptSubmit.flatMap(
+      (e: any) => e.hooks ?? [],
+    );
+    expect(userPromptHooks.some((h: any) => h.command.includes("capture rating"))).toBe(true);
+    expect(userPromptHooks.some((h: any) => h.command.includes("capture correction"))).toBe(true);
+    expect(userPromptHooks.some((h: any) => h.command.includes("capture sentiment"))).toBe(true);
+
+    // Stop hook present
+    expect(settings.hooks.Stop).toBeDefined();
+
+    // Total: 9 hooks installed
+    expect(result.installed).toBe(9);
+
     // Every hook entry has correct structure (type + command)
-    for (const event of ["SessionStart", "SessionEnd", "PostToolUse"]) {
+    for (const event of ["SessionStart", "SessionEnd", "PostToolUse", "UserPromptSubmit", "Stop"]) {
       for (const entry of settings.hooks[event]) {
         expect(entry).toHaveProperty("hooks");
         for (const h of entry.hooks) {

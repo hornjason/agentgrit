@@ -3,7 +3,7 @@ set -uo pipefail
 
 PASS_COUNT=0
 FAIL_COUNT=0
-TOTAL=14
+TOTAL=16
 
 pass() {
   echo "[PASS] $1"
@@ -32,24 +32,23 @@ else
   fail "Step 1: init --quick did not create expected files/dirs"
 fi
 
-# Step 2: Wire Claude Code hooks manually (--claude-code not in published npm yet)
+# Step 2: Init Claude Code hooks via agentgrit init --claude-code
 echo "--- Step 2: Init Claude Code hooks ---"
 SETTINGS_PATH="$HOME/.claude/settings.json"
 mkdir -p "$HOME/.claude"
-cat > "$SETTINGS_PATH" << 'HOOKS_EOF'
-{
-  "hooks": {
-    "SessionStart": [{"matcher": ".*", "hooks": ["npx agentgrit graph context"]}],
-    "SessionEnd": [{"matcher": ".*", "hooks": ["npx agentgrit capture sentiment"]}],
-    "PostToolUse": [{"matcher": ".*", "hooks": ["npx agentgrit capture tool"]}]
-  }
-}
-HOOKS_EOF
+echo '{}' > "$SETTINGS_PATH"
+agentgrit init --claude-code --settings "$SETTINGS_PATH" 2>&1
 HOOK_COUNT=$(grep -c 'agentgrit' "$SETTINGS_PATH" 2>/dev/null || echo "0")
-if [ "$HOOK_COUNT" -ge 3 ]; then
-  pass "Step 2: Installed $HOOK_COUNT agentgrit hooks in settings.json"
+if [ "$HOOK_COUNT" -ge 9 ]; then
+  pass "Step 2: Installed $HOOK_COUNT agentgrit hooks in settings.json (9 expected)"
 else
-  fail "Step 2: Only $HOOK_COUNT hooks written"
+  fail "Step 2: Only $HOOK_COUNT hooks written, expected >= 9"
+fi
+# Verify backup was created
+if [ -f "${SETTINGS_PATH}.bak" ]; then
+  pass "Step 2b: settings.json backup created"
+else
+  fail "Step 2b: No settings.json backup found"
 fi
 
 # Step 3: Copy seed rules to memoryDir and update config
@@ -91,6 +90,12 @@ if echo "$CONTEXT_OUTPUT" | grep -qi "deploy\|verify"; then
   pass "Step 5: Context query returned deployment-related rules"
 else
   fail "Step 5: Context query did not return deployment rules"
+fi
+# Verify system-reminder tags
+if echo "$CONTEXT_OUTPUT" | grep -q "<system-reminder>" && echo "$CONTEXT_OUTPUT" | grep -q "</system-reminder>"; then
+  pass "Step 5b: Context output wrapped in system-reminder tags"
+else
+  fail "Step 5b: Context output missing system-reminder tags"
 fi
 
 # Step 6: claude --print (headless session, hooks fire)

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, copyFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 
@@ -390,39 +390,21 @@ export function installHooks(settingsPath: string): {
   installed: number;
   existing: number;
   skipped: number;
+  backupPath: string | null;
+  paiDetected: boolean;
 } {
-  let settings: any = {};
-  if (existsSync(settingsPath)) {
-    try {
-      settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
-    } catch {
-      settings = {};
-    }
-  }
+  const sources = detectSignalSources();
+  const paiDetected = sources.source === "pai";
 
+  const { settings, backupPath } = readSettingsSafe(settingsPath);
   if (!settings.hooks) settings.hooks = {};
 
-  const hookDefs: Array<{
-    event: string;
-    matcher: string;
-    command: string;
-    timeout: number;
-  }> = [
-    { event: "UserPromptSubmit", matcher: "", command: "npx agentgrit capture rating", timeout: 5000 },
-    { event: "UserPromptSubmit", matcher: "", command: "npx agentgrit capture correction", timeout: 5000 },
-    { event: "UserPromptSubmit", matcher: "", command: "npx agentgrit capture sentiment", timeout: 5000 },
-    { event: "PostToolUse", matcher: "", command: "npx agentgrit capture tool", timeout: 5000 },
-    { event: "PostToolUse", matcher: "Skill", command: "npx agentgrit capture skill", timeout: 5000 },
-    { event: "Stop", matcher: "", command: "npx agentgrit capture assertions", timeout: 5000 },
-    { event: "SessionEnd", matcher: "", command: "npx agentgrit capture session", timeout: 10000 },
-    { event: "SessionEnd", matcher: "", command: "npx agentgrit capture debrief", timeout: 10000 },
-  ];
-
+  // Use canonical hook set — same as installClaudeCodeHooks
   let installed = 0;
   let existing = 0;
   let skipped = 0;
 
-  for (const def of hookDefs) {
+  for (const def of CLAUDE_CODE_HOOK_DEFS) {
     if (!settings.hooks[def.event]) {
       settings.hooks[def.event] = [];
     }
@@ -454,9 +436,10 @@ export function installHooks(settingsPath: string): {
     installed++;
   }
 
-  writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf-8");
+  writeSettingsSafe(settingsPath, settings);
+  writeHookManifest(installed);
 
-  return { installed, existing, skipped };
+  return { installed, existing, skipped, backupPath, paiDetected };
 }
 
 export function countExistingHooks(settingsPath: string): number {
@@ -479,47 +462,78 @@ export function countExistingHooks(settingsPath: string): number {
   }
 }
 
+// Shared hook definitions — the canonical 9-hook set for Claude Code
+const CLAUDE_CODE_HOOK_DEFS: Array<{
+  event: string;
+  matcher: string;
+  command: string;
+  timeout: number;
+}> = [
+  { event: "SessionStart", matcher: "", command: "npx agentgrit graph context", timeout: 10000 },
+  { event: "UserPromptSubmit", matcher: "", command: "npx agentgrit capture rating", timeout: 5000 },
+  { event: "UserPromptSubmit", matcher: "", command: "npx agentgrit capture correction", timeout: 5000 },
+  { event: "UserPromptSubmit", matcher: "", command: "npx agentgrit capture sentiment", timeout: 5000 },
+  { event: "PostToolUse", matcher: "", command: "npx agentgrit capture tool", timeout: 5000 },
+  { event: "PostToolUse", matcher: "Skill", command: "npx agentgrit capture skill", timeout: 5000 },
+  { event: "Stop", matcher: "", command: "npx agentgrit capture assertions", timeout: 5000 },
+  { event: "SessionEnd", matcher: "", command: "npx agentgrit capture session", timeout: 10000 },
+  { event: "SessionEnd", matcher: "", command: "npx agentgrit capture debrief", timeout: 10000 },
+];
+
+function writeHookManifest(installed: number): void {
+  const agentgritDir = process.env.AGENTGRIT_DIR ?? join(homedir(), ".agentgrit");
+  mkdirSync(agentgritDir, { recursive: true });
+  const manifest = {
+    hooks: CLAUDE_CODE_HOOK_DEFS.map((d) => ({ event: d.event, command: d.command })),
+    count: CLAUDE_CODE_HOOK_DEFS.length,
+    installed,
+    timestamp: new Date().toISOString(),
+  };
+  writeFileSync(join(agentgritDir, "installed-hooks.json"), JSON.stringify(manifest, null, 2), "utf-8");
+}
+
+function readSettingsSafe(settingsPath: string): { settings: any; backupPath: string | null } {
+  if (!existsSync(settingsPath)) {
+    return { settings: {}, backupPath: null };
+  }
+
+  const raw = readFileSync(settingsPath, "utf-8");
+  const backupPath = settingsPath + ".bak";
+  copyFileSync(settingsPath, backupPath);
+
+  try {
+    return { settings: JSON.parse(raw), backupPath };
+  } catch {
+    return { settings: {}, backupPath };
+  }
+}
+
+function writeSettingsSafe(settingsPath: string, settings: any): void {
+  const json = JSON.stringify(settings, null, 2);
+  // Validate the JSON we're about to write is parseable
+  JSON.parse(json);
+  writeFileSync(settingsPath, json, "utf-8");
+}
+
 /**
  * Install Claude Code integration hooks into settings.json.
- * Generates hook registrations for:
- *   - SessionStart: context injection (graph context)
- *   - SessionEnd: session scoring (sentiment capture)
- *   - PostToolUse: tool audit capture
- *
- * Merges with existing config — never overwrites non-hook settings.
+ * Full 9-hook set: context injection + all signal capture.
+ * Backs up settings.json before writing. Idempotent.
  */
 export function installClaudeCodeHooks(settingsPath: string): {
   installed: number;
   existing: number;
   skipped: number;
+  backupPath: string | null;
 } {
-  let settings: any = {};
-  if (existsSync(settingsPath)) {
-    try {
-      settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
-    } catch {
-      settings = {};
-    }
-  }
-
+  const { settings, backupPath } = readSettingsSafe(settingsPath);
   if (!settings.hooks) settings.hooks = {};
-
-  const hookDefs: Array<{
-    event: string;
-    matcher: string;
-    command: string;
-    timeout: number;
-  }> = [
-    { event: "SessionStart", matcher: "", command: "npx agentgrit graph context", timeout: 10000 },
-    { event: "SessionEnd", matcher: "", command: "npx agentgrit capture sentiment", timeout: 10000 },
-    { event: "PostToolUse", matcher: ".*", command: "npx agentgrit capture tool", timeout: 5000 },
-  ];
 
   let installed = 0;
   let existing = 0;
   let skipped = 0;
 
-  for (const def of hookDefs) {
+  for (const def of CLAUDE_CODE_HOOK_DEFS) {
     if (!settings.hooks[def.event]) {
       settings.hooks[def.event] = [];
     }
@@ -551,7 +565,8 @@ export function installClaudeCodeHooks(settingsPath: string): {
     installed++;
   }
 
-  writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf-8");
+  writeSettingsSafe(settingsPath, settings);
+  writeHookManifest(installed);
 
-  return { installed, existing, skipped };
+  return { installed, existing, skipped, backupPath };
 }

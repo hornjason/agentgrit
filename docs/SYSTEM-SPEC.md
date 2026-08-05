@@ -203,6 +203,49 @@ Claude Code session
 
 AgentGrit is imported at runtime via dynamic `import()`. If unavailable, PAI falls back to local graph queries. AgentGrit availability never blocks session start.
 
+## Standalone Hook Installation (#175)
+
+### Canonical 9-Hook Set
+
+AgentGrit installs a fixed set of 9 hooks into Claude Code's `settings.json` via `agentgrit init --claude-code`:
+
+| Event | Matcher | Command | Timeout |
+|-------|---------|---------|---------|
+| SessionStart | (all) | `npx agentgrit graph context` | 10s |
+| UserPromptSubmit | (all) | `npx agentgrit capture rating` | 5s |
+| UserPromptSubmit | (all) | `npx agentgrit capture correction` | 5s |
+| UserPromptSubmit | (all) | `npx agentgrit capture sentiment` | 5s |
+| PostToolUse | (all) | `npx agentgrit capture tool` | 5s |
+| PostToolUse | Skill | `npx agentgrit capture skill` | 5s |
+| Stop | (all) | `npx agentgrit capture assertions` | 5s |
+| SessionEnd | (all) | `npx agentgrit capture session` | 10s |
+| SessionEnd | (all) | `npx agentgrit capture debrief` | 10s |
+
+Both `installHooks()` (init path) and `installClaudeCodeHooks()` (claude-code path) use the same `CLAUDE_CODE_HOOK_DEFS` array. Hooks are idempotent — re-running skips already-installed commands. Settings are backed up to `.bak` before any write.
+
+### Hook Manifest
+
+After installation, `writeHookManifest()` writes `installed-hooks.json` to `$AGENTGRIT_DIR` (default `~/.agentgrit/`). The manifest records: hook event+command pairs, total count, installed count, and timestamp. This enables introspection without re-parsing settings.json.
+
+### `graph context` Subcommand
+
+`agentgrit graph context` is the SessionStart hook entry point. Pipeline:
+1. Read knowledge graph from state dir
+2. Accept optional `--query <text>` for task-specific filtering
+3. Run `detectDomains()` on query text for domain-scoped retrieval
+4. BM25+graph hybrid via `getContextRules()` — up to 15 rules
+5. Format output as `<system-reminder>` block with correlation scores
+6. Print to stdout — Claude Code injects into session context
+
+### PAI Coexistence
+
+Architecture: **one-way dependency (PAI -> agentgrit)**. AgentGrit provides the complete hook set and capture API. PAI provides thin adapter enrichment on top.
+
+- `detectSignalSources()` checks for PAI signals at `~/.claude/MEMORY/LEARNING/SIGNALS/`. Returns `source: "pai" | "agentgrit" | "none"` with signal counts.
+- `installHooks()` calls `detectSignalSources()` and returns `paiDetected` boolean. Hook commands always reference `agentgrit` — never PAI directly.
+- AgentGrit writes to its own signal dir (`$AGENTGRIT_DIR/signals/`), separate from PAI signals. Neither system overwrites the other.
+- If PAI is absent, AgentGrit operates standalone with full learning loop functionality.
+
 ## Current State (2026-07-13)
 
 | Area | Status | Reference |

@@ -5,6 +5,8 @@ import { readGraph, buildGraph, writeGraphFile } from "../../src/graph/builder";
 import { queryGraph } from "../../src/graph/query";
 import { generateReport, formatReportMarkdown } from "../../src/graph/report";
 import { relativeTime } from "../../src/adapters/time";
+import { getContextRules, detectDomains, sanitizeRuleText } from "../../src/graph/context";
+import { buildIndexFromDir } from "../../src/graph/bm25";
 
 function showStats(base: string): void {
   const graphPath = join(base, "state", "knowledge-graph.json");
@@ -69,6 +71,44 @@ function doQuery(base: string, queryStr: string): void {
       console.log(`         connected: ${cluster.connected.map((c) => c.node.id).join(", ")}`);
     }
   }
+}
+
+async function doContext(base: string, args: string[]): Promise<void> {
+  const graph = readGraph();
+  if (graph.nodeCount === 0) {
+    console.error("  No graph found. Run 'agentgrit graph build' first.");
+    return;
+  }
+
+  const queryIdx = args.indexOf("--query");
+  const queryText = queryIdx !== -1 && args[queryIdx + 1]
+    ? args.slice(queryIdx + 1).join(" ")
+    : undefined;
+
+  const memoryDir = resolveMemoryDir();
+  const index = buildIndexFromDir(memoryDir);
+  const domains = queryText ? detectDomains(queryText) : [];
+  const limit = 15;
+
+  const rules = await getContextRules(graph, index, domains, limit, undefined, queryText);
+
+  if (rules.length === 0) {
+    console.error("  No context rules found.");
+    return;
+  }
+
+  const lines: string[] = ["<system-reminder>", "## Context Rules (correlation-ranked)"];
+  for (const rule of rules) {
+    const tags = rule.tags.length > 0 ? ` [${rule.tags.join(", ")}]` : "";
+    const score = rule.correlationScore !== undefined
+      ? ` (score: ${rule.correlationScore.toFixed(2)})`
+      : "";
+    lines.push(`- **${rule.id}**${tags}${score}`);
+    lines.push(`  ${rule.text}`);
+  }
+  lines.push("</system-reminder>");
+
+  console.log(lines.join("\n"));
 }
 
 function doReport(): void {
@@ -138,6 +178,9 @@ export async function graphCommand(args: string[]): Promise<void> {
     if (result.errors.length > 0) {
       console.log(`  Errors: ${result.errors.join(", ")}`);
     }
+  } else if (sub === "context") {
+    await doContext(base, args.slice(1));
+    return;
   } else if (sub === "query") {
     const query = args.slice(1).join(" ");
     if (!query) {
