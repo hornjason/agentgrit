@@ -34,7 +34,7 @@ async function evaluateWeights(
 
     const domains = session.domains ?? [];
     const queryText = session.task_context ?? session.description ?? "";
-    const retrieved = await getContextRules(graph, index, domains, 5, undefined, queryText);
+    const retrieved = await getContextRules(graph, index, domains, 5, undefined, queryText, undefined, undefined, weights);
     const retrievedIds = retrieved.map(r => r.id);
     totalPrecision += precisionAtK(relevantRules, retrievedIds, 5);
     count++;
