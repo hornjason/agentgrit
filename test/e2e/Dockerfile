@@ -9,5 +9,5 @@ RUN npm install -g @anthropic-ai/claude-code @agentgrit/core
 
 WORKDIR /test
 COPY test-data/ /test/test-data/
-COPY phase1-clean-install.sh phase2-integration.sh /test/
+COPY phase1-clean-install.sh phase2-integration.sh phase3b-coexistence.sh /test/
 RUN chmod +x /test/*.sh

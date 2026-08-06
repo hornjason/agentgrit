@@ -3,7 +3,7 @@ set -uo pipefail
 
 PASS_COUNT=0
 FAIL_COUNT=0
-TOTAL=14
+TOTAL=16
 
 pass() {
   echo "[PASS] $1"
@@ -16,7 +16,10 @@ fail() {
 }
 
 export AGENTGRIT_DIR="/tmp/agentgrit-e2e"
+SIGNAL_DIR="$AGENTGRIT_DIR/signals"
+SETTINGS_PATH="$HOME/.claude/settings.json"
 rm -rf "$AGENTGRIT_DIR"
+mkdir -p "$HOME/.claude"
 
 echo "=== Phase 1: Clean Install Lifecycle ($TOTAL steps) ==="
 echo ""
@@ -32,24 +35,21 @@ else
   fail "Step 1: init --quick did not create expected files/dirs"
 fi
 
-# Step 2: Wire Claude Code hooks manually (--claude-code not in published npm yet)
-echo "--- Step 2: Init Claude Code hooks ---"
-SETTINGS_PATH="$HOME/.claude/settings.json"
-mkdir -p "$HOME/.claude"
-cat > "$SETTINGS_PATH" << 'HOOKS_EOF'
-{
-  "hooks": {
-    "SessionStart": [{"matcher": ".*", "hooks": ["npx agentgrit graph context"]}],
-    "SessionEnd": [{"matcher": ".*", "hooks": ["npx agentgrit capture sentiment"]}],
-    "PostToolUse": [{"matcher": ".*", "hooks": ["npx agentgrit capture tool"]}]
-  }
-}
-HOOKS_EOF
+# Step 2: Verify Claude Code hooks installed by init
+echo "--- Step 2: Verify Claude Code hooks ---"
 HOOK_COUNT=$(grep -c 'agentgrit' "$SETTINGS_PATH" 2>/dev/null || echo "0")
-if [ "$HOOK_COUNT" -ge 3 ]; then
-  pass "Step 2: Installed $HOOK_COUNT agentgrit hooks in settings.json"
+if [ "$HOOK_COUNT" -ge 8 ]; then
+  pass "Step 2: Installed $HOOK_COUNT agentgrit hooks in settings.json (8 expected)"
 else
-  fail "Step 2: Only $HOOK_COUNT hooks written"
+  fail "Step 2: Only $HOOK_COUNT hooks written, expected >= 8"
+fi
+# Verify init --claude-code is idempotent
+agentgrit init --claude-code --settings "$SETTINGS_PATH" 2>&1
+POST_HOOK_COUNT=$(grep -c 'agentgrit' "$SETTINGS_PATH" 2>/dev/null || echo "0")
+if [ "$POST_HOOK_COUNT" -ge 8 ]; then
+  pass "Step 2b: init --claude-code idempotent ($POST_HOOK_COUNT hooks preserved)"
+else
+  fail "Step 2b: init --claude-code reduced hooks to $POST_HOOK_COUNT"
 fi
 
 # Step 3: Copy seed rules to memoryDir and update config
@@ -92,6 +92,18 @@ if echo "$CONTEXT_OUTPUT" | grep -qi "deploy\|verify"; then
 else
   fail "Step 5: Context query did not return deployment rules"
 fi
+# Verify system-reminder tags
+if echo "$CONTEXT_OUTPUT" | grep -q "<system-reminder>" && echo "$CONTEXT_OUTPUT" | grep -q "</system-reminder>"; then
+  pass "Step 5b: Context output wrapped in system-reminder tags"
+else
+  fail "Step 5b: Context output missing system-reminder tags"
+fi
+
+# Anti-gaming: verify signals dir is empty before Claude session
+PRE_SIGNAL_COUNT=$(find "$SIGNAL_DIR" -type f 2>/dev/null | wc -l | tr -d ' ')
+if [ "$PRE_SIGNAL_COUNT" -ne 0 ]; then
+  fail "Step 6-pre: Signals dir has $PRE_SIGNAL_COUNT files before Claude session — test would be meaningless"
+fi
 
 # Step 6: claude --print (headless session, hooks fire)
 echo "--- Step 6: Claude headless session ---"
@@ -106,7 +118,6 @@ fi
 
 # Step 7: Check signals directory
 echo "--- Step 7: Check signals ---"
-SIGNAL_DIR="$AGENTGRIT_DIR/signals"
 SIGNAL_COUNT=$(find "$SIGNAL_DIR" -type f 2>/dev/null | wc -l)
 if [ "$SIGNAL_COUNT" -ge 1 ]; then
   pass "Step 7: $SIGNAL_COUNT signal file(s) written"
@@ -168,47 +179,47 @@ cat > "$STATS_FILE" << 'STATS_EOF'
 }
 STATS_EOF
 if [ -f "$STATS_FILE" ]; then
-  pass "Step 11: Rule stats seeded for eviction candidates"
+  pass "Step 11: Rule stats seeded for prune candidates"
 else
   fail "Step 11: Failed to create rule-stats.json"
 fi
 
-# Step 12: agentgrit rules evict --dry-run
-echo "--- Step 12: Eviction dry run ---"
-EVICT_DRY=$(agentgrit rules evict --dry-run --rulesDir "$RULES_DIR" 2>&1 || true)
-if echo "$EVICT_DRY" | grep -qi "bad-rule-never-helps\|stale-unused-rule\|evict\|candidate"; then
-  pass "Step 12: Dry run identifies eviction candidate(s)"
+# Step 12: agentgrit rules prune (dry run by default)
+echo "--- Step 12: Pruning dry run ---"
+PRUNE_DRY=$(agentgrit rules prune 2>&1 || true)
+if echo "$PRUNE_DRY" | grep -qi "bad-rule-never-helps\|stale-unused-rule\|prune\|candidate"; then
+  pass "Step 12: Dry run identifies prune candidate(s)"
 else
   fail "Step 12: Dry run did not identify any candidates"
 fi
 
-# Step 13: agentgrit rules evict
-echo "--- Step 13: Eviction execute ---"
-if agentgrit rules evict 2>&1; then
+# Step 13: agentgrit rules prune --yes
+echo "--- Step 13: Pruning execute ---"
+if agentgrit rules prune --yes 2>&1; then
   if [ ! -f "$RULES_DIR/feedback_bad_rule_never_helps.md" ] || \
      [ ! -f "$RULES_DIR/feedback_stale_unused_rule.md" ]; then
-    pass "Step 13: Bad rule(s) evicted"
+    pass "Step 13: Bad rule(s) pruned"
   else
-    fail "Step 13: Bad rules still present after eviction"
+    fail "Step 13: Bad rules still present after pruning"
   fi
 else
-  fail "Step 13: Eviction command failed"
+  fail "Step 13: Pruning command failed"
 fi
 
-# Step 14: Rebuild graph + doctor after eviction
-echo "--- Step 14: Post-eviction graph build + doctor ---"
+# Step 14: Rebuild graph + doctor after pruning
+echo "--- Step 14: Post-pruning graph build + doctor ---"
 if agentgrit graph build 2>&1; then
   GRAPH_FILE="$AGENTGRIT_DIR/state/knowledge-graph.json"
   POST_NODES=$(jq '.nodes | length' "$GRAPH_FILE" 2>/dev/null || echo 0)
   DOCTOR_POST=$(agentgrit doctor 2>&1 || true)
   CORE_FAILS=$(echo "$DOCTOR_POST" | grep -iE '(base|config|graph).*fail' | wc -l | tr -d ' ')
   if [ "$CORE_FAILS" -eq 0 ]; then
-    pass "Step 14: Post-eviction graph has $POST_NODES nodes, 0 core failures"
+    pass "Step 14: Post-pruning graph has $POST_NODES nodes, 0 core failures"
   else
-    fail "Step 14: Post-eviction doctor reports $CORE_FAILS core failures"
+    fail "Step 14: Post-pruning doctor reports $CORE_FAILS core failures"
   fi
 else
-  fail "Step 14: Post-eviction graph build failed"
+  fail "Step 14: Post-pruning graph build failed"
 fi
 
 # Summary
