@@ -17,5 +17,5 @@ RUN npm install -g .
 
 WORKDIR /test
 COPY test/e2e/test-data/ /test/test-data/
-COPY test/e2e/phase1-clean-install.sh test/e2e/phase2-integration.sh test/e2e/phase3b-coexistence.sh /test/
+COPY test/e2e/phase1-clean-install.sh test/e2e/phase2-integration.sh test/e2e/phase3b-coexistence.sh test/e2e/phase4-parity-gaps.sh /test/
 RUN chmod +x /test/*.sh
