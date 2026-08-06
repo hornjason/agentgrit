@@ -23,7 +23,7 @@ import { showcaseCommand } from "./commands/showcase";
 import { undoCommand } from "./commands/undo";
 import { upgradeCommand } from "./commands/upgrade";
 
-const VERSION = "0.1.6";
+const VERSION = "0.1.8";
 
 const HANDLERS: Record<string, (args: string[]) => Promise<void>> = {
   backfill: backfillCommand,

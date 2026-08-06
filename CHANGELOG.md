@@ -7,6 +7,21 @@ updated: 2026-08-05
 
 # Changelog
 
+## [0.1.8] — 2026-08-06
+
+Docker E2E suite 34/34 with real Claude Code. Closes #176.
+
+### Fixes
+- **`installClaudeCodeHooks` parity** — `init --claude-code` now installs all 8 hooks (was 3), matching `installHooks --bootstrap`. Hooks: SessionStart(graph context), 3×UserPromptSubmit(rating/correction/sentiment), 2×PostToolUse(tool/skill), Stop(harvest), SessionEnd(incident)
+- **`graph context` subcommand** — new CLI command wires `getContextRules()` + `writeSessionContext()`, outputs rules wrapped in `<system-reminder>` tags for Claude Code hook injection
+- **`pruneTobudget` stats merge** — prune now reads `rule-stats.json` (recalls→injectionCount, effectivenessRate→avgCorrelatedRating) so eviction uses real effectiveness data instead of positional fallback
+- **`init --claude-code` writes `installed-hooks.json`** — manifest with hook count, timestamp, and version for coexistence verification
+
+### E2E
+- Phase 1 (clean install): 16/16
+- Phase 2 (integration with real data): 10/10
+- Phase 3b (PAI coexistence): 8/8
+
 ## [0.1.7] — 2026-08-05
 
 Version bump + hardcoded VERSION string fix.
