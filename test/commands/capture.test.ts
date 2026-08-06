@@ -367,6 +367,174 @@ describe("capture session-score", () => {
   });
 });
 
+describe("capture debrief", () => {
+  function makeTranscriptLine(role: "user" | "assistant", content: string): string {
+    return JSON.stringify({
+      type: role === "user" ? "user" : "assistant",
+      message: { content },
+    });
+  }
+
+  test("extracts corrections and writes to correction-captures.jsonl", async () => {
+    const transcriptPath = join(TMP_DIR, "debrief-transcript.jsonl");
+    const lines = [
+      makeTranscriptLine("assistant", "I refactored the module and added abstractions."),
+      makeTranscriptLine("user", "wrong, just fix the bug not refactor"),
+      makeTranscriptLine("assistant", "OK, I fixed the bug directly."),
+      makeTranscriptLine("user", "perfect, exactly what I needed"),
+    ];
+    writeFileSync(transcriptPath, lines.join("\n"));
+
+    const input = JSON.stringify({
+      session_id: "sess-debrief-1",
+      transcript_path: transcriptPath,
+    });
+
+    const result = await runCapture("debrief", input);
+    expect(result.exitCode).toBe(0);
+
+    const file = join(TMP_DIR, "signals", "correction-captures.jsonl");
+    expect(existsSync(file)).toBe(true);
+
+    const allLines = readFileSync(file, "utf-8").trim().split("\n");
+    expect(allLines.length).toBeGreaterThanOrEqual(1);
+
+    const parsed = JSON.parse(allLines[0]);
+    expect(parsed.user_text).toBeDefined();
+    expect(parsed.assistant_context).toBeDefined();
+    expect(parsed.turn_index).toBeDefined();
+    expect(parsed.session_id).toBe("sess-debrief-1");
+    expect(parsed.timestamp).toBeDefined();
+  });
+
+  test("writes approvals to correction-captures.jsonl", async () => {
+    const transcriptPath = join(TMP_DIR, "debrief-approval.jsonl");
+    const lines = [
+      makeTranscriptLine("assistant", "I reorganized the config structure."),
+      makeTranscriptLine("user", "perfect, that's exactly the right approach"),
+    ];
+    writeFileSync(transcriptPath, lines.join("\n"));
+
+    const input = JSON.stringify({
+      session_id: "sess-debrief-approval",
+      transcript_path: transcriptPath,
+    });
+
+    const result = await runCapture("debrief", input);
+    expect(result.exitCode).toBe(0);
+
+    const file = join(TMP_DIR, "signals", "correction-captures.jsonl");
+    expect(existsSync(file)).toBe(true);
+
+    const allLines = readFileSync(file, "utf-8").trim().split("\n");
+    const approvalLine = allLines.find((l) => {
+      const p = JSON.parse(l);
+      return p.type === "approval";
+    });
+    expect(approvalLine).toBeDefined();
+
+    const parsed = JSON.parse(approvalLine!);
+    expect(parsed.phrase).toBeDefined();
+    expect(parsed.session_id).toBe("sess-debrief-approval");
+  });
+
+  test("filters noise phrases — zero captures", async () => {
+    const transcriptPath = join(TMP_DIR, "debrief-noise.jsonl");
+    const noiseMessages = [
+      "no problem, keep going",
+      "no worries at all",
+      "no rush on this",
+      "no need to change anything",
+      "no thanks, I'm good",
+      "not yet, still thinking",
+      "don't worry about it",
+      "don't forget to commit",
+    ];
+    const lines: string[] = [];
+    for (const msg of noiseMessages) {
+      lines.push(makeTranscriptLine("assistant", "Here's the result."));
+      lines.push(makeTranscriptLine("user", msg));
+    }
+    writeFileSync(transcriptPath, lines.join("\n"));
+
+    const input = JSON.stringify({
+      session_id: "sess-debrief-noise",
+      transcript_path: transcriptPath,
+    });
+
+    const result = await runCapture("debrief", input);
+    expect(result.exitCode).toBe(0);
+
+    const file = join(TMP_DIR, "signals", "correction-captures.jsonl");
+    expect(existsSync(file)).toBe(false);
+  });
+
+  test("exits 0 for empty transcript", async () => {
+    const transcriptPath = join(TMP_DIR, "debrief-empty.jsonl");
+    writeFileSync(transcriptPath, "");
+
+    const input = JSON.stringify({
+      session_id: "sess-debrief-empty",
+      transcript_path: transcriptPath,
+    });
+
+    const result = await runCapture("debrief", input);
+    expect(result.exitCode).toBe(0);
+
+    const file = join(TMP_DIR, "signals", "correction-captures.jsonl");
+    expect(existsSync(file)).toBe(false);
+  });
+
+  test("exits 0 for missing transcript file", async () => {
+    const input = JSON.stringify({
+      session_id: "sess-debrief-missing",
+      transcript_path: "/nonexistent/debrief-transcript.jsonl",
+    });
+
+    const result = await runCapture("debrief", input);
+    expect(result.exitCode).toBe(0);
+  });
+
+  test("exits 0 on invalid JSON stdin", async () => {
+    const result = await runCapture("debrief", "not json");
+    expect(result.exitCode).toBe(0);
+  });
+
+  test("correction fields match schema: user_text, assistant_context, turn_index, session_id, timestamp", async () => {
+    const transcriptPath = join(TMP_DIR, "debrief-schema.jsonl");
+    const lines = [
+      makeTranscriptLine("assistant", "I added comments to every function."),
+      makeTranscriptLine("user", "stop doing that, no comments unless non-obvious"),
+      makeTranscriptLine("assistant", "Removed the comments."),
+      makeTranscriptLine("user", "that's right, much better"),
+    ];
+    writeFileSync(transcriptPath, lines.join("\n"));
+
+    const input = JSON.stringify({
+      session_id: "sess-debrief-schema",
+      transcript_path: transcriptPath,
+    });
+
+    const result = await runCapture("debrief", input);
+    expect(result.exitCode).toBe(0);
+
+    const file = join(TMP_DIR, "signals", "correction-captures.jsonl");
+    const allLines = readFileSync(file, "utf-8").trim().split("\n");
+    const correctionLine = allLines.find((l) => {
+      const p = JSON.parse(l);
+      return p.type === "correction";
+    });
+    expect(correctionLine).toBeDefined();
+
+    const parsed = JSON.parse(correctionLine!);
+    expect(typeof parsed.user_text).toBe("string");
+    expect(typeof parsed.assistant_context).toBe("string");
+    expect(typeof parsed.turn_index).toBe("number");
+    expect(typeof parsed.session_id).toBe("string");
+    expect(typeof parsed.timestamp).toBe("string");
+  });
+});
+
 describe("performance", () => {
   test("all capture commands complete under 500ms", async () => {
     const cases = [

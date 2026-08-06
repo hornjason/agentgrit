@@ -3,7 +3,7 @@ import { join } from "path";
 import { randomUUID } from "crypto";
 import { parseRating, computeComposite, parseBareNumberRating, parsePraiseRating, parseThumbsRating, captureSessionSentiment } from "../../src/capture/rating";
 import type { Turn } from "../../src/capture/rating";
-import { parseTranscript } from "../../src/capture/debrief";
+import { parseTranscript, extractDebrief } from "../../src/capture/debrief";
 import { SCHEMA_VERSION } from "../../src/adapters/types";
 import { loadConfig } from "../../src/adapters/paths";
 import { resolveSignalDir } from "../../src/adapters/paths";
@@ -407,6 +407,56 @@ async function captureSessionScoreCommand(): Promise<void> {
   await captureSessionSentiment(turns, sessionId);
 }
 
+async function captureDebriefCommand(): Promise<void> {
+  const raw = readStdin();
+  if (!raw) return;
+
+  let input: { session_id?: string; transcript_path?: string };
+  try {
+    input = JSON.parse(raw);
+  } catch {
+    return;
+  }
+
+  const sessionId = input.session_id;
+  const transcriptPath = input.transcript_path;
+  if (!sessionId || !transcriptPath) return;
+
+  if (!existsSync(transcriptPath)) return;
+
+  const transcript = readFileSync(transcriptPath, "utf-8");
+  if (!transcript.trim()) return;
+
+  const result = await extractDebrief(transcript, sessionId);
+
+  if (result.corrections.length === 0 && result.approvals.length === 0) return;
+
+  const dir = getSignalDir();
+  const outPath = join(dir, "correction-captures.jsonl");
+
+  for (const c of result.corrections) {
+    appendJsonl(outPath, {
+      type: "correction",
+      user_text: c.correction_phrase,
+      assistant_context: c.context,
+      turn_index: c.turn_index ?? 0,
+      session_id: sessionId,
+      timestamp: c.timestamp,
+    });
+  }
+
+  for (const a of result.approvals) {
+    appendJsonl(outPath, {
+      type: "approval",
+      phrase: a.phrase,
+      context: a.context,
+      turn_index: a.turnIndex,
+      session_id: sessionId,
+      timestamp: new Date().toISOString(),
+    });
+  }
+}
+
 const SUBCOMMANDS: Record<string, () => Promise<void>> = {
   rating: captureRatingCommand,
   correction: captureCorrectionCommand,
@@ -416,6 +466,7 @@ const SUBCOMMANDS: Record<string, () => Promise<void>> = {
   harvest: captureHarvestCommand,
   incident: captureIncidentCommand,
   "session-score": captureSessionScoreCommand,
+  debrief: captureDebriefCommand,
 };
 
 export async function captureCommand(args: string[]): Promise<void> {

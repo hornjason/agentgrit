@@ -417,6 +417,7 @@ export function installHooks(settingsPath: string): {
     { event: "Stop", matcher: "", command: "npx agentgrit capture harvest", timeout: 5000 },
     { event: "SessionEnd", matcher: "", command: "npx agentgrit capture incident", timeout: 10000 },
     { event: "SessionEnd", matcher: "", command: "npx agentgrit capture session-score", timeout: 10000 },
+    { event: "SessionEnd", matcher: "", command: "npx agentgrit capture debrief", timeout: 10000 },
   ];
 
   let installed = 0;
@@ -516,6 +517,7 @@ export function installClaudeCodeHooks(settingsPath: string): {
     { event: "Stop", matcher: "", command: "npx agentgrit capture harvest", timeout: 5000 },
     { event: "SessionEnd", matcher: "", command: "npx agentgrit capture incident", timeout: 10000 },
     { event: "SessionEnd", matcher: "", command: "npx agentgrit capture session-score", timeout: 10000 },
+    { event: "SessionEnd", matcher: "", command: "npx agentgrit capture debrief", timeout: 10000 },
   ];
 
   let installed = 0;
