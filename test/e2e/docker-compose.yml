@@ -1,6 +1,8 @@
 services:
   e2e-phase1:
-    build: .
+    build:
+      context: ../..
+      dockerfile: test/e2e/Dockerfile
     command: ./phase1-clean-install.sh
     volumes:
       - ~/.config/gcloud:/root/.config/gcloud:ro
@@ -8,9 +10,15 @@ services:
     environment:
       - GOOGLE_CLOUD_PROJECT=jhorn-pai
       - GOOGLE_CLOUD_LOCATION=us-east1
+      - CLAUDE_CODE_USE_VERTEX=1
+      - ANTHROPIC_VERTEX_PROJECT_ID=itpc-gcp-global-revenue-claude
+      - VERTEX_PROJECT_ID=jhorn-pai
+      - VERTEX_LOCATION=us-east1
 
   e2e-phase2:
-    build: .
+    build:
+      context: ../..
+      dockerfile: test/e2e/Dockerfile
     command: ./phase2-integration.sh
     volumes:
       - ~/.config/gcloud:/root/.config/gcloud:ro
@@ -21,3 +29,23 @@ services:
     environment:
       - GOOGLE_CLOUD_PROJECT=jhorn-pai
       - GOOGLE_CLOUD_LOCATION=us-east1
+      - CLAUDE_CODE_USE_VERTEX=1
+      - ANTHROPIC_VERTEX_PROJECT_ID=itpc-gcp-global-revenue-claude
+      - VERTEX_PROJECT_ID=jhorn-pai
+      - VERTEX_LOCATION=us-east1
+
+  e2e-phase3b:
+    build:
+      context: ../..
+      dockerfile: test/e2e/Dockerfile
+    command: ./phase3b-coexistence.sh
+    volumes:
+      - ~/.config/gcloud:/root/.config/gcloud:ro
+      - ~/.claude.json:/root/.claude.json:ro
+    environment:
+      - GOOGLE_CLOUD_PROJECT=jhorn-pai
+      - GOOGLE_CLOUD_LOCATION=us-east1
+      - CLAUDE_CODE_USE_VERTEX=1
+      - ANTHROPIC_VERTEX_PROJECT_ID=itpc-gcp-global-revenue-claude
+      - VERTEX_PROJECT_ID=jhorn-pai
+      - VERTEX_LOCATION=us-east1

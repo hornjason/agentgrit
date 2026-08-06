@@ -136,9 +136,9 @@ mkdir -p "$HOME/.claude"
 cat > "$SETTINGS_PATH" << 'HOOKS_EOF'
 {
   "hooks": {
-    "SessionStart": [{"matcher": ".*", "hooks": ["npx agentgrit graph context"]}],
-    "SessionEnd": [{"matcher": ".*", "hooks": ["npx agentgrit capture sentiment"]}],
-    "PostToolUse": [{"matcher": ".*", "hooks": ["npx agentgrit capture tool"]}]
+    "SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "npx agentgrit graph context", "timeout": 10000}]}],
+    "UserPromptSubmit": [{"matcher": "", "hooks": [{"type": "command", "command": "npx agentgrit capture sentiment", "timeout": 5000}]}],
+    "SessionEnd": [{"matcher": "", "hooks": [{"type": "command", "command": "npx agentgrit capture incident", "timeout": 10000}]}]
   }
 }
 HOOKS_EOF

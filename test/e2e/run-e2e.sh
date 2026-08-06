@@ -30,6 +30,12 @@ PHASE2_EXIT=0
 docker compose -f "$COMPOSE_FILE" run --rm e2e-phase2 || PHASE2_EXIT=$?
 echo ""
 
+# Phase 3b
+echo "--- Running Phase 3b: PAI Coexistence ---"
+PHASE3B_EXIT=0
+docker compose -f "$COMPOSE_FILE" run --rm e2e-phase3b || PHASE3B_EXIT=$?
+echo ""
+
 # Summary
 echo "========================================"
 echo " E2E Summary"
@@ -45,9 +51,15 @@ if [ "$PHASE2_EXIT" -eq 0 ]; then
 else
   echo "  Phase 2: FAIL (exit $PHASE2_EXIT)"
 fi
+
+if [ "$PHASE3B_EXIT" -eq 0 ]; then
+  echo "  Phase 3b: PASS"
+else
+  echo "  Phase 3b: FAIL (exit $PHASE3B_EXIT)"
+fi
 echo "========================================"
 
-if [ "$PHASE1_EXIT" -ne 0 ] || [ "$PHASE2_EXIT" -ne 0 ]; then
+if [ "$PHASE1_EXIT" -ne 0 ] || [ "$PHASE2_EXIT" -ne 0 ] || [ "$PHASE3B_EXIT" -ne 0 ]; then
   exit 1
 fi
 exit 0
