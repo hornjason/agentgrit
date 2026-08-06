@@ -267,6 +267,106 @@ describe("capture skill", () => {
   });
 });
 
+describe("capture session-score", () => {
+  function makeTranscriptLine(role: "user" | "assistant", content: string): string {
+    return JSON.stringify({
+      type: role === "user" ? "user" : "assistant",
+      message: { content },
+    });
+  }
+
+  test("writes session sentiment for transcript with corrections", async () => {
+    const transcriptPath = join(TMP_DIR, "transcript.jsonl");
+    const lines = [
+      makeTranscriptLine("assistant", "I refactored the module."),
+      makeTranscriptLine("user", "wrong, just fix the bug not refactor"),
+      makeTranscriptLine("assistant", "Fixed the bug."),
+      makeTranscriptLine("user", "perfect, exactly what I needed"),
+    ];
+    writeFileSync(transcriptPath, lines.join("\n"));
+
+    const input = JSON.stringify({
+      session_id: "sess-auto",
+      transcript_path: transcriptPath,
+    });
+
+    const result = await runCapture("session-score", input);
+    expect(result.exitCode).toBe(0);
+
+    const file = join(TMP_DIR, "signals", "ratings.jsonl");
+    expect(existsSync(file)).toBe(true);
+
+    const parsed = JSON.parse(readFileSync(file, "utf-8").trim());
+    expect(parsed.source).toBe("transcript-analysis");
+    expect(parsed.scorer_version).toBe("v2");
+    expect(parsed.session_id).toBe("sess-auto");
+  });
+
+  test("skips when explicit rating already exists for session", async () => {
+    const sigDir = join(TMP_DIR, "signals");
+    mkdirSync(sigDir, { recursive: true });
+    const ratingsFile = join(sigDir, "ratings.jsonl");
+    const existingRating = JSON.stringify({
+      id: "existing-1",
+      type: "rating",
+      session_id: "sess-dedup",
+      source: "explicit",
+      rating: 8,
+    });
+    writeFileSync(ratingsFile, existingRating + "\n");
+
+    const transcriptPath = join(TMP_DIR, "transcript.jsonl");
+    const lines = [
+      makeTranscriptLine("assistant", "Done with the task."),
+      makeTranscriptLine("user", "wrong, that's not what I asked"),
+    ];
+    writeFileSync(transcriptPath, lines.join("\n"));
+
+    const input = JSON.stringify({
+      session_id: "sess-dedup",
+      transcript_path: transcriptPath,
+    });
+
+    const result = await runCapture("session-score", input);
+    expect(result.exitCode).toBe(0);
+
+    const content = readFileSync(ratingsFile, "utf-8").trim();
+    const allLines = content.split("\n");
+    expect(allLines.length).toBe(1);
+  });
+
+  test("exits 0 for empty transcript", async () => {
+    const transcriptPath = join(TMP_DIR, "transcript.jsonl");
+    writeFileSync(transcriptPath, "");
+
+    const input = JSON.stringify({
+      session_id: "sess-empty",
+      transcript_path: transcriptPath,
+    });
+
+    const result = await runCapture("session-score", input);
+    expect(result.exitCode).toBe(0);
+
+    const file = join(TMP_DIR, "signals", "ratings.jsonl");
+    expect(existsSync(file)).toBe(false);
+  });
+
+  test("exits 0 for missing transcript file", async () => {
+    const input = JSON.stringify({
+      session_id: "sess-missing",
+      transcript_path: "/nonexistent/path/transcript.jsonl",
+    });
+
+    const result = await runCapture("session-score", input);
+    expect(result.exitCode).toBe(0);
+  });
+
+  test("exits 0 on invalid JSON stdin", async () => {
+    const result = await runCapture("session-score", "not json");
+    expect(result.exitCode).toBe(0);
+  });
+});
+
 describe("performance", () => {
   test("all capture commands complete under 500ms", async () => {
     const cases = [

@@ -1,7 +1,9 @@
-import { existsSync, mkdirSync, appendFileSync } from "fs";
+import { existsSync, mkdirSync, appendFileSync, readFileSync } from "fs";
 import { join } from "path";
 import { randomUUID } from "crypto";
-import { parseRating, computeComposite, parseBareNumberRating, parsePraiseRating, parseThumbsRating } from "../../src/capture/rating";
+import { parseRating, computeComposite, parseBareNumberRating, parsePraiseRating, parseThumbsRating, captureSessionSentiment } from "../../src/capture/rating";
+import type { Turn } from "../../src/capture/rating";
+import { parseTranscript } from "../../src/capture/debrief";
 import { SCHEMA_VERSION } from "../../src/adapters/types";
 import { loadConfig } from "../../src/adapters/paths";
 import { resolveSignalDir } from "../../src/adapters/paths";
@@ -357,6 +359,54 @@ async function captureIncidentCommand(): Promise<void> {
   monitorToolOutput(output, command, sessionId, incidentsPath);
 }
 
+async function captureSessionScoreCommand(): Promise<void> {
+  const raw = readStdin();
+  if (!raw) return;
+
+  let input: { session_id?: string; transcript_path?: string };
+  try {
+    input = JSON.parse(raw);
+  } catch {
+    return;
+  }
+
+  const sessionId = input.session_id;
+  const transcriptPath = input.transcript_path;
+  if (!sessionId || !transcriptPath) return;
+
+  if (!existsSync(transcriptPath)) return;
+
+  const transcript = readFileSync(transcriptPath, "utf-8");
+  if (!transcript.trim()) return;
+
+  const rawTurns = parseTranscript(transcript);
+  const turns: Turn[] = rawTurns.map((t) => ({
+    role: t.role,
+    text: t.text,
+    charCount: t.text.length,
+  }));
+
+  if (turns.length === 0) return;
+
+  const dir = getSignalDir();
+  const ratingsPath = join(dir, "ratings.jsonl");
+  if (existsSync(ratingsPath)) {
+    const lines = readFileSync(ratingsPath, "utf-8").trim().split("\n");
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line);
+        if (entry.session_id === sessionId && entry.source === "explicit") {
+          return;
+        }
+      } catch {
+        // skip malformed lines
+      }
+    }
+  }
+
+  await captureSessionSentiment(turns, sessionId);
+}
+
 const SUBCOMMANDS: Record<string, () => Promise<void>> = {
   rating: captureRatingCommand,
   correction: captureCorrectionCommand,
@@ -365,6 +415,7 @@ const SUBCOMMANDS: Record<string, () => Promise<void>> = {
   sentiment: captureSentimentCommand,
   harvest: captureHarvestCommand,
   incident: captureIncidentCommand,
+  "session-score": captureSessionScoreCommand,
 };
 
 export async function captureCommand(args: string[]): Promise<void> {
