@@ -1,6 +1,8 @@
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
 import { randomUUID } from "crypto";
 import type { Rule } from "../adapters/types";
+import { stateDir as defaultStateDir } from "../adapters/paths";
 import { Tier, SCHEMA_VERSION } from "../adapters/types";
 import { checkBudget } from "./budget";
 import { getEvictionCandidates } from "./rules";
@@ -54,6 +56,34 @@ export async function pruneTobudget(
   }
 
   const rules = extractRulesWithIds(content);
+
+  // Merge stats from rule-stats.json so getEvictionCandidates has real data
+  const resolvedStateDir = options?.stateDir ?? defaultStateDir();
+  const statsPath = join(resolvedStateDir, "rule-stats.json");
+  if (existsSync(statsPath)) {
+    try {
+      const raw = JSON.parse(readFileSync(statsPath, "utf-8"));
+      const statsMap = new Map<string, Record<string, unknown>>();
+      if (Array.isArray(raw)) {
+        for (const entry of raw) {
+          if (entry.ruleId) statsMap.set(entry.ruleId, entry);
+        }
+      } else if (typeof raw === "object" && raw !== null) {
+        for (const [id, data] of Object.entries(raw)) {
+          statsMap.set(id, data as Record<string, unknown>);
+        }
+      }
+      for (const rule of rules) {
+        const s = statsMap.get(rule.id);
+        if (!s) continue;
+        rule.injectionCount = (s.recalls ?? s.injectionCount ?? 0) as number;
+        rule.avgCorrelatedRating = (s.effectivenessRate ?? s.avgCorrelatedRating ?? 0) as number;
+        rule.lowRatingActivations = (s.negativeOutcomes ?? s.lowRatingActivations ?? 0) as number;
+        rule.lastSeen = (s.lastRecall ?? s.lastSeen ?? "") as string;
+      }
+    } catch { /* stats unavailable — fallback to unmerged rules */ }
+  }
+
   let candidates = getEvictionCandidates(rules, maxPrune + 5);
   if (candidates.length === 0) {
     candidates = rules.slice().reverse().slice(0, maxPrune + 5);
