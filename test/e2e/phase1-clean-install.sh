@@ -174,9 +174,9 @@ cat > "$STATS_FILE" << 'STATS_EOF'
     "effectivenessRate": 0.05
   },
   "stale-unused-rule": {
-    "recalls": 2,
+    "recalls": 10,
     "positiveOutcomes": 0,
-    "negativeOutcomes": 0,
+    "negativeOutcomes": 8,
     "lastRecall": "2025-10-01T00:00:00Z",
     "effectivenessRate": 0.0
   }
@@ -220,8 +220,6 @@ cat > "$HOME/.claude/CLAUDE.md" << 'CLAUDE_EOF'
 - **extra-rule-20:** Twentieth padding rule
 - **extra-rule-21:** Twenty-first padding rule
 - **extra-rule-22:** Twenty-second padding rule
-- **extra-rule-23:** Twenty-third padding rule
-- **extra-rule-24:** Twenty-fourth padding rule
 CLAUDE_EOF
 
 # Step 12: agentgrit rules prune (dry run by default)
@@ -236,7 +234,8 @@ fi
 # Step 13: agentgrit rules prune --yes
 echo "--- Step 13: Pruning execute ---"
 if agentgrit rules prune --yes 2>&1; then
-  BAD_IN_CLAUDE=$(grep -c "bad-rule-never-helps\|stale-unused-rule" "$HOME/.claude/CLAUDE.md" 2>/dev/null || echo "0")
+  BAD_IN_CLAUDE=$(grep -c "bad-rule-never-helps\|stale-unused-rule" "$HOME/.claude/CLAUDE.md" 2>/dev/null || true)
+  BAD_IN_CLAUDE=${BAD_IN_CLAUDE:-0}
   if [ "$BAD_IN_CLAUDE" -eq 0 ]; then
     pass "Step 13: Bad rules pruned from CLAUDE.md"
   else

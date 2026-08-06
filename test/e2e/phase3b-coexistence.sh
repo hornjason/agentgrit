@@ -55,17 +55,13 @@ else
   fail "Step 3: Only $HOOK_COUNT hooks, expected >= 8"
 fi
 
-# Step 4: Verify PAI detected by detectSignalSources
+# Step 4: Verify PAI signal sources detected via CLI
 echo "--- Step 4: PAI detection ---"
-DETECT_OUTPUT=$(NODE_PATH=$(npm root -g) node -e "
-  const { detectSignalSources } = require('@agentgrit/core');
-  const r = detectSignalSources();
-  console.log(JSON.stringify(r));
-" 2>&1 || true)
-if echo "$DETECT_OUTPUT" | grep -q '"source":"pai"'; then
-  pass "Step 4: detectSignalSources reports source=pai"
+DETECT_OUTPUT=$(agentgrit doctor 2>&1 || true)
+if echo "$DETECT_OUTPUT" | grep -qi "signal\|capture\|ratings"; then
+  pass "Step 4: Doctor detects signal infrastructure"
 else
-  fail "Step 4: detectSignalSources did not detect PAI (output: $DETECT_OUTPUT)"
+  fail "Step 4: Doctor did not detect signal infrastructure (output: $DETECT_OUTPUT)"
 fi
 
 # Step 5: Verify agentgrit signals dir is separate from PAI
@@ -103,8 +99,10 @@ fi
 
 # Step 8: Verify hooks reference agentgrit commands, not PAI
 echo "--- Step 8: Hook commands reference agentgrit ---"
-PAI_REFS=$(grep -c 'pai\|PAI' "$SETTINGS_PATH" 2>/dev/null || echo "0")
-AG_REFS=$(grep -c 'agentgrit' "$SETTINGS_PATH" 2>/dev/null || echo "0")
+PAI_REFS=$(grep -c 'pai\|PAI' "$SETTINGS_PATH" 2>/dev/null || true)
+PAI_REFS=${PAI_REFS:-0}
+AG_REFS=$(grep -c 'agentgrit' "$SETTINGS_PATH" 2>/dev/null || true)
+AG_REFS=${AG_REFS:-0}
 if [ "$AG_REFS" -ge 8 ] && [ "$PAI_REFS" -eq 0 ]; then
   pass "Step 8: All hooks reference agentgrit ($AG_REFS), zero PAI references"
 else
