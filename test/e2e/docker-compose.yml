@@ -49,3 +49,19 @@ services:
       - ANTHROPIC_VERTEX_PROJECT_ID=itpc-gcp-global-revenue-claude
       - VERTEX_PROJECT_ID=jhorn-pai
       - VERTEX_LOCATION=us-east1
+
+  e2e-phase4:
+    build:
+      context: ../..
+      dockerfile: test/e2e/Dockerfile
+    command: ./phase4-parity-gaps.sh
+    volumes:
+      - ~/.config/gcloud:/root/.config/gcloud:ro
+      - ~/.claude.json:/root/.claude.json:ro
+    environment:
+      - GOOGLE_CLOUD_PROJECT=jhorn-pai
+      - GOOGLE_CLOUD_LOCATION=us-east1
+      - CLAUDE_CODE_USE_VERTEX=1
+      - ANTHROPIC_VERTEX_PROJECT_ID=itpc-gcp-global-revenue-claude
+      - VERTEX_PROJECT_ID=jhorn-pai
+      - VERTEX_LOCATION=us-east1
