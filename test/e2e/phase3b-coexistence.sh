@@ -57,7 +57,7 @@ fi
 
 # Step 4: Verify PAI detected by detectSignalSources
 echo "--- Step 4: PAI detection ---"
-DETECT_OUTPUT=$(node -e "
+DETECT_OUTPUT=$(NODE_PATH=$(npm root -g) node -e "
   const { detectSignalSources } = require('@agentgrit/core');
   const r = detectSignalSources();
   console.log(JSON.stringify(r));

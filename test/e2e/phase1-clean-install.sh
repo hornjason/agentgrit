@@ -35,11 +35,12 @@ else
   fail "Step 1: init --quick did not create expected files/dirs"
 fi
 
-# Step 2: Verify Claude Code hooks installed by init
+# Step 2: Install and verify Claude Code hooks
 echo "--- Step 2: Verify Claude Code hooks ---"
+agentgrit init --claude-code --settings "$SETTINGS_PATH" 2>&1
 HOOK_COUNT=$(grep -c 'agentgrit' "$SETTINGS_PATH" 2>/dev/null || echo "0")
 if [ "$HOOK_COUNT" -ge 8 ]; then
-  pass "Step 2: Installed $HOOK_COUNT agentgrit hooks in settings.json (8 expected)"
+  pass "Step 2: Installed $HOOK_COUNT agentgrit hooks in settings.json (>= 8 expected)"
 else
   fail "Step 2: Only $HOOK_COUNT hooks written, expected >= 8"
 fi
@@ -183,6 +184,42 @@ if [ -f "$STATS_FILE" ]; then
 else
   fail "Step 11: Failed to create rule-stats.json"
 fi
+
+# Create CLAUDE.md with enough rules to exceed Global budget (cap=25)
+mkdir -p "$HOME/.claude"
+cat > "$HOME/.claude/CLAUDE.md" << 'CLAUDE_EOF'
+# Rules
+
+- **bad-rule-never-helps:** This is a rule that never helps anyone
+- **stale-unused-rule:** This rule is stale and unused
+- **feedback_check_scope_first:** Check scope before implementation
+- **feedback_test_in_browser:** Always test in browser
+- **feedback_verify_deploy:** Verify deployment
+- **extra-rule-01:** Extra padding rule for budget
+- **extra-rule-02:** Another padding rule for budget
+- **extra-rule-03:** Yet another padding rule
+- **extra-rule-04:** Fourth padding rule
+- **extra-rule-05:** Fifth padding rule
+- **extra-rule-06:** Sixth padding rule
+- **extra-rule-07:** Seventh padding rule
+- **extra-rule-08:** Eighth padding rule
+- **extra-rule-09:** Ninth padding rule
+- **extra-rule-10:** Tenth padding rule
+- **extra-rule-11:** Eleventh padding rule
+- **extra-rule-12:** Twelfth padding rule
+- **extra-rule-13:** Thirteenth padding rule
+- **extra-rule-14:** Fourteenth padding rule
+- **extra-rule-15:** Fifteenth padding rule
+- **extra-rule-16:** Sixteenth padding rule
+- **extra-rule-17:** Seventeenth padding rule
+- **extra-rule-18:** Eighteenth padding rule
+- **extra-rule-19:** Nineteenth padding rule
+- **extra-rule-20:** Twentieth padding rule
+- **extra-rule-21:** Twenty-first padding rule
+- **extra-rule-22:** Twenty-second padding rule
+- **extra-rule-23:** Twenty-third padding rule
+- **extra-rule-24:** Twenty-fourth padding rule
+CLAUDE_EOF
 
 # Step 12: agentgrit rules prune (dry run by default)
 echo "--- Step 12: Pruning dry run ---"

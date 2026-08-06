@@ -1,10 +1,12 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { getBaseDir, stateDir, resolveMemoryDir } from "../../src/adapters/paths";
+import { getBaseDir, stateDir, resolveMemoryDir, resolveSignalDir } from "../../src/adapters/paths";
 import { readGraph, buildGraph, writeGraphFile } from "../../src/graph/builder";
 import { queryGraph } from "../../src/graph/query";
 import { generateReport, formatReportMarkdown } from "../../src/graph/report";
 import { relativeTime } from "../../src/adapters/time";
+import { buildIndexFromDir } from "../../src/graph/bm25";
+import { detectDomains, getContextRules, writeSessionContext } from "../../src/graph/context";
 
 function showStats(base: string): void {
   const graphPath = join(base, "state", "knowledge-graph.json");
@@ -147,6 +149,22 @@ export async function graphCommand(args: string[]): Promise<void> {
     doQuery(base, query);
   } else if (sub === "report") {
     doReport();
+  } else if (sub === "context") {
+    const graph = readGraph();
+    if (graph.nodeCount === 0) {
+      console.log("  Empty graph. Run 'agentgrit graph build' first.\n");
+      return;
+    }
+    const memoryDir = resolveMemoryDir();
+    const index = buildIndexFromDir(memoryDir);
+    const queryIdx = args.indexOf("--query");
+    const queryText = queryIdx !== -1 && args[queryIdx + 1] ? args.slice(queryIdx + 1).join(" ") : "";
+    const domains = queryText ? detectDomains(queryText) : [];
+    const signalDir = resolveSignalDir();
+    const rules = await getContextRules(graph, index, domains, 10, signalDir, queryText || undefined);
+    const rulesText = rules.map(r => `- **${r.id}:** ${r.text}`).join("\n");
+    console.log(`<system-reminder>\nAgentGrit Context (auto-loaded)\n\n${rulesText}\n</system-reminder>`);
+    writeSessionContext(rules, domains.length > 0 ? domains : ["default"]);
   } else if (sub === "stats") {
     showStats(base);
   } else {

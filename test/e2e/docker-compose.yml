@@ -1,6 +1,8 @@
 services:
   e2e-phase1:
-    build: .
+    build:
+      context: ../..
+      dockerfile: test/e2e/Dockerfile
     command: ./phase1-clean-install.sh
     volumes:
       - ~/.config/gcloud:/root/.config/gcloud:ro
@@ -14,7 +16,9 @@ services:
       - VERTEX_LOCATION=us-east1
 
   e2e-phase2:
-    build: .
+    build:
+      context: ../..
+      dockerfile: test/e2e/Dockerfile
     command: ./phase2-integration.sh
     volumes:
       - ~/.config/gcloud:/root/.config/gcloud:ro
@@ -31,7 +35,9 @@ services:
       - VERTEX_LOCATION=us-east1
 
   e2e-phase3b:
-    build: .
+    build:
+      context: ../..
+      dockerfile: test/e2e/Dockerfile
     command: ./phase3b-coexistence.sh
     volumes:
       - ~/.config/gcloud:/root/.config/gcloud:ro

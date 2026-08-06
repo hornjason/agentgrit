@@ -481,12 +481,8 @@ export function countExistingHooks(settingsPath: string): number {
 
 /**
  * Install Claude Code integration hooks into settings.json.
- * Generates hook registrations for:
- *   - SessionStart: context injection (graph context)
- *   - SessionEnd: session scoring (sentiment capture)
- *   - PostToolUse: tool audit capture
- *
  * Merges with existing config — never overwrites non-hook settings.
+ * Writes installed-hooks.json manifest for verification.
  */
 export function installClaudeCodeHooks(settingsPath: string): {
   installed: number;
@@ -511,8 +507,13 @@ export function installClaudeCodeHooks(settingsPath: string): {
     timeout: number;
   }> = [
     { event: "SessionStart", matcher: "", command: "npx agentgrit graph context", timeout: 10000 },
-    { event: "SessionEnd", matcher: "", command: "npx agentgrit capture sentiment", timeout: 10000 },
-    { event: "PostToolUse", matcher: ".*", command: "npx agentgrit capture tool", timeout: 5000 },
+    { event: "UserPromptSubmit", matcher: "", command: "npx agentgrit capture rating", timeout: 5000 },
+    { event: "UserPromptSubmit", matcher: "", command: "npx agentgrit capture correction", timeout: 5000 },
+    { event: "UserPromptSubmit", matcher: "", command: "npx agentgrit capture sentiment", timeout: 5000 },
+    { event: "PostToolUse", matcher: "", command: "npx agentgrit capture tool", timeout: 5000 },
+    { event: "PostToolUse", matcher: "Skill", command: "npx agentgrit capture skill", timeout: 5000 },
+    { event: "Stop", matcher: "", command: "npx agentgrit capture harvest", timeout: 5000 },
+    { event: "SessionEnd", matcher: "", command: "npx agentgrit capture incident", timeout: 10000 },
   ];
 
   let installed = 0;
@@ -552,6 +553,17 @@ export function installClaudeCodeHooks(settingsPath: string): {
   }
 
   writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf-8");
+
+  // Write installed-hooks.json manifest for verification
+  const baseDir = process.env.AGENTGRIT_DIR ?? join(homedir(), ".agentgrit");
+  const manifestPath = join(baseDir, "installed-hooks.json");
+  const totalHooks = countExistingHooks(settingsPath);
+  writeFileSync(manifestPath, JSON.stringify({
+    count: totalHooks,
+    settingsPath,
+    installedAt: new Date().toISOString(),
+    hooks: hookDefs.map(d => `${d.event}:${d.command}`),
+  }, null, 2), "utf-8");
 
   return { installed, existing, skipped };
 }
