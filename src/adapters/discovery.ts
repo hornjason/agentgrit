@@ -419,6 +419,7 @@ export function installHooks(settingsPath: string): {
     { event: "SessionEnd", matcher: "", command: "npx agentgrit capture session-score", timeout: 10000 },
     { event: "SessionEnd", matcher: "", command: "npx agentgrit capture debrief", timeout: 10000 },
     { event: "SessionEnd", matcher: "", command: "npx agentgrit capture incident-analysis", timeout: 10000 },
+    { event: "SessionEnd", matcher: "", command: "npx agentgrit capture work-completion", timeout: 10000 },
   ];
 
   let installed = 0;
@@ -520,6 +521,7 @@ export function installClaudeCodeHooks(settingsPath: string): {
     { event: "SessionEnd", matcher: "", command: "npx agentgrit capture session-score", timeout: 10000 },
     { event: "SessionEnd", matcher: "", command: "npx agentgrit capture debrief", timeout: 10000 },
     { event: "SessionEnd", matcher: "", command: "npx agentgrit capture incident-analysis", timeout: 10000 },
+    { event: "SessionEnd", matcher: "", command: "npx agentgrit capture work-completion", timeout: 10000 },
   ];
 
   let installed = 0;
