@@ -6,7 +6,7 @@ import { queryGraph } from "../../src/graph/query";
 import { generateReport, formatReportMarkdown } from "../../src/graph/report";
 import { relativeTime } from "../../src/adapters/time";
 import { buildIndexFromDir } from "../../src/graph/bm25";
-import { detectDomains, getContextRules, writeSessionContext } from "../../src/graph/context";
+import { detectDomains, getContextRules, writeSessionContext, computePerformanceSummary, getRecentFailurePatterns, getWorkContextDomains } from "../../src/graph/context";
 
 function showStats(base: string): void {
   const graphPath = join(base, "state", "knowledge-graph.json");
@@ -159,11 +159,27 @@ export async function graphCommand(args: string[]): Promise<void> {
     const index = buildIndexFromDir(memoryDir);
     const queryIdx = args.indexOf("--query");
     const queryText = queryIdx !== -1 && args[queryIdx + 1] ? args.slice(queryIdx + 1).join(" ") : "";
-    const domains = queryText ? detectDomains(queryText) : [];
     const signalDir = resolveSignalDir();
+    let domains = queryText ? detectDomains(queryText) : [];
+    const workDomains = await getWorkContextDomains(signalDir);
+    for (const wd of workDomains) {
+      if (!domains.includes(wd)) domains.push(wd);
+    }
     const rules = await getContextRules(graph, index, domains, 10, signalDir, queryText || undefined);
     const rulesText = rules.map(r => `- **${r.id}:** ${r.text}`).join("\n");
-    console.log(`<system-reminder>\nAgentGrit Context (auto-loaded)\n\n${rulesText}\n</system-reminder>`);
+
+    const extraSections: string[] = [];
+    const perf = await computePerformanceSummary(signalDir);
+    if (perf) {
+      const fmt = (v: number | null) => v !== null ? `${v.toFixed(1)}/10` : "—";
+      extraSections.push(`\n**Performance Signals:** Today: ${fmt(perf.today_avg)} | Week: ${fmt(perf.week_avg)} | Month: ${fmt(perf.month_avg)} | Trend: ${perf.trend} | Total signals: ${perf.total_signals}`);
+    }
+    const failures = await getRecentFailurePatterns(signalDir);
+    if (failures.length > 0) {
+      extraSections.push(`\n**Recent Failure Patterns (avoid these):**\n${failures.map(f => `  ${f}`).join("\n")}`);
+    }
+
+    console.log(`<system-reminder>\nAgentGrit Context (auto-loaded)\n\n${rulesText}${extraSections.join("")}\n</system-reminder>`);
     writeSessionContext(rules, domains.length > 0 ? domains : ["default"]);
   } else if (sub === "stats") {
     showStats(base);
