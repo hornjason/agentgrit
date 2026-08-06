@@ -550,3 +550,56 @@ describe("performance", () => {
     }
   });
 });
+
+// ── capture incident-analysis ──
+
+describe("capture incident-analysis", () => {
+  test("detects pattern from 2+ incidents of same type", async () => {
+    const signalDir = join(TMP_DIR, "signals");
+    const stateDir = join(TMP_DIR, "state");
+    mkdirSync(signalDir, { recursive: true });
+    mkdirSync(stateDir, { recursive: true });
+
+    const incidents = [
+      { timestamp: new Date().toISOString(), session_id: "sess-pattern", error_snippet: "ENOENT: no such file", error_type: "ENOENT", command_preview: "cat /missing" },
+      { timestamp: new Date().toISOString(), session_id: "sess-pattern", error_snippet: "ENOENT: no such file", error_type: "ENOENT", command_preview: "cat /also-missing" },
+      { timestamp: new Date().toISOString(), session_id: "sess-pattern", error_snippet: "EACCES: permission denied", error_type: "EACCES", command_preview: "rm /protected" },
+    ];
+    writeFileSync(join(signalDir, "incidents.jsonl"), incidents.map(i => JSON.stringify(i)).join("\n") + "\n");
+
+    const input = JSON.stringify({ session_id: "sess-pattern" });
+    const result = await runCapture("incident-analysis", input);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toContain("1 pattern(s)");
+    expect(result.stderr).toContain("1 rule(s) proposed");
+
+    const pendingRules = readFileSync(join(stateDir, "pending-rules.md"), "utf-8");
+    expect(pendingRules).toContain("incident-pattern-ENOENT");
+    expect(pendingRules).not.toContain("incident-pattern-EACCES");
+  });
+
+  test("dedup prevents duplicate rule proposals", async () => {
+    const signalDir = join(TMP_DIR, "signals");
+    const stateDir = join(TMP_DIR, "state");
+    mkdirSync(signalDir, { recursive: true });
+    mkdirSync(stateDir, { recursive: true });
+
+    const incidents = [
+      { timestamp: new Date().toISOString(), session_id: "sess-dedup", error_snippet: "ENOENT: no such file", error_type: "ENOENT", command_preview: "cat /missing" },
+      { timestamp: new Date().toISOString(), session_id: "sess-dedup", error_snippet: "ENOENT: no such file", error_type: "ENOENT", command_preview: "cat /also-missing" },
+    ];
+    writeFileSync(join(signalDir, "incidents.jsonl"), incidents.map(i => JSON.stringify(i)).join("\n") + "\n");
+
+    writeFileSync(join(stateDir, "pending-rules.md"), "## [PROPOSED] incident-pattern-ENOENT\nAlready exists\n");
+
+    const input = JSON.stringify({ session_id: "sess-dedup" });
+    const result = await runCapture("incident-analysis", input);
+
+    expect(result.exitCode).toBe(0);
+
+    const pendingRules = readFileSync(join(stateDir, "pending-rules.md"), "utf-8");
+    const matches = pendingRules.match(/incident-pattern-ENOENT/g);
+    expect(matches!.length).toBe(1);
+  });
+});

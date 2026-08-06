@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, appendFileSync, readFileSync } from "fs";
 import { join } from "path";
 import { randomUUID } from "crypto";
+import { execSync } from "child_process";
 import { parseRating, computeComposite, parseBareNumberRating, parsePraiseRating, parseThumbsRating, captureSessionSentiment } from "../../src/capture/rating";
 import type { Turn } from "../../src/capture/rating";
 import { parseTranscript, extractDebrief } from "../../src/capture/debrief";
@@ -457,6 +458,34 @@ async function captureDebriefCommand(): Promise<void> {
   }
 }
 
+async function captureIncidentAnalysisCommand(): Promise<void> {
+  const raw = readStdin();
+  if (!raw) return;
+
+  let input: { session_id?: string };
+  try {
+    input = JSON.parse(raw);
+  } catch {
+    return;
+  }
+
+  const sessionId = input.session_id;
+  if (!sessionId) return;
+
+  const { analyzeSessionPatterns } = await import("../../src/capture/incidents");
+  const { resolveSignalDir, stateDir } = await import("../../src/adapters/paths");
+
+  const incidentsPath = join(resolveSignalDir(), "incidents.jsonl");
+  const pendingRulesPath = join(stateDir(), "pending-rules.md");
+
+  const result = analyzeSessionPatterns(incidentsPath, pendingRulesPath, sessionId);
+  if (result.patternsFound > 0) {
+    process.stderr.write(
+      `[incident-analysis] ${result.patternsFound} pattern(s), ${result.rulesProposed} rule(s) proposed\n`,
+    );
+  }
+}
+
 const SUBCOMMANDS: Record<string, () => Promise<void>> = {
   rating: captureRatingCommand,
   correction: captureCorrectionCommand,
@@ -467,6 +496,7 @@ const SUBCOMMANDS: Record<string, () => Promise<void>> = {
   incident: captureIncidentCommand,
   "session-score": captureSessionScoreCommand,
   debrief: captureDebriefCommand,
+  "incident-analysis": captureIncidentAnalysisCommand,
 };
 
 export async function captureCommand(args: string[]): Promise<void> {

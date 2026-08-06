@@ -316,14 +316,14 @@ describe("inventoryMemoryFiles", () => {
 // ── installHooks ──
 
 describe("installHooks", () => {
-  test("installs all 9 hooks into empty settings", async () => {
+  test("installs all 11 hooks into empty settings", async () => {
     const settingsPath = join(SANDBOX, "settings.json");
     writeFileSync(settingsPath, "{}", "utf-8");
 
     const mod = await import("../../src/adapters/discovery");
     const result = mod.installHooks(settingsPath);
 
-    expect(result.installed).toBe(10);
+    expect(result.installed).toBe(11);
     expect(result.existing).toBe(0);
 
     const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
@@ -353,7 +353,7 @@ describe("installHooks", () => {
     const mod = await import("../../src/adapters/discovery");
     const result = mod.installHooks(settingsPath);
 
-    expect(result.installed).toBe(10);
+    expect(result.installed).toBe(11);
 
     const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
 
@@ -380,11 +380,11 @@ describe("installHooks", () => {
 
     const mod = await import("../../src/adapters/discovery");
     const first = mod.installHooks(settingsPath);
-    expect(first.installed).toBe(10);
+    expect(first.installed).toBe(11);
 
     const second = mod.installHooks(settingsPath);
     expect(second.installed).toBe(0);
-    expect(second.existing).toBe(10);
+    expect(second.existing).toBe(11);
   });
 
   test("creates settings file if it doesn't exist", async () => {
@@ -394,7 +394,7 @@ describe("installHooks", () => {
     const mod = await import("../../src/adapters/discovery");
     const result = mod.installHooks(settingsPath);
 
-    expect(result.installed).toBe(10);
+    expect(result.installed).toBe(11);
     expect(existsSync(settingsPath)).toBe(true);
   });
 
