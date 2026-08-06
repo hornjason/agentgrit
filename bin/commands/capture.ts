@@ -6,8 +6,9 @@ import { parseRating, computeComposite, parseBareNumberRating, parsePraiseRating
 import type { Turn } from "../../src/capture/rating";
 import { parseTranscript, extractDebrief } from "../../src/capture/debrief";
 import { SCHEMA_VERSION } from "../../src/adapters/types";
-import { loadConfig } from "../../src/adapters/paths";
-import { resolveSignalDir } from "../../src/adapters/paths";
+import type { RatingSignal } from "../../src/adapters/types";
+import { loadConfig, resolveSignalDir, resolveMemoryDir } from "../../src/adapters/paths";
+import { generateFeedback, generateSuccess } from "../../src/daemon/feedback";
 import { inference, type InferenceOptions, type InferenceResult } from "../../src/adapters/inference";
 
 export type InferenceFn = (opts: InferenceOptions) => Promise<InferenceResult>;
@@ -57,6 +58,19 @@ function readStdin(): string {
   }
 }
 
+async function maybeGenerateLearning(rating: number, ratingSignal: RatingSignal): Promise<void> {
+  try {
+    const memoryDir = resolveMemoryDir();
+    if (rating >= 8) {
+      await generateSuccess([ratingSignal], memoryDir);
+    } else if (rating <= 4) {
+      await generateFeedback([ratingSignal], memoryDir);
+    }
+  } catch (err) {
+    process.stderr.write(`[agentgrit] auto-feedback error: ${err}\n`);
+  }
+}
+
 async function captureRatingCommand(): Promise<void> {
   const raw = readStdin();
   if (!raw) return;
@@ -79,8 +93,9 @@ async function captureRatingCommand(): Promise<void> {
   const parsed = parseRating(content);
   if (parsed) {
     const composite = computeComposite(parsed.mode, parsed.scope, parsed.quality);
+    const recordId = randomUUID();
     appendJsonl(join(dir, "ratings.jsonl"), {
-      id: randomUUID(),
+      id: recordId,
       type: "rating",
       timestamp: ts,
       session_id: sessionId,
@@ -92,20 +107,29 @@ async function captureRatingCommand(): Promise<void> {
       quality: parsed.quality,
       comment: parsed.comment,
     });
+    await maybeGenerateLearning(composite, {
+      id: recordId, type: "rating", timestamp: ts, session_id: sessionId,
+      schemaVersion: SCHEMA_VERSION, rating: composite, source: "explicit",
+    });
     return;
   }
 
   // 2. Bare number (e.g., "7", "8 - nice work")
   const bareNumber = parseBareNumberRating(content);
   if (bareNumber !== null) {
+    const recordId = randomUUID();
     appendJsonl(join(dir, "ratings.jsonl"), {
-      id: randomUUID(),
+      id: recordId,
       type: "rating",
       timestamp: ts,
       session_id: sessionId,
       schemaVersion: SCHEMA_VERSION,
       rating: bareNumber,
       source: "implicit",
+    });
+    await maybeGenerateLearning(bareNumber, {
+      id: recordId, type: "rating", timestamp: ts, session_id: sessionId,
+      schemaVersion: SCHEMA_VERSION, rating: bareNumber, source: "implicit",
     });
     return;
   }
@@ -114,8 +138,9 @@ async function captureRatingCommand(): Promise<void> {
   const config = loadConfig();
   const praise = parsePraiseRating(content, config);
   if (praise) {
+    const recordId = randomUUID();
     appendJsonl(join(dir, "ratings.jsonl"), {
-      id: randomUUID(),
+      id: recordId,
       type: "rating",
       timestamp: ts,
       session_id: sessionId,
@@ -123,20 +148,29 @@ async function captureRatingCommand(): Promise<void> {
       rating: praise.score,
       source: "praise",
     });
+    await maybeGenerateLearning(praise.score, {
+      id: recordId, type: "rating", timestamp: ts, session_id: sessionId,
+      schemaVersion: SCHEMA_VERSION, rating: praise.score, source: "praise",
+    });
     return;
   }
 
   // 4. Thumbs up/down
   const thumbs = parseThumbsRating(content, config);
   if (thumbs) {
+    const recordId = randomUUID();
     appendJsonl(join(dir, "ratings.jsonl"), {
-      id: randomUUID(),
+      id: recordId,
       type: "rating",
       timestamp: ts,
       session_id: sessionId,
       schemaVersion: SCHEMA_VERSION,
       rating: thumbs.score,
       source: "thumbs",
+    });
+    await maybeGenerateLearning(thumbs.score, {
+      id: recordId, type: "rating", timestamp: ts, session_id: sessionId,
+      schemaVersion: SCHEMA_VERSION, rating: thumbs.score, source: "thumbs",
     });
     return;
   }
@@ -486,6 +520,90 @@ async function captureIncidentAnalysisCommand(): Promise<void> {
   }
 }
 
+async function captureWorkCompletionCommand(): Promise<void> {
+  const raw = readStdin();
+  if (!raw) return;
+
+  let input: { session_id?: string; transcript_path?: string };
+  try {
+    input = JSON.parse(raw);
+  } catch {
+    return;
+  }
+
+  const sessionId = input.session_id;
+  const transcriptPath = input.transcript_path;
+  if (!sessionId || !transcriptPath) return;
+
+  let gitSummary = "";
+  let filesChanged: string[] = [];
+  try {
+    gitSummary = execSync("git diff --stat", { encoding: "utf-8", timeout: 5000 }).trim();
+    filesChanged = gitSummary.split("\n").filter((l) => l.includes("|")).map((l) => l.split("|")[0].trim());
+  } catch {}
+
+  let turnCount = 0;
+  if (existsSync(transcriptPath)) {
+    const transcript = readFileSync(transcriptPath, "utf-8");
+    const lines = transcript.split("\n").filter((l) => l.trim());
+    turnCount = lines.length;
+  }
+
+  if (filesChanged.length === 0 && turnCount < 3) return;
+
+  const dir = getSignalDir();
+  const toolAuditPath = join(dir, "tool-audit.jsonl");
+  const toolsUsed: string[] = [];
+  if (existsSync(toolAuditPath)) {
+    const lines = readFileSync(toolAuditPath, "utf-8").trim().split("\n");
+    const seen = new Set<string>();
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line);
+        if (entry.session_id === sessionId && entry.tool_name && !seen.has(entry.tool_name)) {
+          seen.add(entry.tool_name);
+          toolsUsed.push(entry.tool_name);
+        }
+      } catch {}
+    }
+  }
+
+  let durationMinutes = 0;
+  if (existsSync(transcriptPath)) {
+    const transcript = readFileSync(transcriptPath, "utf-8");
+    const lines = transcript.split("\n").filter((l) => l.trim());
+    let firstTs: string | null = null;
+    let lastTs: string | null = null;
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line);
+        if (entry.timestamp) {
+          if (!firstTs) firstTs = entry.timestamp;
+          lastTs = entry.timestamp;
+        }
+      } catch {}
+    }
+    if (firstTs && lastTs) {
+      const diff = new Date(lastTs).getTime() - new Date(firstTs).getTime();
+      if (diff > 0) durationMinutes = Math.round(diff / 60000);
+    }
+  }
+
+  const record = {
+    id: randomUUID(),
+    type: "work-completion",
+    timestamp: new Date().toISOString(),
+    session_id: sessionId,
+    schemaVersion: SCHEMA_VERSION,
+    files_changed: filesChanged,
+    tools_used: toolsUsed,
+    duration_minutes: durationMinutes,
+    git_summary: gitSummary,
+  };
+
+  appendJsonl(join(dir, "work-completions.jsonl"), record);
+}
+
 const SUBCOMMANDS: Record<string, () => Promise<void>> = {
   rating: captureRatingCommand,
   correction: captureCorrectionCommand,
@@ -497,6 +615,7 @@ const SUBCOMMANDS: Record<string, () => Promise<void>> = {
   "session-score": captureSessionScoreCommand,
   debrief: captureDebriefCommand,
   "incident-analysis": captureIncidentAnalysisCommand,
+  "work-completion": captureWorkCompletionCommand,
 };
 
 export async function captureCommand(args: string[]): Promise<void> {

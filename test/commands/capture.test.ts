@@ -17,13 +17,13 @@ afterEach(() => {
 
 const BIN = join(import.meta.dir, "../../bin/agentgrit.ts");
 
-async function runCapture(sub: string, stdin: string): Promise<{ exitCode: number; stdout: string; stderr: string; elapsed: number }> {
+async function runCapture(sub: string, stdin: string, extraEnv?: Record<string, string>): Promise<{ exitCode: number; stdout: string; stderr: string; elapsed: number }> {
   const start = performance.now();
   const proc = Bun.spawn(["bun", BIN, "capture", sub], {
     stdin: new Blob([stdin]),
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, AGENTGRIT_DIR: TMP_DIR },
+    env: { ...process.env, AGENTGRIT_DIR: TMP_DIR, ...extraEnv },
   });
   const exitCode = await proc.exited;
   const stdout = await new Response(proc.stdout).text();
@@ -535,6 +535,139 @@ describe("capture debrief", () => {
   });
 });
 
+// ── capture work-completion ──
+
+describe("capture work-completion", () => {
+  test("writes valid record with all fields", async () => {
+    const signalDir = join(TMP_DIR, "signals");
+    mkdirSync(signalDir, { recursive: true });
+
+    writeFileSync(join(signalDir, "tool-audit.jsonl"), [
+      JSON.stringify({ session_id: "sess-wc", tool_name: "Read" }),
+      JSON.stringify({ session_id: "sess-wc", tool_name: "Bash" }),
+      JSON.stringify({ session_id: "sess-wc", tool_name: "Read" }),
+      JSON.stringify({ session_id: "other-sess", tool_name: "Edit" }),
+    ].join("\n") + "\n");
+
+    const transcriptPath = join(TMP_DIR, "transcript-wc.jsonl");
+    const now = new Date();
+    const later = new Date(now.getTime() + 30 * 60000);
+    writeFileSync(transcriptPath, [
+      JSON.stringify({ type: "user", timestamp: now.toISOString(), message: { content: "do something" } }),
+      JSON.stringify({ type: "assistant", timestamp: now.toISOString(), message: { content: [{ type: "text", text: "ok" }] } }),
+      JSON.stringify({ type: "user", timestamp: later.toISOString(), message: { content: "thanks" } }),
+    ].join("\n"));
+
+    const input = JSON.stringify({ session_id: "sess-wc", transcript_path: transcriptPath });
+    const result = await runCapture("work-completion", input);
+    expect(result.exitCode).toBe(0);
+
+    const file = join(signalDir, "work-completions.jsonl");
+    expect(existsSync(file)).toBe(true);
+
+    const parsed = JSON.parse(readFileSync(file, "utf-8").trim());
+    expect(parsed.type).toBe("work-completion");
+    expect(parsed.session_id).toBe("sess-wc");
+    expect(parsed.id).toBeDefined();
+    expect(parsed.timestamp).toBeDefined();
+    expect(parsed.schemaVersion).toBeDefined();
+    expect(Array.isArray(parsed.files_changed)).toBe(true);
+    expect(Array.isArray(parsed.tools_used)).toBe(true);
+    expect(typeof parsed.duration_minutes).toBe("number");
+    expect(typeof parsed.git_summary).toBe("string");
+  });
+
+  test("schema has all 9 required fields", async () => {
+    const transcriptPath = join(TMP_DIR, "transcript-schema.jsonl");
+    const now = new Date();
+    writeFileSync(transcriptPath, [
+      JSON.stringify({ type: "user", timestamp: now.toISOString(), message: { content: "a" } }),
+      JSON.stringify({ type: "assistant", timestamp: now.toISOString(), message: { content: [{ type: "text", text: "b" }] } }),
+      JSON.stringify({ type: "user", timestamp: now.toISOString(), message: { content: "c" } }),
+    ].join("\n"));
+
+    const input = JSON.stringify({ session_id: "sess-schema", transcript_path: transcriptPath });
+    const result = await runCapture("work-completion", input);
+    expect(result.exitCode).toBe(0);
+
+    const file = join(TMP_DIR, "signals", "work-completions.jsonl");
+    expect(existsSync(file)).toBe(true);
+
+    const parsed = JSON.parse(readFileSync(file, "utf-8").trim());
+    const requiredFields = ["id", "type", "timestamp", "session_id", "schemaVersion", "files_changed", "tools_used", "duration_minutes", "git_summary"];
+    for (const field of requiredFields) {
+      expect(parsed).toHaveProperty(field);
+    }
+    expect(Object.keys(parsed).length).toBeGreaterThanOrEqual(9);
+  });
+
+  test("trivial session guard — no git changes AND <3 turns → skip", async () => {
+    const cleanGitDir = join(TMP_DIR, "clean-repo");
+    mkdirSync(cleanGitDir, { recursive: true });
+    const { execSync: exec } = require("child_process");
+    exec("git init", { cwd: cleanGitDir });
+    exec("git commit --allow-empty -m init", { cwd: cleanGitDir });
+
+    const transcriptPath = join(TMP_DIR, "transcript-trivial.jsonl");
+    writeFileSync(transcriptPath, [
+      JSON.stringify({ type: "user", message: { content: "hi" } }),
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "hello" }] } }),
+    ].join("\n"));
+
+    const input = JSON.stringify({ session_id: "sess-trivial", transcript_path: transcriptPath });
+    const result = await runCapture("work-completion", input, {
+      GIT_DIR: join(cleanGitDir, ".git"),
+      GIT_WORK_TREE: cleanGitDir,
+    });
+    expect(result.exitCode).toBe(0);
+
+    const file = join(TMP_DIR, "signals", "work-completions.jsonl");
+    expect(existsSync(file)).toBe(false);
+  });
+
+  test("exits 0 on invalid JSON", async () => {
+    const result = await runCapture("work-completion", "not json");
+    expect(result.exitCode).toBe(0);
+  });
+
+  test("exits 0 on empty stdin", async () => {
+    const result = await runCapture("work-completion", "");
+    expect(result.exitCode).toBe(0);
+  });
+
+  test("exits 0 with missing params", async () => {
+    const result = await runCapture("work-completion", JSON.stringify({ session_id: "s" }));
+    expect(result.exitCode).toBe(0);
+  });
+
+  test("tool deduplication — same tool counted once", async () => {
+    const signalDir = join(TMP_DIR, "signals");
+    mkdirSync(signalDir, { recursive: true });
+
+    writeFileSync(join(signalDir, "tool-audit.jsonl"), [
+      JSON.stringify({ session_id: "sess-dedup", tool_name: "Read" }),
+      JSON.stringify({ session_id: "sess-dedup", tool_name: "Read" }),
+      JSON.stringify({ session_id: "sess-dedup", tool_name: "Read" }),
+      JSON.stringify({ session_id: "sess-dedup", tool_name: "Bash" }),
+    ].join("\n") + "\n");
+
+    const transcriptPath = join(TMP_DIR, "transcript-dedup.jsonl");
+    writeFileSync(transcriptPath, [
+      JSON.stringify({ type: "user", message: { content: "a" } }),
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "b" }] } }),
+      JSON.stringify({ type: "user", message: { content: "c" } }),
+    ].join("\n"));
+
+    const input = JSON.stringify({ session_id: "sess-dedup", transcript_path: transcriptPath });
+    const result = await runCapture("work-completion", input);
+    expect(result.exitCode).toBe(0);
+
+    const file = join(signalDir, "work-completions.jsonl");
+    const parsed = JSON.parse(readFileSync(file, "utf-8").trim());
+    expect(parsed.tools_used).toEqual(["Read", "Bash"]);
+  });
+});
+
 describe("performance", () => {
   test("all capture commands complete under 500ms", async () => {
     const cases = [
@@ -601,5 +734,83 @@ describe("capture incident-analysis", () => {
     const pendingRules = readFileSync(join(stateDir, "pending-rules.md"), "utf-8");
     const matches = pendingRules.match(/incident-pattern-ENOENT/g);
     expect(matches!.length).toBe(1);
+  });
+});
+
+// ── auto-feedback on rating capture (#185) ──
+
+describe("auto-feedback on rating capture", () => {
+  test("AC-1: generateSuccess called for rating >= 8", async () => {
+    const input = JSON.stringify({
+      session_id: "sess-high",
+      message: { content: "9" },
+    });
+    const result = await runCapture("rating", input);
+    expect(result.exitCode).toBe(0);
+
+    const ratingsFile = join(TMP_DIR, "signals", "ratings.jsonl");
+    expect(existsSync(ratingsFile)).toBe(true);
+    const parsed = JSON.parse(readFileSync(ratingsFile, "utf-8").trim());
+    expect(parsed.rating).toBe(9);
+
+    const markerFile = join(TMP_DIR, "memory", ".generated-sessions.json");
+    expect(existsSync(markerFile)).toBe(true);
+    const marker = JSON.parse(readFileSync(markerFile, "utf-8"));
+    expect(marker.success).toContain("sess-high");
+  });
+
+  test("AC-2: generateFeedback called for rating <= 4", async () => {
+    const input = JSON.stringify({
+      session_id: "sess-low",
+      message: { content: "3" },
+    });
+    const result = await runCapture("rating", input);
+    expect(result.exitCode).toBe(0);
+
+    const ratingsFile = join(TMP_DIR, "signals", "ratings.jsonl");
+    expect(existsSync(ratingsFile)).toBe(true);
+    const parsed = JSON.parse(readFileSync(ratingsFile, "utf-8").trim());
+    expect(parsed.rating).toBe(3);
+
+    const markerFile = join(TMP_DIR, "memory", ".generated-sessions.json");
+    expect(existsSync(markerFile)).toBe(true);
+    const marker = JSON.parse(readFileSync(markerFile, "utf-8"));
+    expect(marker.feedback).toContain("sess-low");
+  });
+
+  test("AC-3: no feedback function call for mid-range rating 6", async () => {
+    const input = JSON.stringify({
+      session_id: "sess-mid",
+      message: { content: "6" },
+    });
+    const result = await runCapture("rating", input);
+    expect(result.exitCode).toBe(0);
+
+    const ratingsFile = join(TMP_DIR, "signals", "ratings.jsonl");
+    expect(existsSync(ratingsFile)).toBe(true);
+    const parsed = JSON.parse(readFileSync(ratingsFile, "utf-8").trim());
+    expect(parsed.rating).toBe(6);
+
+    const markerFile = join(TMP_DIR, "memory", ".generated-sessions.json");
+    expect(existsSync(markerFile)).toBe(false);
+  });
+
+  test("AC-4: rating still written when auto-feedback errors", async () => {
+    const memPath = join(TMP_DIR, "memory");
+    writeFileSync(memPath, "blocker");
+
+    const input = JSON.stringify({
+      session_id: "sess-err",
+      message: { content: "9" },
+    });
+    const result = await runCapture("rating", input);
+    expect(result.exitCode).toBe(0);
+
+    const ratingsFile = join(TMP_DIR, "signals", "ratings.jsonl");
+    expect(existsSync(ratingsFile)).toBe(true);
+    const parsed = JSON.parse(readFileSync(ratingsFile, "utf-8").trim());
+    expect(parsed.rating).toBe(9);
+
+    expect(result.stderr).toContain("[agentgrit] auto-feedback error:");
   });
 });
