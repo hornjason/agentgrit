@@ -424,6 +424,45 @@ export function scoreSession(turns: Turn[]): SessionScoreResult {
   };
 }
 
+// ── Bare-number rating parsing ──
+
+const BARE_NUMBER_PATTERN = /^(10|[1-9])\b/;
+const COUNT_CONTEXT = /^(?:10|[1-9])\s+(?:items?|files?|steps?|times?|things?|of\b|bugs?|issues?|errors?|warnings?|tasks?|projects?|versions?|minutes?|hours?|days?|seconds?|people|users?|more|left|remaining|total|pages?|lines?|commits?|tests?|PRs?|tickets?|runs?|ways?|options?|modules?|components?|endpoints?|queries?|rows?|columns?|fields?|records?)\b/i;
+
+export function parseBareNumberRating(message: string): number | null {
+  const trimmed = message.trim();
+  if (!BARE_NUMBER_PATTERN.test(trimmed)) return null;
+  if (/^(?:10|[1-9])\.\d/.test(trimmed)) return null;
+  if (COUNT_CONTEXT.test(trimmed)) return null;
+  const match = trimmed.match(BARE_NUMBER_PATTERN)!;
+  return parseInt(match[1], 10);
+}
+
+// ── Praise keyword rating parsing ──
+
+export function parsePraiseRating(message: string, config?: AgentGritConfig): { score: number } | null {
+  const trimmed = message.trim();
+  const words = trimmed.split(/\s+/);
+  if (words.length > 5) return null;
+
+  const lower = trimmed.toLowerCase().replace(/[.!?,'"]/g, "");
+  const lowerWords = lower.split(/\s+/);
+
+  let found = false;
+  for (const word of lowerWords) {
+    if (POSITIVE_KEYWORDS.has(word)) { found = true; break; }
+  }
+  if (!found) {
+    for (let i = 0; i < lowerWords.length - 1; i++) {
+      const phrase = `${lowerWords[i]} ${lowerWords[i + 1]}`;
+      if (POSITIVE_KEYWORDS.has(phrase)) { found = true; break; }
+    }
+  }
+
+  if (!found) return null;
+  return { score: config?.thresholds?.praiseScore ?? 8 };
+}
+
 // ── Thumbs up/down parsing ──
 
 const THUMBS_UP_PATTERNS = [/👍/, /\bthumbs\s*up\b/i, /\+1\b/];

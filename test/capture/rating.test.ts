@@ -15,6 +15,8 @@ import {
   captureSessionSentiment,
   scoreSessionObjective,
   parseThumbsRating,
+  parseBareNumberRating,
+  parsePraiseRating,
   countUninterruptedRuns,
   countShortFrustrated,
 } from "../../src/capture/rating";
@@ -693,5 +695,156 @@ describe("countShortFrustrated", () => {
       { role: "user", text: "yes", charCount: 3 },
     ];
     expect(countShortFrustrated(turns)).toBe(0);
+  });
+});
+
+describe("parseBareNumberRating", () => {
+  // Positive matches (5+)
+  test("parses standalone '7'", () => {
+    expect(parseBareNumberRating("7")).toBe(7);
+  });
+
+  test("parses '8 - nice work'", () => {
+    expect(parseBareNumberRating("8 - nice work")).toBe(8);
+  });
+
+  test("parses '10'", () => {
+    expect(parseBareNumberRating("10")).toBe(10);
+  });
+
+  test("parses '1'", () => {
+    expect(parseBareNumberRating("1")).toBe(1);
+  });
+
+  test("parses '5' with trailing whitespace", () => {
+    expect(parseBareNumberRating("  5  ")).toBe(5);
+  });
+
+  test("parses '9 — excellent' with em-dash", () => {
+    expect(parseBareNumberRating("9 — excellent")).toBe(9);
+  });
+
+  // Negative matches (5+)
+  test("rejects '3 items'", () => {
+    expect(parseBareNumberRating("3 items")).toBeNull();
+  });
+
+  test("rejects 'step 2' (doesn't start with digit)", () => {
+    expect(parseBareNumberRating("step 2")).toBeNull();
+  });
+
+  test("rejects 'version 3.2' (doesn't start with digit)", () => {
+    expect(parseBareNumberRating("version 3.2")).toBeNull();
+  });
+
+  test("rejects '3.2' (version-like decimal)", () => {
+    expect(parseBareNumberRating("3.2")).toBeNull();
+  });
+
+  test("rejects '0' (out of range)", () => {
+    expect(parseBareNumberRating("0")).toBeNull();
+  });
+
+  test("rejects '11' (out of range — 1 matches but 11 doesn't match pattern)", () => {
+    // "11" starts with "1" and then "1" again — ^(10|[1-9])\b won't match "11"
+    // because \b after [1-9] requires a non-word boundary
+    expect(parseBareNumberRating("11")).toBeNull();
+  });
+
+  test("rejects '2 files'", () => {
+    expect(parseBareNumberRating("2 files")).toBeNull();
+  });
+
+  test("rejects 'hello world'", () => {
+    expect(parseBareNumberRating("hello world")).toBeNull();
+  });
+
+  test("rejects '5 more things to do'", () => {
+    expect(parseBareNumberRating("5 more things to do")).toBeNull();
+  });
+
+  test("rejects '4 tests failed'", () => {
+    expect(parseBareNumberRating("4 tests failed")).toBeNull();
+  });
+});
+
+describe("parsePraiseRating", () => {
+  // Positive matches (8+)
+  test("detects 'great'", () => {
+    const result = parsePraiseRating("great");
+    expect(result).not.toBeNull();
+    expect(result!.score).toBe(8);
+  });
+
+  test("detects 'perfect'", () => {
+    const result = parsePraiseRating("perfect");
+    expect(result).not.toBeNull();
+    expect(result!.score).toBe(8);
+  });
+
+  test("detects 'love it'", () => {
+    const result = parsePraiseRating("love it");
+    expect(result).not.toBeNull();
+    expect(result!.score).toBe(8);
+  });
+
+  test("detects 'nice'", () => {
+    expect(parsePraiseRating("nice")).not.toBeNull();
+  });
+
+  test("detects 'awesome'", () => {
+    expect(parsePraiseRating("awesome")).not.toBeNull();
+  });
+
+  test("detects 'excellent'", () => {
+    expect(parsePraiseRating("excellent")).not.toBeNull();
+  });
+
+  test("detects 'amazing work'", () => {
+    expect(parsePraiseRating("amazing work")).not.toBeNull();
+  });
+
+  test("detects 'brilliant'", () => {
+    expect(parsePraiseRating("brilliant")).not.toBeNull();
+  });
+
+  test("detects 'nailed it'", () => {
+    expect(parsePraiseRating("nailed it")).not.toBeNull();
+  });
+
+  test("detects 'well done'", () => {
+    expect(parsePraiseRating("well done")).not.toBeNull();
+  });
+
+  // Rejection cases (3+)
+  test("rejects long sentence (>5 words)", () => {
+    expect(parsePraiseRating("great job on the implementation of the feature")).toBeNull();
+  });
+
+  test("rejects non-praise text", () => {
+    expect(parsePraiseRating("check logs")).toBeNull();
+  });
+
+  test("rejects empty string", () => {
+    expect(parsePraiseRating("")).toBeNull();
+  });
+
+  test("rejects neutral instruction", () => {
+    expect(parsePraiseRating("deploy the service now")).toBeNull();
+  });
+
+  // Config override
+  test("respects praiseScore config", () => {
+    const config: AgentGritConfig = {
+      signalDir: "/tmp",
+      adapter: "local",
+      rubrics: [],
+      rules: { globalBudget: 10, projectBudget: 5, autoPromote: false },
+      daemon: { interval: "1h", weeklyDay: "sunday" },
+      thresholds: { praiseScore: 7 },
+    };
+    const result = parsePraiseRating("perfect", config);
+    expect(result).not.toBeNull();
+    expect(result!.score).toBe(7);
   });
 });

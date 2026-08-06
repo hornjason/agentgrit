@@ -20,7 +20,7 @@ export interface Signal {
 export interface RatingSignal extends Signal {
   type: "rating";
   rating: number;
-  source: "explicit" | "implicit";
+  source: "explicit" | "implicit" | "praise" | "thumbs";
   comment?: string;
   sentimentSummary?: string;
   confidence?: number;
@@ -250,6 +250,7 @@ export interface AgentGritConfig {
     frustrationWeight?: number;
     thumbsUpScore?: number;
     thumbsDownScore?: number;
+    praiseScore?: number;
     decayHalfLife?: number;
     qualityFloorThreshold?: number;
     qualityFloorMinSessions?: number;

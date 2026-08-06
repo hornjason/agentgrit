@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, appendFileSync } from "fs";
 import { join } from "path";
 import { randomUUID } from "crypto";
-import { parseRating, computeComposite } from "../../src/capture/rating";
+import { parseRating, computeComposite, parseBareNumberRating, parsePraiseRating, parseThumbsRating } from "../../src/capture/rating";
 import { SCHEMA_VERSION } from "../../src/adapters/types";
+import { loadConfig } from "../../src/adapters/paths";
 import { resolveSignalDir } from "../../src/adapters/paths";
 import { inference, type InferenceOptions, type InferenceResult } from "../../src/adapters/inference";
 
@@ -67,26 +68,75 @@ async function captureRatingCommand(): Promise<void> {
   const content = input.message?.content;
   if (typeof content !== "string") return;
 
-  const parsed = parseRating(content);
-  if (!parsed) return;
-
-  const composite = computeComposite(parsed.mode, parsed.scope, parsed.quality);
   const dir = getSignalDir();
-  const record = {
-    id: randomUUID(),
-    type: "rating",
-    timestamp: new Date().toISOString(),
-    session_id: input.session_id || "unknown",
-    schemaVersion: SCHEMA_VERSION,
-    rating: composite,
-    source: "explicit",
-    mode: parsed.mode,
-    scope: parsed.scope,
-    quality: parsed.quality,
-    comment: parsed.comment,
-  };
+  const sessionId = input.session_id || "unknown";
+  const ts = new Date().toISOString();
 
-  appendJsonl(join(dir, "ratings.jsonl"), record);
+  // 1. Explicit /rate M:N S:N Q:N (highest priority)
+  const parsed = parseRating(content);
+  if (parsed) {
+    const composite = computeComposite(parsed.mode, parsed.scope, parsed.quality);
+    appendJsonl(join(dir, "ratings.jsonl"), {
+      id: randomUUID(),
+      type: "rating",
+      timestamp: ts,
+      session_id: sessionId,
+      schemaVersion: SCHEMA_VERSION,
+      rating: composite,
+      source: "explicit",
+      mode: parsed.mode,
+      scope: parsed.scope,
+      quality: parsed.quality,
+      comment: parsed.comment,
+    });
+    return;
+  }
+
+  // 2. Bare number (e.g., "7", "8 - nice work")
+  const bareNumber = parseBareNumberRating(content);
+  if (bareNumber !== null) {
+    appendJsonl(join(dir, "ratings.jsonl"), {
+      id: randomUUID(),
+      type: "rating",
+      timestamp: ts,
+      session_id: sessionId,
+      schemaVersion: SCHEMA_VERSION,
+      rating: bareNumber,
+      source: "implicit",
+    });
+    return;
+  }
+
+  // 3. Praise keywords (≤5 words, e.g., "great", "perfect", "love it")
+  const config = loadConfig();
+  const praise = parsePraiseRating(content, config);
+  if (praise) {
+    appendJsonl(join(dir, "ratings.jsonl"), {
+      id: randomUUID(),
+      type: "rating",
+      timestamp: ts,
+      session_id: sessionId,
+      schemaVersion: SCHEMA_VERSION,
+      rating: praise.score,
+      source: "praise",
+    });
+    return;
+  }
+
+  // 4. Thumbs up/down
+  const thumbs = parseThumbsRating(content, config);
+  if (thumbs) {
+    appendJsonl(join(dir, "ratings.jsonl"), {
+      id: randomUUID(),
+      type: "rating",
+      timestamp: ts,
+      session_id: sessionId,
+      schemaVersion: SCHEMA_VERSION,
+      rating: thumbs.score,
+      source: "thumbs",
+    });
+    return;
+  }
 }
 
 async function captureCorrectionCommand(): Promise<void> {
