@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { existsSync, rmSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
-import { getContextRules, detectDomains, initHybridDetection, parseLearnedRules, filterLearnedRules, resetDetectPatterns } from "../../src/graph/context";
+import { getContextRules, detectDomains, initHybridDetection, parseLearnedRules, filterLearnedRules, resetDetectPatterns, computePerformanceSummary, getRecentFailurePatterns, getWorkContextDomains } from "../../src/graph/context";
 import { buildIndex } from "../../src/graph/bm25";
 import type { Graph } from "../../src/graph/types";
 import type { GraphNode } from "../../src/adapters/types";
@@ -715,5 +715,153 @@ describe("filterLearnedRules", () => {
   test("security query ranks security rule higher than deploy rule", () => {
     const filtered = filterLearnedRules(rules, "security vulnerability scan", 3);
     expect(filtered[0]).toContain("Security Scan");
+  });
+});
+
+// ── Performance Summary Tests ──
+
+describe("computePerformanceSummary", () => {
+  test("computes all 5 fields from ratings", async () => {
+    const now = new Date();
+    const ratings = [
+      { rating: 8, timestamp: now.toISOString(), type: "rating", session_id: "s1" },
+      { rating: 6, timestamp: now.toISOString(), type: "rating", session_id: "s2" },
+      { rating: 7, timestamp: new Date(now.getTime() - 2 * 86400000).toISOString(), type: "rating", session_id: "s3" },
+      { rating: 5, timestamp: new Date(now.getTime() - 3 * 86400000).toISOString(), type: "rating", session_id: "s4" },
+      { rating: 9, timestamp: new Date(now.getTime() - 5 * 86400000).toISOString(), type: "rating", session_id: "s5" },
+      { rating: 4, timestamp: new Date(now.getTime() - 10 * 86400000).toISOString(), type: "rating", session_id: "s6" },
+      { rating: 3, timestamp: new Date(now.getTime() - 15 * 86400000).toISOString(), type: "rating", session_id: "s7" },
+      { rating: 6, timestamp: new Date(now.getTime() - 20 * 86400000).toISOString(), type: "rating", session_id: "s8" },
+      { rating: 2, timestamp: new Date(now.getTime() - 25 * 86400000).toISOString(), type: "rating", session_id: "s9" },
+      { rating: 5, timestamp: new Date(now.getTime() - 28 * 86400000).toISOString(), type: "rating", session_id: "s10" },
+    ];
+    writeFileSync(join(TMP_DIR, "ratings.jsonl"), ratings.map(r => JSON.stringify(r)).join("\n"));
+    const result = await computePerformanceSummary(TMP_DIR);
+    expect(result).not.toBeNull();
+    expect(result!.today_avg).toBeCloseTo(7, 0);
+    expect(result!.week_avg).not.toBeNull();
+    expect(result!.month_avg).not.toBeNull();
+    expect(typeof result!.trend).toBe("string");
+    expect(result!.total_signals).toBe(10);
+  });
+
+  test("returns null on missing file", async () => {
+    const result = await computePerformanceSummary(join(TMP_DIR, "nonexistent"));
+    expect(result).toBeNull();
+  });
+
+  test("detects declining trend", async () => {
+    const now = new Date();
+    const ratings = [
+      { rating: 3, timestamp: new Date(now.getTime() - 1 * 86400000).toISOString(), type: "rating", session_id: "s1" },
+      { rating: 2, timestamp: new Date(now.getTime() - 3 * 86400000).toISOString(), type: "rating", session_id: "s2" },
+      { rating: 8, timestamp: new Date(now.getTime() - 15 * 86400000).toISOString(), type: "rating", session_id: "s3" },
+      { rating: 9, timestamp: new Date(now.getTime() - 20 * 86400000).toISOString(), type: "rating", session_id: "s4" },
+      { rating: 7, timestamp: new Date(now.getTime() - 25 * 86400000).toISOString(), type: "rating", session_id: "s5" },
+    ];
+    writeFileSync(join(TMP_DIR, "ratings.jsonl"), ratings.map(r => JSON.stringify(r)).join("\n"));
+    const result = await computePerformanceSummary(TMP_DIR);
+    expect(result!.trend).toBe("declining");
+  });
+
+  test("detects stable trend", async () => {
+    const now = new Date();
+    const ratings = [
+      { rating: 7, timestamp: new Date(now.getTime() - 2 * 86400000).toISOString(), type: "rating", session_id: "s1" },
+      { rating: 7, timestamp: new Date(now.getTime() - 15 * 86400000).toISOString(), type: "rating", session_id: "s2" },
+      { rating: 7, timestamp: new Date(now.getTime() - 25 * 86400000).toISOString(), type: "rating", session_id: "s3" },
+    ];
+    writeFileSync(join(TMP_DIR, "ratings.jsonl"), ratings.map(r => JSON.stringify(r)).join("\n"));
+    const result = await computePerformanceSummary(TMP_DIR);
+    expect(result!.trend).toBe("stable");
+  });
+
+  test("today_avg is null when no ratings today", async () => {
+    const now = new Date();
+    const ratings = [
+      { rating: 7, timestamp: new Date(now.getTime() - 2 * 86400000).toISOString(), type: "rating", session_id: "s1" },
+    ];
+    writeFileSync(join(TMP_DIR, "ratings.jsonl"), ratings.map(r => JSON.stringify(r)).join("\n"));
+    const result = await computePerformanceSummary(TMP_DIR);
+    expect(result!.today_avg).toBeNull();
+  });
+});
+
+// ── Failure Patterns Tests ──
+
+describe("getRecentFailurePatterns", () => {
+  test("returns 5 unique from 7 incidents", async () => {
+    const incidents = [
+      { error_type: "ENOENT", timestamp: "2026-08-01T10:00:00Z" },
+      { error_type: "EACCES", timestamp: "2026-08-02T10:00:00Z" },
+      { error_type: "ENOENT", timestamp: "2026-08-02T12:00:00Z" },
+      { error_type: "TIMEOUT", timestamp: "2026-08-03T10:00:00Z" },
+      { error_type: "EPERM", timestamp: "2026-08-04T10:00:00Z" },
+      { error_type: "ECONNREFUSED", timestamp: "2026-08-05T10:00:00Z" },
+      { error_type: "ENOENT", timestamp: "2026-08-06T10:00:00Z" },
+    ];
+    writeFileSync(join(TMP_DIR, "incidents.jsonl"), incidents.map(i => JSON.stringify(i)).join("\n"));
+    const result = await getRecentFailurePatterns(TMP_DIR, 5);
+    expect(result.length).toBe(5);
+    expect(result[0]).toBe("ENOENT");
+    expect(result[1]).toBe("ECONNREFUSED");
+  });
+
+  test("returns empty on missing file", async () => {
+    const result = await getRecentFailurePatterns(join(TMP_DIR, "nonexistent"));
+    expect(result).toEqual([]);
+  });
+
+  test("deduplicates error types", async () => {
+    const incidents = [
+      { error_type: "ENOENT", timestamp: "2026-08-01T10:00:00Z" },
+      { error_type: "ENOENT", timestamp: "2026-08-02T10:00:00Z" },
+      { error_type: "ENOENT", timestamp: "2026-08-03T10:00:00Z" },
+    ];
+    writeFileSync(join(TMP_DIR, "incidents.jsonl"), incidents.map(i => JSON.stringify(i)).join("\n"));
+    const result = await getRecentFailurePatterns(TMP_DIR);
+    expect(result).toEqual(["ENOENT"]);
+  });
+});
+
+// ── Work Context Domains Tests ──
+
+describe("getWorkContextDomains", () => {
+  test("detects frontend from React files", async () => {
+    const entry = { files_changed: ["src/App.tsx", "src/style.css"], timestamp: "2026-08-06T10:00:00Z" };
+    writeFileSync(join(TMP_DIR, "work-completions.jsonl"), JSON.stringify(entry));
+    const result = await getWorkContextDomains(TMP_DIR);
+    expect(result).toContain("frontend");
+  });
+
+  test("detects testing from test files", async () => {
+    const entry = { files_changed: ["test/foo.test.ts", "src/bar.ts"], timestamp: "2026-08-06T10:00:00Z" };
+    writeFileSync(join(TMP_DIR, "work-completions.jsonl"), JSON.stringify(entry));
+    const result = await getWorkContextDomains(TMP_DIR);
+    expect(result).toContain("testing");
+    expect(result).toContain("code");
+  });
+
+  test("detects database from SQL and Prisma", async () => {
+    const entry = { files_changed: ["migrations/001.sql", "schema.prisma"], timestamp: "2026-08-06T10:00:00Z" };
+    writeFileSync(join(TMP_DIR, "work-completions.jsonl"), JSON.stringify(entry));
+    const result = await getWorkContextDomains(TMP_DIR);
+    expect(result).toContain("database");
+  });
+
+  test("returns empty on missing file", async () => {
+    const result = await getWorkContextDomains(join(TMP_DIR, "nonexistent"));
+    expect(result).toEqual([]);
+  });
+
+  test("uses only the most recent entry", async () => {
+    const entries = [
+      { files_changed: ["old.sql"], timestamp: "2026-08-01T10:00:00Z" },
+      { files_changed: ["new.tsx"], timestamp: "2026-08-06T10:00:00Z" },
+    ];
+    writeFileSync(join(TMP_DIR, "work-completions.jsonl"), entries.map(e => JSON.stringify(e)).join("\n"));
+    const result = await getWorkContextDomains(TMP_DIR);
+    expect(result).toContain("frontend");
+    expect(result).not.toContain("database");
   });
 });

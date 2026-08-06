@@ -612,3 +612,123 @@ export async function getContextRulesWithReranking(
     .map((r) => ruleMap.get(r.id))
     .filter((r): r is Rule => r !== undefined);
 }
+
+// ── Performance Summary ──
+
+export interface PerformanceSummary {
+  today_avg: number | null;
+  week_avg: number | null;
+  month_avg: number | null;
+  trend: "improving" | "declining" | "stable";
+  total_signals: number;
+}
+
+export async function computePerformanceSummary(signalDir: string): Promise<PerformanceSummary | null> {
+  const ratingsPath = join(signalDir, "ratings.jsonl");
+  if (!existsSync(ratingsPath)) return null;
+  const raw = readFileSync(ratingsPath, "utf-8");
+  const lines = raw.split("\n").filter(l => l.trim());
+  if (lines.length === 0) return null;
+
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+  const todayRatings: number[] = [];
+  const weekRatings: number[] = [];
+  const monthRatings: number[] = [];
+  let totalRatings = 0;
+
+  for (const line of lines) {
+    try {
+      const s = JSON.parse(line);
+      if (typeof s.rating !== "number") continue;
+      totalRatings++;
+      const ts = new Date(s.timestamp);
+      if (ts >= todayStart) todayRatings.push(s.rating);
+      if (ts >= weekAgo) weekRatings.push(s.rating);
+      if (ts >= monthAgo) monthRatings.push(s.rating);
+    } catch { /* skip malformed */ }
+  }
+
+  if (totalRatings === 0) return null;
+
+  const avg = (arr: number[]) => arr.length === 0 ? null : arr.reduce((a, b) => a + b, 0) / arr.length;
+  const weekAvg = avg(weekRatings);
+  const monthAvg = avg(monthRatings);
+
+  let trend: "improving" | "declining" | "stable" = "stable";
+  if (weekAvg !== null && monthAvg !== null) {
+    if (weekAvg > monthAvg + 0.5) trend = "improving";
+    else if (weekAvg < monthAvg - 0.5) trend = "declining";
+  }
+
+  return { today_avg: avg(todayRatings), week_avg: weekAvg, month_avg: monthAvg, trend, total_signals: totalRatings };
+}
+
+// ── Failure Patterns ──
+
+export async function getRecentFailurePatterns(signalDir: string, limit: number = 5): Promise<string[]> {
+  const filePath = join(signalDir, "incidents.jsonl");
+  if (!existsSync(filePath)) return [];
+  const raw = readFileSync(filePath, "utf-8");
+  const lines = raw.split("\n").filter(l => l.trim());
+
+  const records: Array<{ error_type: string }> = [];
+  for (const line of lines) {
+    try { records.push(JSON.parse(line)); } catch { /* skip */ }
+  }
+
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (let i = records.length - 1; i >= 0; i--) {
+    const et = records[i].error_type;
+    if (!et || seen.has(et)) continue;
+    seen.add(et);
+    unique.push(et);
+    if (unique.length >= limit) break;
+  }
+  return unique;
+}
+
+// ── Work Context Domains ──
+
+const EXT_DOMAIN_MAP: Record<string, string> = {
+  ".tsx": "frontend", ".jsx": "frontend", ".css": "frontend", ".scss": "frontend",
+  ".vue": "frontend", ".svelte": "frontend",
+  ".sql": "database", ".prisma": "database",
+  ".ts": "code", ".js": "code", ".py": "code", ".go": "code", ".rs": "code",
+  ".md": "documentation",
+  ".yaml": "config", ".yml": "config", ".json": "config", ".toml": "config",
+  ".dockerfile": "infrastructure", ".tf": "infrastructure",
+};
+
+export async function getWorkContextDomains(signalDir: string): Promise<string[]> {
+  const filePath = join(signalDir, "work-completions.jsonl");
+  if (!existsSync(filePath)) return [];
+  const raw = readFileSync(filePath, "utf-8");
+  const lines = raw.split("\n").filter(l => l.trim());
+  if (lines.length === 0) return [];
+
+  let latest: { files_changed?: string[] } | null = null;
+  for (const line of lines) {
+    try { latest = JSON.parse(line); } catch { /* skip */ }
+  }
+
+  if (!latest?.files_changed || latest.files_changed.length === 0) return [];
+
+  const domains = new Set<string>();
+  for (const file of latest.files_changed) {
+    if (/\.test\.[tj]sx?$/.test(file) || /\.spec\.[tj]sx?$/.test(file)) {
+      domains.add("testing");
+      continue;
+    }
+    const extMatch = file.match(/(\.[^./]+)$/);
+    if (extMatch) {
+      const domain = EXT_DOMAIN_MAP[extMatch[1]];
+      if (domain) domains.add(domain);
+    }
+  }
+  return Array.from(domains);
+}
