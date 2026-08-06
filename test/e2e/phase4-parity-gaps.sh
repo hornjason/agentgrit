@@ -47,7 +47,7 @@ fi
 
 # Step 2: Capture rating — explicit /rate
 echo "--- Step 2: Capture rating (explicit) ---"
-echo '{"session_id":"e2e-s1","message":{"content":"Great job on that refactor /rate M:8 S:8 Q:9"}}' | npx agentgrit capture rating 2>&1
+echo '{"session_id":"e2e-s1","message":{"content":"/rate M:8 S:8 Q:9"}}' | npx agentgrit capture rating 2>&1
 RATINGS_FILE="$SIGNAL_DIR/ratings.jsonl"
 if [ -f "$RATINGS_FILE" ] && grep -q '"source":"explicit"' "$RATINGS_FILE" 2>/dev/null; then
   pass "Step 2: Explicit rating captured with source=explicit"
