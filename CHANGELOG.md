@@ -2,25 +2,34 @@
 doc-type: reference
 status: active
 owner: jason
-updated: 2026-08-05
+updated: 2026-08-07
 ---
 
 # Changelog
 
-## [0.1.8] — 2026-08-06
+## [0.1.8] — 2026-08-07
 
-Docker E2E suite 34/34 with real Claude Code. Closes #176.
+Full parity with PAI learning loop. 13 hooks, 44/44 Docker E2E tests, zero gaps remaining. Closes #176, #178, #187.
+
+### New Features
+- **Real-time incident detection** — PostToolUse/Bash hook captures errors the moment a command fails, not just at session end (#187). Closes the last parity gap vs PAI's learning loop.
+- **Enriched graph context** — `graph context` output now includes Performance Signals (rating trends, averages) and Failure Patterns (recent error types) sections (#184)
+- **Work completion capture** — `capture work-completion` subcommand + SessionEnd hook for AI-powered work insight generation (#182)
+- **Incident analysis** — `capture incident-analysis` subcommand + SessionEnd hook for pattern analysis across session incidents (#183)
+- **Session scoring** — `capture session-score` subcommand for end-of-session composite scoring (#181)
+- **Debrief capture** — `capture debrief` subcommand for session-end rule extraction (#180)
 
 ### Fixes
-- **`installClaudeCodeHooks` parity** — `init --claude-code` now installs all 8 hooks (was 3), matching `installHooks --bootstrap`. Hooks: SessionStart(graph context), 3×UserPromptSubmit(rating/correction/sentiment), 2×PostToolUse(tool/skill), Stop(harvest), SessionEnd(incident)
+- **`installClaudeCodeHooks` parity** — `init --claude-code` now installs all 13 hooks (was 3), matching `installHooks --bootstrap`. Hooks: SessionStart(graph context), 3×UserPromptSubmit(rating/correction/sentiment), 3×PostToolUse(tool/skill/incident), Stop(harvest), 5×SessionEnd(incident/session-score/debrief/incident-analysis/work-completion)
 - **`graph context` subcommand** — new CLI command wires `getContextRules()` + `writeSessionContext()`, outputs rules wrapped in `<system-reminder>` tags for Claude Code hook injection
 - **`pruneTobudget` stats merge** — prune now reads `rule-stats.json` (recalls→injectionCount, effectivenessRate→avgCorrelatedRating) so eviction uses real effectiveness data instead of positional fallback
 - **`init --claude-code` writes `installed-hooks.json`** — manifest with hook count, timestamp, and version for coexistence verification
 
-### E2E
+### E2E (44/44)
 - Phase 1 (clean install): 16/16
 - Phase 2 (integration with real data): 10/10
 - Phase 3b (PAI coexistence): 8/8
+- Phase 4 (parity gap features): 10/10
 
 ## [0.1.7] — 2026-08-05
 

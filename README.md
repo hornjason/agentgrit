@@ -2,19 +2,19 @@
 doc-type: reference
 status: active
 owner: jason
-updated: 2026-08-05
+updated: 2026-08-07
 ---
 
 # AgentGrit
 
 > Self-learning engine that makes AI agents smarter over time.
 
-[![Tests](https://img.shields.io/badge/tests-1367%20pass-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-1436%20pass-brightgreen)]()
 [![npm](https://img.shields.io/npm/v/@agentgrit/core)](https://www.npmjs.com/package/@agentgrit/core)
 
 AgentGrit closes a feedback loop around AI agents: it captures signals from your sessions (ratings, corrections, sentiment), detects recurring failure patterns, promotes learnings into durable rules, and builds a knowledge graph for contextual recall. Every session makes the next one smarter.
 
-**Key metrics:** 1367 tests, 404 graph nodes, 16 domains, 98% domain coverage, hybrid BM25+vector+graph retrieval with config-driven RRF weights.
+**Key metrics:** 1436 tests, 404 graph nodes, 16 domains, 98% domain coverage, hybrid BM25+vector+graph retrieval with config-driven RRF weights, 13 Claude Code hooks, 44/44 Docker E2E tests.
 
 **Design principles:**
 1. Nothing hardcoded, everything lifecycled — all thresholds, weights, and domain classification are config-driven or graph-derived
@@ -499,9 +499,13 @@ The test suite uses fixture JSONL files with known patterns that must produce sp
 
 ## Roadmap
 
-### v0.1.7 (current)
+### v0.1.8 (current)
 
-- **1367 tests** across 112 files
+- **1436 tests** across 112+ files
+- **Full PAI learning loop parity** — 0 gaps, 13 hooks, real-time incident detection
+- **44/44 Docker E2E tests** — clean install, integration, PAI coexistence, parity features
+- **Enriched graph context** — performance signals + failure patterns injected at session start
+- **6 new capture subcommands** — session-score, debrief, work-completion, incident-analysis, incident (PostToolUse), skill
 - All 7 subsystems: capture, evaluate, detect, promote, optimize, graph, daemon
 - CLI with 20+ commands + `init --import` for machine migration
 - Three adoption speeds (quick/standard/full)
@@ -514,10 +518,7 @@ The test suite uses fixture JSONL files with known patterns that must produce sp
 - **Per-domain diversity cap** — max 3 rules per domain per source in retrieval
 - **Rule effectiveness tracking** — before/after correction frequency per rule
 - **Critical Rules demotion path** — eviction system can demote even critical rules
-- **Docker E2E test suite** — containerized end-to-end pipeline tests
-- **Migration pipeline dashboard** — `agentgrit dashboard` for pipeline health
-- **Living showcase dashboard** — `agentgrit showcase` for system health
-- **Hybrid pattern detection** — confidence-gated with BM25 agreement
+- **Docker E2E test suite** — containerized end-to-end pipeline tests (4 phases)
 - Hill-climbing optimizer for prompts, skills, and retrieval weights
 - LaunchAgent (macOS) and systemd (Linux) scheduler
 - Atomic CLAUDE.md writes with promotion ledger and undo (`--yes` flag for non-interactive)
