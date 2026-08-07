@@ -34,15 +34,15 @@ jq --arg rd "$RULES_DIR" '. + {memoryDir: $rd}' "$AGENTGRIT_DIR/config.json" > "
 agentgrit graph build 2>&1
 echo ""
 
-# Step 1: Hook count — init --claude-code installs exactly 12 hooks
-echo "--- Step 1: Hook count (12 hooks) ---"
+# Step 1: Hook count — init --claude-code installs exactly 13 hooks
+echo "--- Step 1: Hook count (13 hooks) ---"
 rm -f "$SETTINGS_PATH"
 agentgrit init --claude-code --settings "$SETTINGS_PATH" 2>&1
 HOOK_COUNT=$(grep -o 'agentgrit' "$SETTINGS_PATH" 2>/dev/null | wc -l | tr -d ' ')
-if [ "$HOOK_COUNT" -eq 12 ]; then
-  pass "Step 1: init --claude-code installed exactly 12 hooks"
+if [ "$HOOK_COUNT" -eq 13 ]; then
+  pass "Step 1: init --claude-code installed exactly 13 hooks"
 else
-  fail "Step 1: Expected 12 hooks, found $HOOK_COUNT"
+  fail "Step 1: Expected 13 hooks, found $HOOK_COUNT"
 fi
 
 # Step 2: Capture rating — explicit /rate
