@@ -4,6 +4,7 @@ export {};
 import { backfillCommand } from "./commands/backfill";
 import { baselineCommand } from "./commands/baseline";
 import { captureCommand } from "./commands/capture";
+import { contextCommand } from "./commands/context";
 import { dashboardCommand } from "./commands/dashboard";
 import { daemonCommand } from "./commands/daemon";
 import { doctorCommand } from "./commands/doctor";
@@ -29,6 +30,7 @@ const HANDLERS: Record<string, (args: string[]) => Promise<void>> = {
   backfill: backfillCommand,
   baseline: baselineCommand,
   capture: captureCommand,
+  context: contextCommand,
   dashboard: dashboardCommand,
   daemon: daemonCommand,
   doctor: doctorCommand,
@@ -53,6 +55,7 @@ const DESCRIPTIONS: Record<string, string> = {
   backfill: "Run full pipeline on existing data",
   baseline: "Capture or show baseline measurement snapshot",
   capture: "Capture signals from Claude Code hooks",
+  context: "Refresh session context from task text",
   dashboard: "Migration pipeline health dashboard (HTML)",
   daemon: "Run, start, stop daemon cycle",
   doctor: "Health check — verify every link in the chain",

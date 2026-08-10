@@ -123,6 +123,7 @@ async function claudeCodeInit(args: string[]): Promise<void> {
   console.log("  Hooks installed (" + result.installed + " new, " + result.existing + " existing, " + result.skipped + " skipped)");
   console.log("\n  Hook events:");
   console.log("    SessionStart       -> npx agentgrit graph context");
+  console.log("    SessionStart       -> npx agentgrit context refresh");
   console.log("    UserPromptSubmit   -> npx agentgrit capture rating");
   console.log("    UserPromptSubmit   -> npx agentgrit capture correction");
   console.log("    UserPromptSubmit   -> npx agentgrit capture sentiment");

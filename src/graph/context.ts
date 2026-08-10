@@ -320,6 +320,7 @@ export function filterLearnedRules(rules: string[], queryText: string, topK: num
 // ── Session Context Attribution ──
 
 import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "fs";
+import { execSync } from "child_process";
 import { dirname, join } from "path";
 import { statePath } from "../adapters/paths";
 
@@ -733,4 +734,112 @@ export async function getWorkContextDomains(signalDir: string): Promise<string[]
     }
   }
   return Array.from(domains);
+}
+
+// ── Git Status Domain Detection ──
+
+const PATH_DOMAIN_MAP: Array<{ pattern: RegExp; domain: string }> = [
+  { pattern: /src\/graph\//, domain: "graph" },
+  { pattern: /src\/capture\//, domain: "scoring" },
+  { pattern: /src\/daemon\//, domain: "pipeline" },
+  { pattern: /src\/detect\//, domain: "algorithm" },
+  { pattern: /src\/adapters\//, domain: "architecture" },
+  { pattern: /bin\/commands\//, domain: "delegation" },
+  { pattern: /test\//, domain: "verification" },
+  { pattern: /hooks\//, domain: "deployment" },
+  { pattern: /\.tsx?$/, domain: "code" },
+  { pattern: /\.md$/, domain: "documentation" },
+  { pattern: /\.json$/, domain: "config" },
+];
+
+export function detectDomainsFromGitStatus(): string[] {
+  try {
+    const output = execSync("git status --short", {
+      encoding: "utf-8",
+      timeout: 5000,
+    }).trim();
+    if (!output) return [];
+
+    const domains = new Set<string>();
+    for (const line of output.split("\n")) {
+      const filePath = line.slice(3).trim();
+      for (const { pattern, domain } of PATH_DOMAIN_MAP) {
+        if (pattern.test(filePath)) {
+          domains.add(domain);
+          break;
+        }
+      }
+    }
+    return Array.from(domains);
+  } catch {
+    return [];
+  }
+}
+
+// ── Smart Defaults from Session History ──
+
+export function computeSmartDefaults(signalDir: string): string[] {
+  const historyPath = join(dirname(signalDir), "state", "session-context-history.jsonl");
+  if (!existsSync(historyPath)) return [];
+
+  const lines = readFileSync(historyPath, "utf-8").split("\n").filter(l => l.trim());
+  const recentLines = lines.slice(-20);
+  const domainCounts: Record<string, number> = {};
+
+  for (const line of recentLines) {
+    try {
+      const session = JSON.parse(line) as { domains?: string[] };
+      if (!session.domains) continue;
+      for (const d of session.domains) {
+        domainCounts[d] = (domainCounts[d] || 0) + 1;
+      }
+    } catch { /* skip */ }
+  }
+
+  return Object.entries(domainCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([d]) => d);
+}
+
+// ── Graph Context Formatter ──
+
+import type { RankedCluster } from "./types";
+
+export function formatGraphContext(
+  clusters: RankedCluster[],
+  rules: Rule[],
+  domains: string[],
+): string {
+  const timestamp = new Date().toISOString();
+  const lines: string[] = [
+    `# Graph Context — ${domains.join(", ")}`,
+    `*Generated: ${timestamp} | ${clusters.length} clusters + ${rules.length} context rules from [${domains.join(", ")}]*`,
+    "",
+    "## Most Relevant Rules for This Session",
+    "",
+  ];
+
+  for (let i = 0; i < clusters.length; i++) {
+    const c = clusters[i];
+    lines.push(`### Cluster ${i + 1}: ${c.primary.name} (${c.primary.domains.join(", ")})`);
+    lines.push(c.primary.description);
+    for (const conn of c.connected.slice(0, 3)) {
+      lines.push(`↳ ${conn.relationship} (${conn.strength.toFixed(1)}): ${conn.node.name}`);
+    }
+    lines.push("");
+  }
+
+  lines.push("## Context Rules (correlation-ranked)");
+  lines.push("");
+
+  for (const rule of rules) {
+    const tag = rule.tags[0] || "general";
+    const score = rule.correlationScore?.toFixed(2) ?? "0.00";
+    lines.push(`- **${rule.id}** [${tag}] (score: ${score})`);
+    lines.push(`  ${rule.text}`);
+    lines.push("");
+  }
+
+  return lines.join("\n");
 }
