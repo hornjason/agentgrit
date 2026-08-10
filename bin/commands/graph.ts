@@ -179,8 +179,10 @@ export async function graphCommand(args: string[]): Promise<void> {
       extraSections.push(`\n**Recent Failure Patterns (avoid these):**\n${failures.map(f => `  ${f}`).join("\n")}`);
     }
 
-    console.log(`<system-reminder>\nAgentGrit Context (auto-loaded)\n\n${rulesText}${extraSections.join("")}\n</system-reminder>`);
-    writeSessionContext(rules, domains.length > 0 ? domains : ["default"]);
+    const contextOutput = `<system-reminder>\nAgentGrit Context (auto-loaded)\n\n${rulesText}${extraSections.join("")}\n</system-reminder>`;
+    console.log(contextOutput);
+    const totalContextLines = contextOutput.split("\n").length;
+    writeSessionContext(rules, domains.length > 0 ? domains : ["default"], "keyword", totalContextLines);
   } else if (sub === "stats") {
     showStats(base);
   } else {

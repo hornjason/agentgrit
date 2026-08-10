@@ -2,6 +2,8 @@ import { existsSync, statSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { resolveSignalFile } from "../adapters/paths";
 import type { AgentGritConfig } from "../adapters/types";
+import { checkBudget, checkLearnedBudget } from "../promote/budget";
+import { Tier } from "../adapters/types";
 
 export type CheckStatus = "ok" | "warning" | "error";
 
@@ -186,6 +188,16 @@ function checkGraph(config: AgentGritConfig): DoctorSection {
   };
 }
 
+function parseRuleType(filePath: string): string {
+  try {
+    const content = readFileSync(filePath, "utf-8");
+    const match = content.match(/^type:\s*(\S+)/m);
+    return match ? match[1] : "global";
+  } catch {
+    return "global";
+  }
+}
+
 function checkRules(config: AgentGritConfig): DoctorSection {
   const checks: CheckResult[] = [];
   const rulesBase = join(config.signalDir, "..", "rules");
@@ -198,18 +210,57 @@ function checkRules(config: AgentGritConfig): DoctorSection {
     });
   } else {
     const files = readdirSync(rulesBase).filter((f) => f.endsWith(".md"));
-    const count = files.length;
-    const globalBudget = config.rules.globalBudget;
+    let globalCount = 0;
+    let learnedCount = 0;
 
-    let status: CheckStatus = "ok";
-    if (count > globalBudget) status = "error";
-    else if (count > globalBudget - 5) status = "warning";
+    for (const file of files) {
+      const ruleType = parseRuleType(join(rulesBase, file));
+      if (ruleType === "learned") {
+        learnedCount++;
+      } else {
+        globalCount++;
+      }
+    }
 
+    // Global tier check
+    const globalStatus = checkBudget(Tier.Global, globalCount, config.rules.globalBudget);
+    const globalCheckStatus: CheckStatus =
+      globalStatus.level === "OVER_BUDGET" ? "error" :
+      globalStatus.level === "WARNING" ? "warning" : "ok";
     checks.push({
-      name: "rule-count",
-      status,
-      message: `${count} / ${globalBudget} rules (global budget)`,
+      name: "global-rules",
+      status: globalCheckStatus,
+      message: `${globalCount} / ${config.rules.globalBudget} global rules`,
     });
+
+    // Learned tier check
+    const learnedBudget = config.rules.learnedBudget ?? 50;
+    const learnedStatus = checkLearnedBudget(learnedCount, learnedBudget);
+    const learnedCheckStatus: CheckStatus =
+      learnedStatus.level === "OVER_BUDGET" ? "error" :
+      learnedStatus.level === "WARNING" ? "warning" : "ok";
+    checks.push({
+      name: "learned-rules",
+      status: learnedCheckStatus,
+      message: `${learnedCount} / ${learnedBudget} learned rules`,
+    });
+
+    // Graph nodes — uncapped, info only
+    const stateBase = join(config.signalDir, "..", "state");
+    const graphPath = join(stateBase, "knowledge-graph.json");
+    if (existsSync(graphPath)) {
+      try {
+        const graph = JSON.parse(readFileSync(graphPath, "utf-8"));
+        const nodeCount = Object.keys(graph.nodes || {}).length;
+        checks.push({
+          name: "graph-nodes",
+          status: "ok",
+          message: `${nodeCount} graph nodes (uncapped)`,
+        });
+      } catch {
+        // skip if graph unreadable
+      }
+    }
   }
 
   return {

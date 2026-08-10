@@ -140,32 +140,52 @@ describe("RULES section", () => {
     expect(rules.status).toBe("ok");
   });
 
-  test("warns when near budget", async () => {
+  test("warns when global rules near budget", async () => {
     mkdirSync(RULES_DIR, { recursive: true });
     for (let i = 0; i < 22; i++) {
-      writeFileSync(join(RULES_DIR, `rule-${i}.md`), `Rule ${i}`);
+      writeFileSync(join(RULES_DIR, `rule-${i}.md`), `---\ntype: global\n---\nRule ${i}`);
     }
 
     const config = makeConfig();
     const report = await runDoctor(config);
     const rules = report.sections.find((s) => s.name === "RULES")!;
-    const countCheck = rules.checks.find((c) => c.name === "rule-count")!;
+    const globalCheck = rules.checks.find((c) => c.name === "global-rules")!;
 
-    expect(countCheck.status).toBe("warning");
+    expect(globalCheck.status).toBe("warning");
   });
 
-  test("errors when over budget", async () => {
+  test("errors when global rules over budget", async () => {
     mkdirSync(RULES_DIR, { recursive: true });
     for (let i = 0; i < 30; i++) {
-      writeFileSync(join(RULES_DIR, `rule-${i}.md`), `Rule ${i}`);
+      writeFileSync(join(RULES_DIR, `rule-${i}.md`), `---\ntype: global\n---\nRule ${i}`);
     }
 
     const config = makeConfig();
     const report = await runDoctor(config);
     const rules = report.sections.find((s) => s.name === "RULES")!;
-    const countCheck = rules.checks.find((c) => c.name === "rule-count")!;
+    const globalCheck = rules.checks.find((c) => c.name === "global-rules")!;
 
-    expect(countCheck.status).toBe("error");
+    expect(globalCheck.status).toBe("error");
+  });
+
+  test("learned rules checked against learned budget (50)", async () => {
+    mkdirSync(RULES_DIR, { recursive: true });
+    for (let i = 0; i < 47; i++) {
+      writeFileSync(join(RULES_DIR, `learned-${i}.md`), `---\ntype: learned\n---\nRule ${i}`);
+    }
+
+    const config = makeConfig();
+    const report = await runDoctor(config);
+    const rules = report.sections.find((s) => s.name === "RULES")!;
+    const learnedCheck = rules.checks.find((c) => c.name === "learned-rules")!;
+    const globalCheck = rules.checks.find((c) => c.name === "global-rules")!;
+
+    // 47 learned rules within budget of 50 but near warning threshold (50-5=45)
+    expect(learnedCheck.status).toBe("warning");
+    expect(learnedCheck.message).toContain("47");
+    expect(learnedCheck.message).toContain("50");
+    // 0 global rules — ok
+    expect(globalCheck.status).toBe("ok");
   });
 });
 

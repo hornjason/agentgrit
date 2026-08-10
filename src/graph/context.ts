@@ -329,6 +329,7 @@ const SESSION_CONTEXT_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface SessionContext {
   ruleIds: string[];
+  rules?: Array<{ id: string; text: string }>;
   domains: string[];
   domain_source: "metadata" | "keyword" | "bm25";
   timestamp: string;
@@ -356,6 +357,7 @@ export function writeSessionContext(
 
   const context: SessionContext = {
     ruleIds: rules.map((r) => r.id),
+    rules: rules.map((r) => ({ id: r.id, text: r.text })),
     domains,
     domain_source: domainSource,
     timestamp: new Date().toISOString(),
