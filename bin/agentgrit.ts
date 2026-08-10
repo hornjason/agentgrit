@@ -11,6 +11,7 @@ import { doctorCommand } from "./commands/doctor";
 import { evalCommand } from "./commands/eval";
 import { exportCommand } from "./commands/export";
 import { graphCommand } from "./commands/graph";
+import { healthCommand } from "./commands/health";
 import { inboxCommand } from "./commands/inbox";
 import { initCommand } from "./commands/init";
 import { memoryCommand } from "./commands/memory";
@@ -37,6 +38,7 @@ const HANDLERS: Record<string, (args: string[]) => Promise<void>> = {
   eval: evalCommand,
   export: exportCommand,
   graph: graphCommand,
+  health: healthCommand,
   inbox: inboxCommand,
   init: initCommand,
   memory: memoryCommand,
@@ -62,6 +64,7 @@ const DESCRIPTIONS: Record<string, string> = {
   eval: "Evaluate traces, sessions, or recall",
   export: "Export graph + rules + rubrics",
   graph: "Build, query, or inspect knowledge graph",
+  health: "Context health — rules, budget, lifecycle, doctor",
   inbox: "Review and approve pending rule candidates",
   init: "Interactive setup wizard",
   memory: "MEMORY.md lifecycle — staleness detection",
