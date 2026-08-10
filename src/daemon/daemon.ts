@@ -695,41 +695,14 @@ export async function runDaemonCycle(
 
   // 7d. Attribution — process rated sessions to update rule stats
   try {
-    const { processRatingAttribution } = await import("../capture/rating");
+    const { processUnattributedRatings } = await import("../capture/rating");
     const { stateDir: getState } = await import("../adapters/paths");
     const { join } = await import("path");
-    const { existsSync: exists, readFileSync: readFile, writeFileSync: writeFile } = await import("fs");
 
     const ratingsPath = join(config.signalDir, "ratings.jsonl");
     const processedPath = join(getState(), "attribution-cursor.json");
 
-    if (exists(ratingsPath)) {
-      const lines = readFile(ratingsPath, "utf-8").split("\n").filter(Boolean);
-      let cursor = "";
-      if (exists(processedPath)) {
-        try { cursor = JSON.parse(readFile(processedPath, "utf-8")).lastTimestamp ?? ""; } catch {}
-      }
-
-      let updated = 0;
-
-      for (const line of lines) {
-        try {
-          const entry = JSON.parse(line);
-          if (!entry.timestamp || !entry.rating) continue;
-          if (cursor && entry.timestamp <= cursor) continue;
-          const ruleIds: string[] = entry.rule_ids ?? [];
-          if (ruleIds.length === 0) continue;
-
-          await processRatingAttribution(entry.rating, ruleIds);
-          cursor = entry.timestamp;
-          updated++;
-        } catch {}
-      }
-
-      if (updated > 0) {
-        writeFile(processedPath, JSON.stringify({ lastTimestamp: cursor }), "utf-8");
-      }
-    }
+    await processUnattributedRatings(ratingsPath, processedPath);
   } catch (err) {
     result.errors.push(`attribution: ${err instanceof Error ? err.message : String(err)}`);
   }

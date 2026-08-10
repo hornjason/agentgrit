@@ -7,9 +7,9 @@ updated: 2026-07-08
 
 # AgentGrit System Spec
 
-**Version:** 1.1 (2026-07-14)
-**Package:** @agentgrit/core@0.1.4 on npm
-**Tests:** 1194 pass, 0 fail across 103 files
+**Version:** 1.2 (2026-08-10)
+**Package:** @agentgrit/core@0.1.8 on npm
+**Tests:** 1436 pass, 9 fail across 112 files
 
 ## Purpose
 
@@ -59,7 +59,7 @@ Session signals (ratings, corrections, failures)
 | Work completion | Session learnings extracted | `signals/work-completions.jsonl` |
 | Debrief | Manual `/debrief` extraction | `signals/debriefs.jsonl` |
 
-643 ratings, 1245 corrections captured to date.
+643+ ratings, 1245+ corrections captured to date. Tool audit logs `{ts, tool, ok}` per tool call via PAI hook.
 
 ### 2. Pattern Detection (`src/detect/`)
 
@@ -151,6 +151,10 @@ Measured by `RecallEvaluator` over 60-session gold set (34 real + 26 synthetic).
 
 **What exists:**
 - **Correlation tracking** — `trackAttributedRules()` updates per-rule stats after every rated session
+- **Noise penalty** — `processRatingAttribution()` computes noisePenalty via BM25 relevance scoring; 43/219 rules have noisePenalty > 0
+- **Time-weighted decay** — `computeDecayedAverage()` in promote/rules.ts applies exponential decay (half-life: 10 sessions); result stored as `avgCorrelatedRating` (**gap: no separate `decayedRating` field for observability — #163 SC-6**)
+- **Daemon attribution** — daemon.ts processes unattributed ratings from ratings.jsonl via cursor-based batch processing; calls `processRatingAttribution()` per entry (**gap: inline cursor/JSONL parsing logic should be a shared function — #163 SC-2**)
+- **Session context enrichment** — `writeSessionContext()` accepts `toolCallPatterns`/`filePathsTouched` via `extra` param (**gap: never called at session end with tool-audit data — #163 SC-3**)
 - **Staleness detection** — `lastSeen > 60 days` → priority eviction candidate
 - **Low-correlation flagging** — `avgCorrelatedRating < 4` after 10+ sessions → eviction candidate
 - **Self-healing** — new graph nodes auto-classified into `rule-domains.json` at session start
@@ -203,7 +207,7 @@ Claude Code session
 
 AgentGrit is imported at runtime via dynamic `import()`. If unavailable, PAI falls back to local graph queries. AgentGrit availability never blocks session start.
 
-## Current State (2026-07-13)
+## Current State (2026-08-10)
 
 | Area | Status | Reference |
 |------|--------|-----------|
@@ -215,7 +219,7 @@ AgentGrit is imported at runtime via dynamic `import()`. If unavailable, PAI fal
 | Eviction pipeline | COMPLETE | #85 shipped — correlation-based, duplicate detection, budget cap |
 | Co-occurrence edges | SHIPPED | Rating-weighted (#97). Attribution feedback updates weights per session (#99). |
 | Embedding support | SHIPPED | transformers.js optional peerDep, vector-cache.json, EmbeddingProvider interface (#98) |
-| Feedback loop | CLOSED | Attribution → edge weights → retrieval → session → attribution (#99) |
+| Feedback loop | **PARTIAL** | Core loop closed (#99). 3 gaps remain (#163): daemon inline logic (SC-2), session context enrichment (SC-3), decay observability (SC-6) |
 | Eval regression gate | SHIPPED | Blocks buildGraph on precision drop >= 0.05 (#99) |
 | Skill optimization | COMPLETE | 75 tests pass |
 | Track 1 ports (#63-74) | ALL CLOSED | 12/12 verified 2026-07-08 |

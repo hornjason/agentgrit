@@ -40,27 +40,29 @@ interface ToolAuditEntry {
 export function readToolAuditForSession(
   sessionTimestamp: string,
   auditPath: string = DEFAULT_TOOL_AUDIT_PATH,
-): { toolNames: string[] } {
-  if (!existsSync(auditPath)) return { toolNames: [] };
+): { toolNames: string[]; filePaths: string[] } {
+  if (!existsSync(auditPath)) return { toolNames: [], filePaths: [] };
 
   try {
     const raw = readFileSync(auditPath, "utf-8");
     const sessionTs = new Date(sessionTimestamp).getTime();
-    const seen = new Set<string>();
+    const seenTools = new Set<string>();
+    const seenPaths = new Set<string>();
 
     for (const line of raw.split("\n")) {
       if (!line.trim()) continue;
       try {
-        const entry = JSON.parse(line) as ToolAuditEntry;
-        if (new Date(entry.ts).getTime() >= sessionTs && entry.tool) {
-          seen.add(entry.tool);
+        const entry = JSON.parse(line) as ToolAuditEntry & { filePath?: string };
+        if (new Date(entry.ts).getTime() >= sessionTs) {
+          if (entry.tool) seenTools.add(entry.tool);
+          if (entry.filePath) seenPaths.add(entry.filePath);
         }
       } catch { /* skip malformed lines */ }
     }
 
-    return { toolNames: Array.from(seen) };
+    return { toolNames: Array.from(seenTools), filePaths: Array.from(seenPaths) };
   } catch {
-    return { toolNames: [] };
+    return { toolNames: [], filePaths: [] };
   }
 }
 
@@ -609,6 +611,47 @@ export async function processRatingAttribution(
   } catch { /* edge weights non-critical */ }
 
   persistRuleStats(Array.from(statsMap.values()));
+}
+
+// ── Batch attribution for daemon (replaces inline JSONL parsing in daemon.ts) ──
+
+export async function processUnattributedRatings(
+  ratingsPath: string,
+  cursorPath: string,
+): Promise<number> {
+  if (!existsSync(ratingsPath)) return 0;
+
+  const lines = readFileSync(ratingsPath, "utf-8").split("\n").filter(Boolean);
+  let cursor = "";
+  if (existsSync(cursorPath)) {
+    try {
+      cursor = JSON.parse(readFileSync(cursorPath, "utf-8")).lastTimestamp ?? "";
+    } catch { /* start from beginning */ }
+  }
+
+  let updated = 0;
+
+  for (const line of lines) {
+    try {
+      const entry = JSON.parse(line);
+      if (!entry.timestamp || !entry.rating) continue;
+      if (cursor && entry.timestamp <= cursor) continue;
+      const ruleIds: string[] = entry.rule_ids ?? [];
+      if (ruleIds.length === 0) continue;
+
+      await processRatingAttribution(entry.rating, ruleIds);
+      cursor = entry.timestamp;
+      updated++;
+    } catch { /* skip malformed entries */ }
+  }
+
+  if (updated > 0) {
+    const dir = dirname(cursorPath);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(cursorPath, JSON.stringify({ lastTimestamp: cursor }), "utf-8");
+  }
+
+  return updated;
 }
 
 // ── Capture explicit rating (writes signal) ──

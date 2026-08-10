@@ -54,6 +54,7 @@ export interface ToolAuditEntry {
   category: ToolCategory;
   ok: boolean;
   argsSummary: string;
+  filePath?: string;
 }
 
 // ── Tool categorization ──
@@ -96,12 +97,18 @@ function summarizeArgs(args: Record<string, unknown>): string {
 
 // ── Capture tool use ──
 
+const FILE_PATH_TOOLS = new Set(["Read", "Edit", "Write"]);
+
 export async function captureToolUse(
   toolName: string,
   args: Record<string, unknown>,
   sessionId: string,
   opts?: { isError?: boolean },
 ): Promise<void> {
+  const toolFilePath = FILE_PATH_TOOLS.has(toolName) && typeof args.file_path === "string"
+    ? args.file_path
+    : undefined;
+
   const entry: ToolAuditEntry = {
     id: randomUUID(),
     type: "tool-audit",
@@ -112,6 +119,7 @@ export async function captureToolUse(
     category: categorizeToolName(toolName),
     ok: opts?.isError !== true,
     argsSummary: summarizeArgs(args),
+    ...(toolFilePath && { filePath: toolFilePath }),
   };
 
   const filePath = signalPath(TOOL_AUDIT_FILE);
@@ -129,16 +137,19 @@ export interface MinimalToolAudit {
   tool: string;
   ok: boolean;
   category: ToolCategory;
+  filePath?: string;
 }
 
 export function buildMinimalAudit(
   toolName: string,
   isError: boolean,
+  filePath?: string,
 ): MinimalToolAudit {
   return {
     ts: new Date().toISOString(),
     tool: toolName,
     ok: !isError,
     category: categorizeToolName(toolName),
+    ...(filePath && { filePath }),
   };
 }

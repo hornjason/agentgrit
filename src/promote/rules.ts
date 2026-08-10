@@ -18,6 +18,8 @@ export interface RuleStats {
   lowRatingActivations: number;
   lastSeen: string;
   noisePenalty?: number;
+  rawAvgRating?: number;
+  decayedRating?: number;
 }
 
 export function computeDecayedAverage(ratings: number[], halfLife: number = DEFAULT_DECAY_HALF_LIFE): number {
@@ -39,12 +41,15 @@ export function trackRule(rule: Rule, sessionRating: number): Rule {
   const ratings = [...(rule.sessionRatings ?? []), sessionRating].slice(
     -MAX_SESSION_RATINGS,
   );
-  const avg = computeDecayedAverage(ratings);
+  const decayed = computeDecayedAverage(ratings);
+  const rawAvg = ratings.reduce((sum, r) => sum + r, 0) / ratings.length;
 
   return {
     ...rule,
     injectionCount: (rule.injectionCount ?? 0) + 1,
-    avgCorrelatedRating: avg,
+    avgCorrelatedRating: decayed,
+    rawAvgRating: Math.round(rawAvg * 100) / 100,
+    decayedRating: Math.round(decayed * 100) / 100,
     sessionRatings: ratings,
     highRatingActivations:
       (rule.highRatingActivations ?? 0) + (sessionRating >= 7 ? 1 : 0),
@@ -105,6 +110,8 @@ export function correlateRules(rules: Rule[]): RuleStats[] {
     highRatingActivations: r.highRatingActivations ?? 0,
     lowRatingActivations: r.lowRatingActivations ?? 0,
     lastSeen: r.lastSeen ?? "",
+    ...(r.rawAvgRating !== undefined && { rawAvgRating: r.rawAvgRating }),
+    ...(r.decayedRating !== undefined && { decayedRating: r.decayedRating }),
   }));
 }
 

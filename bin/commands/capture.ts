@@ -2,8 +2,9 @@ import { existsSync, mkdirSync, appendFileSync, readFileSync } from "fs";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { execSync } from "child_process";
-import { parseRating, computeComposite, parseBareNumberRating, parsePraiseRating, parseThumbsRating, captureSessionSentiment } from "../../src/capture/rating";
+import { parseRating, computeComposite, parseBareNumberRating, parsePraiseRating, parseThumbsRating, captureSessionSentiment, readToolAuditForSession } from "../../src/capture/rating";
 import type { Turn } from "../../src/capture/rating";
+import { writeSessionContext } from "../../src/graph/context";
 import { parseTranscript, extractDebrief } from "../../src/capture/debrief";
 import { SCHEMA_VERSION } from "../../src/adapters/types";
 import type { RatingSignal } from "../../src/adapters/types";
@@ -440,6 +441,20 @@ async function captureSessionScoreCommand(): Promise<void> {
   }
 
   await captureSessionSentiment(turns, sessionId);
+
+  // Enrich session context with tool-audit data
+  try {
+    const sessionTimestamp = new Date().toISOString();
+    const audit = readToolAuditForSession(sessionTimestamp, join(getSignalDir(), "tool-audit.jsonl"));
+    if (audit.toolNames.length > 0 || audit.filePaths.length > 0) {
+      writeSessionContext([], [], "keyword", 0, {
+        toolCallPatterns: audit.toolNames,
+        filePathsTouched: audit.filePaths,
+      });
+    }
+  } catch {
+    // session context enrichment is non-critical
+  }
 }
 
 async function captureDebriefCommand(): Promise<void> {
