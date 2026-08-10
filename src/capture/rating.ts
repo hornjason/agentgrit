@@ -52,9 +52,11 @@ export function readToolAuditForSession(
     for (const line of raw.split("\n")) {
       if (!line.trim()) continue;
       try {
-        const entry = JSON.parse(line) as ToolAuditEntry & { filePath?: string };
-        if (new Date(entry.ts).getTime() >= sessionTs) {
-          if (entry.tool) seenTools.add(entry.tool);
+        const entry = JSON.parse(line);
+        const ts = entry.timestamp || entry.ts;
+        const tool = entry.toolName || entry.tool;
+        if (ts && new Date(ts).getTime() >= sessionTs) {
+          if (tool) seenTools.add(tool);
           if (entry.filePath) seenPaths.add(entry.filePath);
         }
       } catch { /* skip malformed lines */ }

@@ -196,10 +196,12 @@ describe("capture correction", () => {
 });
 
 describe("capture tool", () => {
-  test("writes tool name to tool-audit.jsonl", async () => {
+  test("writes rich tool-audit entry via captureToolUse", async () => {
     const input = JSON.stringify({
       session_id: "sess-tool",
       tool_name: "Bash",
+      tool_input: { command: "ls -la" },
+      tool_response: { is_error: false },
     });
 
     const result = await runCapture("tool", input);
@@ -209,9 +211,107 @@ describe("capture tool", () => {
     expect(existsSync(file)).toBe(true);
 
     const parsed = JSON.parse(readFileSync(file, "utf-8").trim());
-    expect(parsed.type).toBe("tool-use");
-    expect(parsed.tool_name).toBe("Bash");
+    expect(parsed.type).toBe("tool-audit");
+    expect(parsed.toolName).toBe("Bash");
+    expect(parsed.category).toBe("shell");
+    expect(parsed.ok).toBe(true);
     expect(parsed.session_id).toBe("sess-tool");
+    expect(parsed.argsSummary).toContain("command");
+  });
+
+  test("extracts filePath for Read tool", async () => {
+    const input = JSON.stringify({
+      session_id: "sess-read",
+      tool_name: "Read",
+      tool_input: { file_path: "/Users/test/src/index.ts" },
+    });
+
+    const result = await runCapture("tool", input);
+    expect(result.exitCode).toBe(0);
+
+    const file = join(TMP_DIR, "signals", "tool-audit.jsonl");
+    const parsed = JSON.parse(readFileSync(file, "utf-8").trim());
+    expect(parsed.toolName).toBe("Read");
+    expect(parsed.filePath).toBe("/Users/test/src/index.ts");
+    expect(parsed.category).toBe("file-read");
+  });
+
+  test("extracts filePath for Edit tool", async () => {
+    const input = JSON.stringify({
+      session_id: "sess-edit",
+      tool_name: "Edit",
+      tool_input: { file_path: "/Users/test/src/app.ts", old_string: "a", new_string: "b" },
+    });
+
+    const result = await runCapture("tool", input);
+    expect(result.exitCode).toBe(0);
+
+    const file = join(TMP_DIR, "signals", "tool-audit.jsonl");
+    const parsed = JSON.parse(readFileSync(file, "utf-8").trim());
+    expect(parsed.filePath).toBe("/Users/test/src/app.ts");
+    expect(parsed.category).toBe("file-write");
+  });
+
+  test("extracts filePath for Write tool", async () => {
+    const input = JSON.stringify({
+      session_id: "sess-write",
+      tool_name: "Write",
+      tool_input: { file_path: "/Users/test/new-file.ts", content: "hello" },
+    });
+
+    const result = await runCapture("tool", input);
+    expect(result.exitCode).toBe(0);
+
+    const file = join(TMP_DIR, "signals", "tool-audit.jsonl");
+    const parsed = JSON.parse(readFileSync(file, "utf-8").trim());
+    expect(parsed.filePath).toBe("/Users/test/new-file.ts");
+  });
+
+  test("no filePath for non-file tools", async () => {
+    const input = JSON.stringify({
+      session_id: "sess-bash",
+      tool_name: "Bash",
+      tool_input: { command: "echo hello" },
+    });
+
+    const result = await runCapture("tool", input);
+    expect(result.exitCode).toBe(0);
+
+    const file = join(TMP_DIR, "signals", "tool-audit.jsonl");
+    const parsed = JSON.parse(readFileSync(file, "utf-8").trim());
+    expect(parsed.filePath).toBeUndefined();
+  });
+
+  test("records error state from tool_response", async () => {
+    const input = JSON.stringify({
+      session_id: "sess-err",
+      tool_name: "Bash",
+      tool_input: { command: "false" },
+      tool_response: { is_error: true },
+    });
+
+    const result = await runCapture("tool", input);
+    expect(result.exitCode).toBe(0);
+
+    const file = join(TMP_DIR, "signals", "tool-audit.jsonl");
+    const parsed = JSON.parse(readFileSync(file, "utf-8").trim());
+    expect(parsed.ok).toBe(false);
+  });
+
+  test("handles missing tool_input gracefully", async () => {
+    const input = JSON.stringify({
+      session_id: "sess-minimal",
+      tool_name: "Agent",
+    });
+
+    const result = await runCapture("tool", input);
+    expect(result.exitCode).toBe(0);
+
+    const file = join(TMP_DIR, "signals", "tool-audit.jsonl");
+    const parsed = JSON.parse(readFileSync(file, "utf-8").trim());
+    expect(parsed.toolName).toBe("Agent");
+    expect(parsed.category).toBe("agent");
+    expect(parsed.ok).toBe(true);
   });
 
   test("exits 0 with no tool_name", async () => {
@@ -219,6 +319,30 @@ describe("capture tool", () => {
     const result = await runCapture("tool", input);
     expect(result.exitCode).toBe(0);
     expect(existsSync(join(TMP_DIR, "signals", "tool-audit.jsonl"))).toBe(false);
+  });
+
+  test("5 Read calls produce 5 filePaths", async () => {
+    for (let i = 0; i < 5; i++) {
+      const input = JSON.stringify({
+        session_id: "sess-five",
+        tool_name: "Read",
+        tool_input: { file_path: `/Users/test/file-${i}.ts` },
+      });
+      await runCapture("tool", input);
+    }
+
+    const file = join(TMP_DIR, "signals", "tool-audit.jsonl");
+    const lines = readFileSync(file, "utf-8").trim().split("\n");
+    expect(lines.length).toBe(5);
+
+    const filePaths = lines.map((l) => JSON.parse(l).filePath);
+    expect(filePaths).toEqual([
+      "/Users/test/file-0.ts",
+      "/Users/test/file-1.ts",
+      "/Users/test/file-2.ts",
+      "/Users/test/file-3.ts",
+      "/Users/test/file-4.ts",
+    ]);
   });
 });
 
@@ -665,6 +789,33 @@ describe("capture work-completion", () => {
     const file = join(signalDir, "work-completions.jsonl");
     const parsed = JSON.parse(readFileSync(file, "utf-8").trim());
     expect(parsed.tools_used).toEqual(["Read", "Bash"]);
+  });
+
+  test("reads new toolName format from captureToolUse", async () => {
+    const signalDir = join(TMP_DIR, "signals");
+    mkdirSync(signalDir, { recursive: true });
+
+    writeFileSync(join(signalDir, "tool-audit.jsonl"), [
+      JSON.stringify({ session_id: "sess-new", toolName: "Read", type: "tool-audit", category: "file-read" }),
+      JSON.stringify({ session_id: "sess-new", toolName: "Edit", type: "tool-audit", category: "file-write" }),
+      JSON.stringify({ session_id: "sess-new", toolName: "Read", type: "tool-audit", category: "file-read" }),
+      JSON.stringify({ session_id: "other", toolName: "Bash", type: "tool-audit" }),
+    ].join("\n") + "\n");
+
+    const transcriptPath = join(TMP_DIR, "transcript-new-format.jsonl");
+    writeFileSync(transcriptPath, [
+      JSON.stringify({ type: "user", message: { content: "a" } }),
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "b" }] } }),
+      JSON.stringify({ type: "user", message: { content: "c" } }),
+    ].join("\n"));
+
+    const input = JSON.stringify({ session_id: "sess-new", transcript_path: transcriptPath });
+    const result = await runCapture("work-completion", input);
+    expect(result.exitCode).toBe(0);
+
+    const file = join(signalDir, "work-completions.jsonl");
+    const parsed = JSON.parse(readFileSync(file, "utf-8").trim());
+    expect(parsed.tools_used).toEqual(["Read", "Edit"]);
   });
 });
 

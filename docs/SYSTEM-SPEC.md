@@ -219,7 +219,7 @@ AgentGrit is imported at runtime via dynamic `import()`. If unavailable, PAI fal
 | Eviction pipeline | COMPLETE | #85 shipped — correlation-based, duplicate detection, budget cap |
 | Co-occurrence edges | SHIPPED | Rating-weighted (#97). Attribution feedback updates weights per session (#99). |
 | Embedding support | SHIPPED | transformers.js optional peerDep, vector-cache.json, EmbeddingProvider interface (#98) |
-| Feedback loop | **PARTIAL** | Core loop closed (#99). 3 gaps remain (#163): daemon inline logic (SC-2), session context enrichment (SC-3), decay observability (SC-6) |
+| Feedback loop | CLOSED | Core loop (#99) + daemon refactor + session context enrichment + decay observability (#163). All 7 SCs verified. |
 | Eval regression gate | SHIPPED | Blocks buildGraph on precision drop >= 0.05 (#99) |
 | Skill optimization | COMPLETE | 75 tests pass |
 | Track 1 ports (#63-74) | ALL CLOSED | 12/12 verified 2026-07-08 |

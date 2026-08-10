@@ -11,6 +11,7 @@ import type { RatingSignal } from "../../src/adapters/types";
 import { loadConfig, resolveSignalDir, resolveMemoryDir } from "../../src/adapters/paths";
 import { generateFeedback, generateSuccess } from "../../src/daemon/feedback";
 import { inference, type InferenceOptions, type InferenceResult } from "../../src/adapters/inference";
+import { captureToolUse } from "../../src/capture/tool-audit";
 
 export type InferenceFn = (opts: InferenceOptions) => Promise<InferenceResult>;
 
@@ -213,7 +214,12 @@ async function captureToolCommand(): Promise<void> {
   const raw = readStdin();
   if (!raw) return;
 
-  let input: { session_id?: string; tool_name?: string };
+  let input: {
+    session_id?: string;
+    tool_name?: string;
+    tool_input?: Record<string, unknown>;
+    tool_response?: { is_error?: boolean };
+  };
   try {
     input = JSON.parse(raw);
   } catch {
@@ -222,17 +228,15 @@ async function captureToolCommand(): Promise<void> {
 
   if (!input.tool_name) return;
 
-  const dir = getSignalDir();
-  const record = {
-    id: randomUUID(),
-    type: "tool-use",
-    timestamp: new Date().toISOString(),
-    session_id: input.session_id || "unknown",
-    schemaVersion: SCHEMA_VERSION,
-    tool_name: input.tool_name,
-  };
+  const args = input.tool_input ?? {};
+  const isError = input.tool_response?.is_error === true;
 
-  appendJsonl(join(dir, "tool-audit.jsonl"), record);
+  await captureToolUse(
+    input.tool_name,
+    args,
+    input.session_id || "unknown",
+    { isError },
+  );
 }
 
 async function captureSkillCommand(): Promise<void> {
@@ -588,9 +592,10 @@ async function captureWorkCompletionCommand(): Promise<void> {
     for (const line of lines) {
       try {
         const entry = JSON.parse(line);
-        if (entry.session_id === sessionId && entry.tool_name && !seen.has(entry.tool_name)) {
-          seen.add(entry.tool_name);
-          toolsUsed.push(entry.tool_name);
+        const name = entry.toolName || entry.tool_name || entry.tool;
+        if (entry.session_id === sessionId && name && !seen.has(name)) {
+          seen.add(name);
+          toolsUsed.push(name);
         }
       } catch {}
     }

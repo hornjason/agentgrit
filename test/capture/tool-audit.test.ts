@@ -135,4 +135,42 @@ describe("captureToolUse", () => {
     const parsed = JSON.parse(content);
     expect(parsed.ok).toBe(false);
   });
+
+  test("extracts filePath for Read tool", async () => {
+    await captureToolUse("Read", { file_path: "/src/index.ts" }, "test-session");
+
+    const filePath = join(TMP_DIR, "signals", "tool-audit.jsonl");
+    const content = readFileSync(filePath, "utf-8").trim();
+    const parsed = JSON.parse(content);
+    expect(parsed.filePath).toBe("/src/index.ts");
+    expect(parsed.category).toBe("file-read");
+  });
+
+  test("extracts filePath for Edit tool", async () => {
+    await captureToolUse("Edit", { file_path: "/src/app.ts", old_string: "a", new_string: "b" }, "test-session");
+
+    const filePath = join(TMP_DIR, "signals", "tool-audit.jsonl");
+    const content = readFileSync(filePath, "utf-8").trim();
+    const parsed = JSON.parse(content);
+    expect(parsed.filePath).toBe("/src/app.ts");
+    expect(parsed.category).toBe("file-write");
+  });
+
+  test("extracts filePath for Write tool", async () => {
+    await captureToolUse("Write", { file_path: "/src/new.ts", content: "code" }, "test-session");
+
+    const filePath = join(TMP_DIR, "signals", "tool-audit.jsonl");
+    const content = readFileSync(filePath, "utf-8").trim();
+    const parsed = JSON.parse(content);
+    expect(parsed.filePath).toBe("/src/new.ts");
+  });
+
+  test("no filePath for non-file tools", async () => {
+    await captureToolUse("Bash", { command: "ls" }, "test-session");
+
+    const filePath = join(TMP_DIR, "signals", "tool-audit.jsonl");
+    const content = readFileSync(filePath, "utf-8").trim();
+    const parsed = JSON.parse(content);
+    expect(parsed.filePath).toBeUndefined();
+  });
 });
