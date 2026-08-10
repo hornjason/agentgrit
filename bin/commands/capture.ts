@@ -455,6 +455,19 @@ async function captureSessionScoreCommand(): Promise<void> {
   } catch {
     // session context enrichment is non-critical
   }
+
+  // Post-session reconciliation — advisory, never blocks session end
+  try {
+    const { reconcile } = await import("../../src/daemon/reconcile");
+    const report = await reconcile();
+    if (report.overall !== "pass") {
+      process.stderr.write(
+        `[reconcile] ${report.overall}: ${report.checks.filter((c) => c.status !== "pass").map((c) => `${c.name}=${c.status}`).join(", ")}\n`,
+      );
+    }
+  } catch {
+    // reconciliation is advisory — never block session end
+  }
 }
 
 async function captureDebriefCommand(): Promise<void> {
