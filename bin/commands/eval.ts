@@ -339,7 +339,7 @@ export async function evalCommand(args: string[]): Promise<void> {
     console.log("    agentgrit eval session");
     console.log("    agentgrit eval recall [--generate] [--bootstrap] [--live]");
     console.log("    agentgrit eval effectiveness");
-    console.log("    agentgrit eval precision [--strategy current|embeddings] [--compare]");
+    console.log("    agentgrit eval precision [--strategy current|embeddings|prf] [--compare]");
     console.log("    agentgrit eval gold audit [--limit N] [--output PATH]");
     console.log("    agentgrit eval gold apply --file PATH");
     console.log("");
@@ -349,7 +349,7 @@ export async function evalCommand(args: string[]): Promise<void> {
     console.log("  --bootstrap builds recall-scores.json from session-context-history.jsonl.");
     console.log("  --live re-runs getContextRules for each gold session (measures current retrieval).");
     console.log("  precision runs 10 diverse tasks and measures precision@5 and precision@10.");
-    console.log("    --strategy    Retrieval strategy: current (default) or embeddings");
+    console.log("    --strategy    Retrieval strategy: current (default), embeddings, or prf");
     console.log("    --compare     Run A/B comparison of current vs embeddings side-by-side");
     console.log("  effectiveness compares correction frequency before/after rule promotion.\n");
     return;
@@ -608,23 +608,25 @@ export async function evalCommand(args: string[]): Promise<void> {
     const stratIdx = args.indexOf("--strategy");
     if (stratIdx !== -1 && args[stratIdx + 1]) {
       const val = args[stratIdx + 1];
-      if (val === "embeddings" || val === "current") strategy = val;
+      if (val === "embeddings" || val === "current" || val === "prf") strategy = val;
     }
 
     if (compare) {
-      console.log("  Mode: precision@k A/B comparison (current vs embeddings)\n");
+      console.log("  Mode: precision@k A/B/C comparison (current vs embeddings vs prf)\n");
 
       const currentResult = await evaluatePrecision("current");
       const embeddingsResult = await evaluatePrecision("embeddings");
+      const prfResult = await evaluatePrecision("prf");
 
-      const maxDesc = 40;
-      console.log("  " + "Task".padEnd(maxDesc) + " Current     Embeddings   Domains");
-      console.log("  " + " ".repeat(maxDesc) + " P@5   P@10  P@5   P@10");
-      console.log("  " + "-".repeat(maxDesc + 40));
+      const maxDesc = 35;
+      console.log("  " + "Task".padEnd(maxDesc) + " Current     Embeddings   PRF          Domains");
+      console.log("  " + " ".repeat(maxDesc) + " P@5   P@10  P@5   P@10  P@5   P@10");
+      console.log("  " + "-".repeat(maxDesc + 55));
 
       for (let i = 0; i < currentResult.tasks.length; i++) {
         const ct = currentResult.tasks[i];
         const et = embeddingsResult.tasks[i];
+        const pt = prfResult.tasks[i];
         const desc = ct.description.length > maxDesc
           ? ct.description.slice(0, maxDesc - 3) + "..."
           : ct.description.padEnd(maxDesc);
@@ -632,21 +634,29 @@ export async function evalCommand(args: string[]): Promise<void> {
         const cp10 = ct.precision10.toFixed(3).padEnd(6);
         const ep5 = et.precision5.toFixed(3).padEnd(6);
         const ep10 = et.precision10.toFixed(3).padEnd(6);
-        console.log(`  ${desc} ${cp5}${cp10}${ep5}${ep10}${ct.expectedDomains.join(",")}`);
+        const pp5 = pt.precision5.toFixed(3).padEnd(6);
+        const pp10 = pt.precision10.toFixed(3).padEnd(6);
+        console.log(`  ${desc} ${cp5}${cp10}${ep5}${ep10}${pp5}${pp10}${ct.expectedDomains.join(",")}`);
       }
 
-      console.log("  " + "-".repeat(maxDesc + 40));
+      console.log("  " + "-".repeat(maxDesc + 55));
       const meanLabel = "MEAN".padEnd(maxDesc);
       const mcp5 = currentResult.meanPrecision5.toFixed(3).padEnd(6);
       const mcp10 = currentResult.meanPrecision10.toFixed(3).padEnd(6);
       const mep5 = embeddingsResult.meanPrecision5.toFixed(3).padEnd(6);
       const mep10 = embeddingsResult.meanPrecision10.toFixed(3).padEnd(6);
-      console.log(`  ${meanLabel} ${mcp5}${mcp10}${mep5}${mep10}`);
+      const mpp5 = prfResult.meanPrecision5.toFixed(3).padEnd(6);
+      const mpp10 = prfResult.meanPrecision10.toFixed(3).padEnd(6);
+      console.log(`  ${meanLabel} ${mcp5}${mcp10}${mep5}${mep10}${mpp5}${mpp10}`);
 
-      const delta5 = embeddingsResult.meanPrecision5 - currentResult.meanPrecision5;
-      const delta10 = embeddingsResult.meanPrecision10 - currentResult.meanPrecision10;
-      console.log(`\n  Delta P@5:  ${delta5 >= 0 ? "+" : ""}${delta5.toFixed(3)}`);
-      console.log(`  Delta P@10: ${delta10 >= 0 ? "+" : ""}${delta10.toFixed(3)}`);
+      const eDelta5 = embeddingsResult.meanPrecision5 - currentResult.meanPrecision5;
+      const eDelta10 = embeddingsResult.meanPrecision10 - currentResult.meanPrecision10;
+      const pDelta5 = prfResult.meanPrecision5 - currentResult.meanPrecision5;
+      const pDelta10 = prfResult.meanPrecision10 - currentResult.meanPrecision10;
+      console.log(`\n  Embeddings delta P@5:  ${eDelta5 >= 0 ? "+" : ""}${eDelta5.toFixed(3)}`);
+      console.log(`  Embeddings delta P@10: ${eDelta10 >= 0 ? "+" : ""}${eDelta10.toFixed(3)}`);
+      console.log(`  PRF delta P@5:  ${pDelta5 >= 0 ? "+" : ""}${pDelta5.toFixed(3)}`);
+      console.log(`  PRF delta P@10: ${pDelta10 >= 0 ? "+" : ""}${pDelta10.toFixed(3)}`);
 
       const stateDir = join(base, "state");
       if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true });
@@ -654,7 +664,11 @@ export async function evalCommand(args: string[]): Promise<void> {
       writeFileSync(outputPath, JSON.stringify({
         current: currentResult,
         embeddings: embeddingsResult,
-        delta: { p5: delta5, p10: delta10 },
+        prf: prfResult,
+        delta: {
+          embeddings: { p5: eDelta5, p10: eDelta10 },
+          prf: { p5: pDelta5, p10: pDelta10 },
+        },
         timestamp: new Date().toISOString(),
       }, null, 2));
       console.log(`  Results written to: ${outputPath}\n`);

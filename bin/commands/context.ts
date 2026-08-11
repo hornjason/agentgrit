@@ -17,6 +17,7 @@ import {
   formatGraphContext,
   type RetrievalStrategy,
 } from "../../src/graph/context";
+import { expandQueryByPRF } from "../../src/graph/prf";
 import { loadVectorCache } from "../../src/graph/embeddings";
 import { diagnoseBM25, tokenize } from "../../src/graph/bm25";
 import { RRF_WEIGHTS } from "../../src/graph/retrieval";
@@ -44,7 +45,7 @@ function parseArgs(args: string[]): { text?: string; issue?: number; file?: stri
       verbose = true;
     } else if (args[i] === "--strategy" && args[i + 1]) {
       const val = args[++i];
-      if (val === "embeddings" || val === "current") strategy = val;
+      if (val === "embeddings" || val === "current" || val === "prf") strategy = val;
     }
   }
 
@@ -158,6 +159,13 @@ async function doRefresh(args: string[]): Promise<void> {
     console.log(`  Domains detected: [${domains.join(", ")}] (source: ${domainSource})`);
   }
 
+  if (opts.strategy === "prf" && opts.verbose && inputText) {
+    const prfPreview = expandQueryByPRF(inputText, index, 5, 10);
+    console.log(`  Strategy: prf`);
+    console.log(`  PRF expanded terms: [${prfPreview.expandedTerms.join(", ")}]`);
+    console.log(`  PRF combined query: ${prfPreview.combinedQuery}`);
+  }
+
   let rules;
   if (opts.strategy === "embeddings") {
     const vectorCachePath = join(base, "state", "vector-cache.json");
@@ -180,6 +188,8 @@ async function doRefresh(args: string[]): Promise<void> {
     rules = await getContextRules(
       graph, index, domains, opts.limit, signalDir,
       inputText || undefined,
+      undefined, undefined, undefined,
+      opts.strategy,
     );
   }
 
@@ -210,13 +220,13 @@ export async function contextCommand(args: string[]): Promise<void> {
   if (sub === "refresh") {
     await doRefresh(subArgs);
   } else {
-    console.log("  Usage: agentgrit context refresh [--text TEXT | --issue N | --file PATH] [--strategy current|embeddings] [--verbose]");
+    console.log("  Usage: agentgrit context refresh [--text TEXT | --issue N | --file PATH] [--strategy current|embeddings|prf] [--verbose]");
     console.log("  Options:");
     console.log("    --text TEXT       Use text directly for domain detection");
     console.log("    --issue N         Fetch GitHub issue N as input text");
     console.log("    --file PATH       Read file contents as input text");
     console.log("    --limit N         Max context rules (default: 10)");
-    console.log("    --strategy STR    Retrieval strategy: current (default) or embeddings");
+    console.log("    --strategy STR    Retrieval strategy: current (default), embeddings, or prf");
     console.log("    --verbose         Show BM25 diagnostic, scores, and query analysis");
   }
 

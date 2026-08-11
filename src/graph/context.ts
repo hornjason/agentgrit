@@ -19,6 +19,7 @@ import { loadPatterns, loadHybridPatterns } from "./generate-patterns";
 import type { DomainPattern } from "./generate-patterns";
 import { shouldEvict, loadEvictionAllowlist, appendEvictionLog } from "../promote/auto-eviction";
 import { loadRuleStats } from "../promote/rules";
+import { expandQueryByPRF } from "./prf";
 
 // ── Default Domains ──
 
@@ -115,7 +116,7 @@ export function sanitizeRuleText(text: string): string {
 
 // ── Embedding Seed Retrieval ──
 
-export type RetrievalStrategy = "current" | "embeddings";
+export type RetrievalStrategy = "current" | "embeddings" | "prf";
 
 export function retrieveByEmbeddingSeed(
   queryText: string,
@@ -193,12 +194,22 @@ export async function getContextRules(
   vectorCachePath?: string,
   embeddingProvider?: EmbeddingProvider,
   rrfWeights?: RRFWeights,
+  strategy: RetrievalStrategy = "current",
 ): Promise<Rule[]> {
   const domains = currentDomains.length > 0 ? currentDomains : DEFAULT_DOMAINS;
 
   // 1. Hybrid retrieval — BM25 + vector + domain-scored graph via RRF
   const fetchLimit = Math.max(limit * 3, 30);
-  const searchText = queryText || domains.join(" ");
+  let searchText = queryText || domains.join(" ");
+
+  // PRF: expand query with terms from top BM25 hits
+  let prfResult: import("./prf").PRFResult | undefined;
+  if (strategy === "prf" && queryText) {
+    prfResult = expandQueryByPRF(queryText, index, 5, 10);
+    if (prfResult.expandedTerms.length > 0) {
+      searchText = prfResult.combinedQuery;
+    }
+  }
 
   let vectorList: Array<{ id: string; rank: number }> | undefined;
   if (vectorCachePath && embeddingProvider) {

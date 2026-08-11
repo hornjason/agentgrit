@@ -185,6 +185,7 @@ export async function evaluatePrecision(
     } else {
       const rules = await getContextRules(
         graph, index, domains, 15, signalDir, task.description,
+        undefined, undefined, undefined, strategy,
       );
       retrievedIds = rules.map(r => r.id);
     }
