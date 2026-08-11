@@ -1,7 +1,9 @@
 import { readGraph } from "../graph/builder";
 import { buildIndexFromDir } from "../graph/bm25";
-import { getContextRules, initHybridDetection, detectDomains } from "../graph/context";
+import { getContextRules, initHybridDetection, detectDomains, retrieveByEmbeddingSeed, type RetrievalStrategy } from "../graph/context";
+import { loadVectorCache } from "../graph/embeddings";
 import { resolveMemoryDir, resolveSignalDir } from "../adapters/paths";
+import { join } from "path";
 
 export interface EvalTask {
   id: number;
@@ -140,12 +142,21 @@ export const EVAL_TASKS: EvalTask[] = [
   },
 ];
 
-export async function evaluatePrecision(): Promise<PrecisionEvalResult> {
+export async function evaluatePrecision(
+  strategy: RetrievalStrategy = "current",
+): Promise<PrecisionEvalResult> {
   const graph = readGraph();
   initHybridDetection(graph);
   const memoryDir = resolveMemoryDir();
   const signalDir = resolveSignalDir();
   const index = buildIndexFromDir(memoryDir);
+
+  let vectorCache: Map<string, number[]> | null = null;
+  if (strategy === "embeddings") {
+    const { getBaseDir } = await import("../adapters/paths");
+    const vectorCachePath = join(getBaseDir(), "state", "vector-cache.json");
+    vectorCache = loadVectorCache(vectorCachePath);
+  }
 
   const tasks: TaskResult[] = [];
 
@@ -154,10 +165,19 @@ export async function evaluatePrecision(): Promise<PrecisionEvalResult> {
       ? task.expectedDomains
       : detectDomains(task.description);
 
-    const rules = await getContextRules(
-      graph, index, domains, 15, signalDir, task.description,
-    );
-    const retrievedIds = rules.map(r => r.id);
+    let retrievedIds: string[];
+
+    if (strategy === "embeddings" && vectorCache && vectorCache.size > 0) {
+      const rules = retrieveByEmbeddingSeed(
+        task.description, graph, index, vectorCache, 15,
+      );
+      retrievedIds = rules.map(r => r.id);
+    } else {
+      const rules = await getContextRules(
+        graph, index, domains, 15, signalDir, task.description,
+      );
+      retrievedIds = rules.map(r => r.id);
+    }
 
     const expectedSet = new Set(task.expectedRuleIds);
     const top5 = retrievedIds.slice(0, 5);

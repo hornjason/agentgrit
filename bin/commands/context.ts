@@ -10,22 +10,26 @@ import {
   initHybridDetection,
   detectDomains,
   getContextRules,
+  retrieveByEmbeddingSeed,
   writeSessionContext,
   detectDomainsFromGitStatus,
   computeSmartDefaults,
   formatGraphContext,
+  type RetrievalStrategy,
 } from "../../src/graph/context";
+import { loadVectorCache } from "../../src/graph/embeddings";
 import { diagnoseBM25, tokenize } from "../../src/graph/bm25";
 import { RRF_WEIGHTS } from "../../src/graph/retrieval";
 
 const GRAPH_CONTEXT_PATH = join(homedir(), ".claude", "MEMORY", "STATE", "GRAPH-CONTEXT.md");
 
-function parseArgs(args: string[]): { text?: string; issue?: number; file?: string; limit: number; verbose: boolean } {
+function parseArgs(args: string[]): { text?: string; issue?: number; file?: string; limit: number; verbose: boolean; strategy: RetrievalStrategy } {
   let text: string | undefined;
   let issue: number | undefined;
   let file: string | undefined;
   let limit = 10;
   let verbose = false;
+  let strategy: RetrievalStrategy = "current";
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--text" && args[i + 1]) {
@@ -38,10 +42,13 @@ function parseArgs(args: string[]): { text?: string; issue?: number; file?: stri
       limit = parseInt(args[++i], 10) || 10;
     } else if (args[i] === "--verbose") {
       verbose = true;
+    } else if (args[i] === "--strategy" && args[i + 1]) {
+      const val = args[++i];
+      if (val === "embeddings" || val === "current") strategy = val;
     }
   }
 
-  return { text, issue, file, limit, verbose };
+  return { text, issue, file, limit, verbose, strategy };
 }
 
 function resolveInputText(opts: { text?: string; issue?: number; file?: string }): string {
@@ -151,10 +158,30 @@ async function doRefresh(args: string[]): Promise<void> {
     console.log(`  Domains detected: [${domains.join(", ")}] (source: ${domainSource})`);
   }
 
-  const rules = await getContextRules(
-    graph, index, domains, opts.limit, signalDir,
-    inputText || undefined,
-  );
+  let rules;
+  if (opts.strategy === "embeddings") {
+    const vectorCachePath = join(base, "state", "vector-cache.json");
+    const vectorCache = loadVectorCache(vectorCachePath);
+    if (vectorCache && vectorCache.size > 0) {
+      rules = retrieveByEmbeddingSeed(
+        searchText, graph, index, vectorCache, opts.limit,
+      );
+      if (opts.verbose) {
+        console.log(`  Strategy: embeddings (${vectorCache.size} vectors)`);
+      }
+    } else {
+      console.log("  Warning: no vector cache found, falling back to current strategy");
+      rules = await getContextRules(
+        graph, index, domains, opts.limit, signalDir,
+        inputText || undefined,
+      );
+    }
+  } else {
+    rules = await getContextRules(
+      graph, index, domains, opts.limit, signalDir,
+      inputText || undefined,
+    );
+  }
 
   const clusters = queryGraph(graph, domains, 5);
 
@@ -183,13 +210,14 @@ export async function contextCommand(args: string[]): Promise<void> {
   if (sub === "refresh") {
     await doRefresh(subArgs);
   } else {
-    console.log("  Usage: agentgrit context refresh [--text TEXT | --issue N | --file PATH] [--verbose]");
+    console.log("  Usage: agentgrit context refresh [--text TEXT | --issue N | --file PATH] [--strategy current|embeddings] [--verbose]");
     console.log("  Options:");
-    console.log("    --text TEXT   Use text directly for domain detection");
-    console.log("    --issue N     Fetch GitHub issue N as input text");
-    console.log("    --file PATH   Read file contents as input text");
-    console.log("    --limit N     Max context rules (default: 10)");
-    console.log("    --verbose     Show BM25 diagnostic, scores, and query analysis");
+    console.log("    --text TEXT       Use text directly for domain detection");
+    console.log("    --issue N         Fetch GitHub issue N as input text");
+    console.log("    --file PATH       Read file contents as input text");
+    console.log("    --limit N         Max context rules (default: 10)");
+    console.log("    --strategy STR    Retrieval strategy: current (default) or embeddings");
+    console.log("    --verbose         Show BM25 diagnostic, scores, and query analysis");
   }
 
   console.log("");

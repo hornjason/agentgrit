@@ -16,7 +16,8 @@ import { writeFileSync, mkdirSync } from "fs";
 import { readGraph } from "../../src/graph/builder";
 import { buildIndexFromDir } from "../../src/graph/bm25";
 import { getContextRules } from "../../src/graph/context";
-import { evaluatePrecision } from "../../src/evaluate/precision";
+import { evaluatePrecision, type PrecisionEvalResult } from "../../src/evaluate/precision";
+import type { RetrievalStrategy } from "../../src/graph/context";
 
 function getJudgeConfig(): JudgeConfig | null {
   const config = loadConfig();
@@ -339,7 +340,7 @@ export async function evalCommand(args: string[]): Promise<void> {
     console.log("    agentgrit eval session");
     console.log("    agentgrit eval recall [--generate] [--bootstrap] [--live]");
     console.log("    agentgrit eval effectiveness");
-    console.log("    agentgrit eval precision");
+    console.log("    agentgrit eval precision [--strategy current|embeddings] [--compare]");
     console.log("");
     console.log("  Evaluates traces, sessions, recall, precision, or rule effectiveness.");
     console.log("  Traces loads from algorithm-reflections.jsonl or session transcripts.");
@@ -347,6 +348,8 @@ export async function evalCommand(args: string[]): Promise<void> {
     console.log("  --bootstrap builds recall-scores.json from session-context-history.jsonl.");
     console.log("  --live re-runs getContextRules for each gold session (measures current retrieval).");
     console.log("  precision runs 10 diverse tasks and measures precision@5 and precision@10.");
+    console.log("    --strategy    Retrieval strategy: current (default) or embeddings");
+    console.log("    --compare     Run A/B comparison of current vs embeddings side-by-side");
     console.log("  effectiveness compares correction frequency before/after rule promotion.\n");
     return;
   }
@@ -599,32 +602,89 @@ export async function evalCommand(args: string[]): Promise<void> {
       : 0;
     console.log(`  Summary: ${effective.length}/${results.length} rules effective (${effectiveRate}%)\n`);
   } else if (sub === "precision") {
-    console.log("  Mode: precision@k evaluation\n");
-
-    const result = await evaluatePrecision();
-
-    const maxDesc = 55;
-    console.log("  " + "Task".padEnd(maxDesc) + " P@5    P@10   Domains");
-    console.log("  " + "-".repeat(maxDesc + 25));
-
-    for (const t of result.tasks) {
-      const desc = t.description.length > maxDesc
-        ? t.description.slice(0, maxDesc - 3) + "..."
-        : t.description.padEnd(maxDesc);
-      const p5 = t.precision5.toFixed(3).padEnd(7);
-      const p10 = t.precision10.toFixed(3).padEnd(7);
-      console.log(`  ${desc} ${p5}${p10}${t.expectedDomains.join(",")}`);
+    const compare = args.includes("--compare");
+    let strategy: RetrievalStrategy = "current";
+    const stratIdx = args.indexOf("--strategy");
+    if (stratIdx !== -1 && args[stratIdx + 1]) {
+      const val = args[stratIdx + 1];
+      if (val === "embeddings" || val === "current") strategy = val;
     }
 
-    console.log("  " + "-".repeat(maxDesc + 25));
-    const meanLabel = "MEAN".padEnd(maxDesc);
-    console.log(`  ${meanLabel} ${result.meanPrecision5.toFixed(3).padEnd(7)}${result.meanPrecision10.toFixed(3)}`);
+    if (compare) {
+      console.log("  Mode: precision@k A/B comparison (current vs embeddings)\n");
 
-    const stateDir = join(base, "state");
-    if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true });
-    const outputPath = join(stateDir, "precision-eval.json");
-    writeFileSync(outputPath, JSON.stringify(result, null, 2));
-    console.log(`\n  Results written to: ${outputPath}\n`);
+      const currentResult = await evaluatePrecision("current");
+      const embeddingsResult = await evaluatePrecision("embeddings");
+
+      const maxDesc = 40;
+      console.log("  " + "Task".padEnd(maxDesc) + " Current     Embeddings   Domains");
+      console.log("  " + " ".repeat(maxDesc) + " P@5   P@10  P@5   P@10");
+      console.log("  " + "-".repeat(maxDesc + 40));
+
+      for (let i = 0; i < currentResult.tasks.length; i++) {
+        const ct = currentResult.tasks[i];
+        const et = embeddingsResult.tasks[i];
+        const desc = ct.description.length > maxDesc
+          ? ct.description.slice(0, maxDesc - 3) + "..."
+          : ct.description.padEnd(maxDesc);
+        const cp5 = ct.precision5.toFixed(3).padEnd(6);
+        const cp10 = ct.precision10.toFixed(3).padEnd(6);
+        const ep5 = et.precision5.toFixed(3).padEnd(6);
+        const ep10 = et.precision10.toFixed(3).padEnd(6);
+        console.log(`  ${desc} ${cp5}${cp10}${ep5}${ep10}${ct.expectedDomains.join(",")}`);
+      }
+
+      console.log("  " + "-".repeat(maxDesc + 40));
+      const meanLabel = "MEAN".padEnd(maxDesc);
+      const mcp5 = currentResult.meanPrecision5.toFixed(3).padEnd(6);
+      const mcp10 = currentResult.meanPrecision10.toFixed(3).padEnd(6);
+      const mep5 = embeddingsResult.meanPrecision5.toFixed(3).padEnd(6);
+      const mep10 = embeddingsResult.meanPrecision10.toFixed(3).padEnd(6);
+      console.log(`  ${meanLabel} ${mcp5}${mcp10}${mep5}${mep10}`);
+
+      const delta5 = embeddingsResult.meanPrecision5 - currentResult.meanPrecision5;
+      const delta10 = embeddingsResult.meanPrecision10 - currentResult.meanPrecision10;
+      console.log(`\n  Delta P@5:  ${delta5 >= 0 ? "+" : ""}${delta5.toFixed(3)}`);
+      console.log(`  Delta P@10: ${delta10 >= 0 ? "+" : ""}${delta10.toFixed(3)}`);
+
+      const stateDir = join(base, "state");
+      if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true });
+      const outputPath = join(stateDir, "precision-comparison.json");
+      writeFileSync(outputPath, JSON.stringify({
+        current: currentResult,
+        embeddings: embeddingsResult,
+        delta: { p5: delta5, p10: delta10 },
+        timestamp: new Date().toISOString(),
+      }, null, 2));
+      console.log(`  Results written to: ${outputPath}\n`);
+    } else {
+      console.log(`  Mode: precision@k evaluation (strategy: ${strategy})\n`);
+
+      const result = await evaluatePrecision(strategy);
+
+      const maxDesc = 55;
+      console.log("  " + "Task".padEnd(maxDesc) + " P@5    P@10   Domains");
+      console.log("  " + "-".repeat(maxDesc + 25));
+
+      for (const t of result.tasks) {
+        const desc = t.description.length > maxDesc
+          ? t.description.slice(0, maxDesc - 3) + "..."
+          : t.description.padEnd(maxDesc);
+        const p5 = t.precision5.toFixed(3).padEnd(7);
+        const p10 = t.precision10.toFixed(3).padEnd(7);
+        console.log(`  ${desc} ${p5}${p10}${t.expectedDomains.join(",")}`);
+      }
+
+      console.log("  " + "-".repeat(maxDesc + 25));
+      const meanLabel = "MEAN".padEnd(maxDesc);
+      console.log(`  ${meanLabel} ${result.meanPrecision5.toFixed(3).padEnd(7)}${result.meanPrecision10.toFixed(3)}`);
+
+      const stateDir = join(base, "state");
+      if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true });
+      const outputPath = join(stateDir, "precision-eval.json");
+      writeFileSync(outputPath, JSON.stringify(result, null, 2));
+      console.log(`\n  Results written to: ${outputPath}\n`);
+    }
   } else {
     console.log(`  Unknown eval target: ${sub}`);
     console.log(`  Valid targets: traces, session, recall, effectiveness, precision\n`);

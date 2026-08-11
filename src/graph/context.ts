@@ -14,6 +14,7 @@ import { searchIndex, tokenize } from "./bm25";
 import { queryTrajectoriesSync } from "../detect/trajectories";
 import { hybridRetrieve, type RRFWeights } from "./retrieval";
 import { loadVectorCache, rankByVectorSimilarity } from "./embeddings";
+import { cosine } from "./embedder";
 import { loadPatterns, loadHybridPatterns } from "./generate-patterns";
 import type { DomainPattern } from "./generate-patterns";
 import { shouldEvict, loadEvictionAllowlist, appendEvictionLog } from "../promote/auto-eviction";
@@ -110,6 +111,74 @@ export function sanitizeRuleText(text: string): string {
     sanitized = sanitized.replace(p, "");
   }
   return sanitized.trim();
+}
+
+// ── Embedding Seed Retrieval ──
+
+export type RetrievalStrategy = "current" | "embeddings";
+
+export function retrieveByEmbeddingSeed(
+  queryText: string,
+  graph: Graph,
+  index: BM25Index,
+  vectorCache: Map<string, number[]>,
+  limit: number,
+): Rule[] {
+  if (vectorCache.size === 0) return [];
+
+  const bm25Results = searchIndex(index, queryText, 5);
+  if (bm25Results.length === 0) return [];
+
+  const seedIds = bm25Results.map(r => r.id);
+  const seedVectors: number[][] = [];
+  for (const id of seedIds) {
+    const v = vectorCache.get(id);
+    if (v) seedVectors.push(v);
+  }
+  if (seedVectors.length === 0) return [];
+
+  const candidateScores = new Map<string, number[]>();
+  for (const seedVec of seedVectors) {
+    const neighbors = rankByVectorSimilarity(seedVec, vectorCache, 10);
+    for (const n of neighbors) {
+      if (!candidateScores.has(n.id)) candidateScores.set(n.id, []);
+      candidateScores.get(n.id)!.push(n.score);
+    }
+  }
+
+  const scored = Array.from(candidateScores.entries())
+    .map(([id, scores]) => ({
+      id,
+      avgCosine: scores.reduce((a, b) => a + b, 0) / scores.length,
+    }))
+    .sort((a, b) => b.avgCosine - a.avgCosine);
+
+  const ALLOWED_TYPES = new Set(["feedback", "steering", "success", "learned"]);
+  const INDEX_NODE_PATTERN = /^(MEMORY|README|INDEX)$/i;
+
+  const rules: Rule[] = [];
+  for (const entry of scored) {
+    if (rules.length >= limit) break;
+    if (INDEX_NODE_PATTERN.test(entry.id)) continue;
+    const node = graph.nodes[entry.id];
+    if (!node) continue;
+    const t = node.type;
+    if (t && !ALLOWED_TYPES.has(t)) continue;
+
+    rules.push({
+      id: entry.id,
+      text: sanitizeRuleText(node.description || node.name || entry.id),
+      tier: Tier.Graph,
+      tags: node.domains || [],
+      created: node.last_updated || new Date().toISOString(),
+      correlationScore: entry.avgCosine,
+      domainSource: node.domainSource,
+      sourceSignals: [],
+      schemaVersion: 1,
+    });
+  }
+
+  return rules;
 }
 
 // ── Get Context Rules ──
