@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync, createReadStream } from "fs";
 import { join, basename } from "path";
 import { createInterface } from "readline";
+import { extractTaskFromTranscript } from "../../src/evaluate/task-extractor";
 import { getBaseDir, loadConfig, resolveSignalDir, resolveSignalFile, resolveTranscriptDir } from "../../src/adapters/paths";
 import { loadRubric } from "../../src/evaluate/rubric";
 import { tunePrompt } from "../../src/optimize/prompt-tuner";
@@ -53,21 +54,20 @@ function extractTextContent(content: unknown): string {
 }
 
 async function loadTraceFromTranscript(filePath: string): Promise<TraceEntry | null> {
-  let userMsg = "";
+  const task = await extractTaskFromTranscript(filePath);
+  const taskText = task.text;
+
   let assistantMsg = "";
   let systemMsg = "";
   let found = 0;
 
   const rl = createInterface({ input: createReadStream(filePath), crlfDelay: Infinity });
   for await (const line of rl) {
-    if (found >= 3) break;
+    if (found >= 2) break;
     if (!line.trim()) continue;
     try {
       const entry = JSON.parse(line);
-      if (!userMsg && entry.type === "user" && entry.message?.content) {
-        const text = extractTextContent(entry.message.content);
-        if (text) { userMsg = truncate(text, 2000); found++; }
-      } else if (!assistantMsg && entry.type === "assistant" && entry.message?.content) {
+      if (!assistantMsg && entry.type === "assistant" && entry.message?.content) {
         const text = extractTextContent(entry.message.content);
         if (text) { assistantMsg = truncate(text, 2000); found++; }
       } else if (!systemMsg && entry.type === "system" && entry.message?.content) {
@@ -78,11 +78,11 @@ async function loadTraceFromTranscript(filePath: string): Promise<TraceEntry | n
   }
   rl.close();
 
-  if (!userMsg && !assistantMsg) return null;
+  if (!taskText && !assistantMsg) return null;
   const id = basename(filePath, ".jsonl");
   return {
     id,
-    input: userMsg || "(no user message)",
+    input: taskText || "(no user message)",
     output: assistantMsg || "(no assistant message)",
     systemPrompt: systemMsg || "You are a helpful assistant.",
   };

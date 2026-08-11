@@ -19,6 +19,7 @@ import { getContextRules, detectDomains } from "../../src/graph/context";
 import { evaluatePrecision, type PrecisionEvalResult } from "../../src/evaluate/precision";
 import type { RetrievalStrategy } from "../../src/graph/context";
 import { formatAuditReport, parseAuditFile, buildGoldSetFromAudit, type AuditSession } from "../../src/evaluate/gold-audit";
+import { extractTaskFromTranscript } from "../../src/evaluate/task-extractor";
 
 function getJudgeConfig(): JudgeConfig | null {
   const config = loadConfig();
@@ -72,30 +73,27 @@ function truncate(s: string, max: number): string {
 }
 
 async function loadTraceFromTranscript(filePath: string): Promise<Trace | null> {
-  let userMsg = "";
-  let assistantMsg = "";
-  let found = 0;
+  const task = await extractTaskFromTranscript(filePath);
+  const taskText = task.text;
 
+  let assistantMsg = "";
   const rl = createInterface({ input: createReadStream(filePath), crlfDelay: Infinity });
   for await (const line of rl) {
-    if (found >= 2) break;
+    if (assistantMsg) break;
     if (!line.trim()) continue;
     try {
       const entry = JSON.parse(line);
-      if (!userMsg && entry.type === "user" && entry.message?.content) {
+      if (entry.type === "assistant" && entry.message?.content) {
         const text = extractTextContent(entry.message.content);
-        if (text) { userMsg = truncate(text, 2000); found++; }
-      } else if (!assistantMsg && entry.type === "assistant" && entry.message?.content) {
-        const text = extractTextContent(entry.message.content);
-        if (text) { assistantMsg = truncate(text, 2000); found++; }
+        if (text) assistantMsg = truncate(text, 2000);
       }
     } catch {}
   }
   rl.close();
 
-  if (!userMsg && !assistantMsg) return null;
+  if (!taskText && !assistantMsg) return null;
   const id = basename(filePath, ".jsonl");
-  return { id, input: userMsg || "(no user message)", output: assistantMsg || "(no assistant message)" };
+  return { id, input: taskText || "(no user message)", output: assistantMsg || "(no assistant message)" };
 }
 
 async function loadTracesFromTranscripts(transcriptDir: string): Promise<Trace[]> {
