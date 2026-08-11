@@ -45,9 +45,10 @@ export const EVAL_TASKS: EvalTask[] = [
     description: "Optimize the BM25 retrieval scoring algorithm for better recall",
     expectedDomains: ["algorithm"],
     expectedRuleIds: [
+      "feedback_algorithm_learn_backlog_promotion",
       "feedback_design_complete_before_building",
-      "feedback_no_false_completions",
-      "feedback_spec_fidelity_gap",
+      "feedback_clarify_before_documenting",
+      "success_council_then_research_then_ship",
     ],
   },
   {
@@ -55,9 +56,10 @@ export const EVAL_TASKS: EvalTask[] = [
     description: "Add CSRF protection to the login endpoint",
     expectedDomains: ["security"],
     expectedRuleIds: [
-      "steering_check_git_remote_before_push",
-      "feedback_no_notion",
-      "feedback_no_gemini_api",
+      "feedback_no_auth",
+      "feedback_rook_no_destructive_tests",
+      "feedback_security_review_architecture_first",
+      "steering_first_principles_over_bolt_ons",
     ],
   },
   {
@@ -65,9 +67,10 @@ export const EVAL_TASKS: EvalTask[] = [
     description: "Fix Docker container failing to start on Mac Mini",
     expectedDomains: ["deployment"],
     expectedRuleIds: [
+      "feedback_mac_mini_l4_deployment",
+      "feedback_scraper_runs_on_host_not_hero",
       "reference_ghcr_credentials",
-      "feedback_portability_check",
-      "reference_dailybrief_project_path",
+      "success_council_diagnose_ship_deploy",
     ],
   },
   {
@@ -76,8 +79,9 @@ export const EVAL_TASKS: EvalTask[] = [
     expectedDomains: ["ui-testing"],
     expectedRuleIds: [
       "feedback_condition-driven-waits-browser-automation",
-      "feedback_read_templates_before_acs",
-      "feedback_template_compliance_live",
+      "feedback_verify_rendered_ui_not_just_code",
+      "feedback_run_new_specs_against_test_first",
+      "feedback_page-route-predicate-over-glob",
     ],
   },
   {
@@ -85,9 +89,10 @@ export const EVAL_TASKS: EvalTask[] = [
     description: "Refactor the rule promotion pipeline to use deep modules",
     expectedDomains: ["architecture"],
     expectedRuleIds: [
-      "feedback_design_for_least_complexity",
       "feedback_architecture_in_mandatory_read_path",
-      "project_signal_index_architecture",
+      "feedback_design_complete_before_building",
+      "feedback_research_before_implement",
+      "success_signal-architecture-overhaul",
     ],
   },
   {
@@ -95,9 +100,10 @@ export const EVAL_TASKS: EvalTask[] = [
     description: "Signal capture drops ratings when JSONL file exceeds 100MB",
     expectedDomains: ["data"],
     expectedRuleIds: [
-      "feedback_signal_to_output_trace",
-      "feedback_measure_before_optimizing",
-      "success_verify-data-state-diagnose-root-cause",
+      "feedback_before_after_audit_pattern",
+      "feedback_incomplete-capture-cannot-process",
+      "success_signal-architecture-overhaul",
+      "feedback_capture-incomplete-no-learning-section",
     ],
   },
   {
@@ -105,9 +111,10 @@ export const EVAL_TASKS: EvalTask[] = [
     description: "Ship the precision eval instrumentation for context retrieval",
     expectedDomains: ["delivery"],
     expectedRuleIds: [
-      "feedback_ac_garbage_test",
-      "feedback_docs_always_current",
-      "success_4_layer_consumer_verification",
+      "feedback_doc_cascade_on_ship",
+      "feedback_post_findings_to_issues",
+      "feedback_grill_logs_findings_as_issues",
+      "feedback_bypass_permissions_all_agents",
     ],
   },
   {
@@ -115,9 +122,10 @@ export const EVAL_TASKS: EvalTask[] = [
     description: "Investigation: why did the production deploy fail silently last week",
     expectedDomains: ["escalation"],
     expectedRuleIds: [
-      "success_adversarial_e2e_testing",
-      "feedback_slow_down_regroup",
-      "success_council_then_research_then_ship",
+      "feedback_audit_before_fixing",
+      "feedback_read_project_docs_before_investigating",
+      "steering_first_principles_over_bolt_ons",
+      "feedback_proactive-spot-check-patterns",
     ],
   },
   {
@@ -125,9 +133,10 @@ export const EVAL_TASKS: EvalTask[] = [
     description: "Add memory staleness detection to the daemon weekly cycle",
     expectedDomains: ["memory"],
     expectedRuleIds: [
-      "feedback_flag_rule_conflicts",
-      "project_memory_loop",
-      "feedback_consolidate-corrections-before-stating",
+      "feedback_mechanicals_over_memory",
+      "feedback_capture-incomplete-no-learning-section",
+      "feedback_capture_decisions_immediately",
+      "feedback_design_complete_before_building",
     ],
   },
   {
@@ -135,9 +144,10 @@ export const EVAL_TASKS: EvalTask[] = [
     description: "Fix broken domain propagation in knowledge graph builder",
     expectedDomains: ["algorithm", "deployment"],
     expectedRuleIds: [
-      "success_audit_then_architecture_then_ship",
-      "project_unified_ship_workflow",
       "feedback_design_complete_before_building",
+      "feedback_no_false_completions",
+      "steering_one_change_when_debugging",
+      "steering_surgical_fixes_only",
     ],
   },
 ];
