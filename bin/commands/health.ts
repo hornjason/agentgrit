@@ -16,6 +16,33 @@ interface RuleStatEntry {
   low_rating_activations: number;
 }
 
+function normalizeRuleStats(raw: unknown): Record<string, RuleStatEntry> | null {
+  if (Array.isArray(raw)) {
+    const result: Record<string, RuleStatEntry> = {};
+    for (const entry of raw) {
+      const id = entry.ruleId || entry.id || "";
+      if (!id) continue;
+      result[id] = {
+        id,
+        text_preview: entry.text_preview || id,
+        injection_count: entry.injectionCount ?? entry.injection_count ?? 0,
+        avg_correlated_rating: entry.avgCorrelatedRating ?? entry.avg_correlated_rating ?? 0,
+        last_seen: entry.lastSeen ?? entry.last_seen ?? "",
+        high_rating_activations: entry.highRatingActivations ?? entry.high_rating_activations ?? 0,
+        low_rating_activations: entry.lowRatingActivations ?? entry.low_rating_activations ?? 0,
+      };
+    }
+    return Object.keys(result).length > 0 ? result : null;
+  }
+  if (raw && typeof raw === "object" && "rules" in raw) {
+    return (raw as { rules: Record<string, RuleStatEntry> }).rules;
+  }
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return raw as Record<string, RuleStatEntry>;
+  }
+  return null;
+}
+
 interface ToolAuditEntry {
   toolName: string;
   filePath?: string;
@@ -127,16 +154,11 @@ function gatherSession(): SessionSection {
 }
 
 function loadRuleStats(): Record<string, RuleStatEntry> | null {
-  const statsPath = join(
-    process.env.HOME || process.env.USERPROFILE || "",
-    ".claude", "MEMORY", "LEARNING", "STATE", "rule-stats.json",
-  );
+  const statsPath = join(stateDir(), "rule-stats.json");
   if (!existsSync(statsPath)) return null;
   try {
     const raw = JSON.parse(readFileSync(statsPath, "utf-8"));
-    if (raw.rules && typeof raw.rules === "object") return raw.rules;
-    if (typeof raw === "object" && !Array.isArray(raw)) return raw;
-    return null;
+    return normalizeRuleStats(raw);
   } catch {
     return null;
   }
