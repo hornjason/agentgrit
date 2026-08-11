@@ -16,6 +16,8 @@ import { hybridRetrieve, type RRFWeights } from "./retrieval";
 import { loadVectorCache, rankByVectorSimilarity } from "./embeddings";
 import { loadPatterns, loadHybridPatterns } from "./generate-patterns";
 import type { DomainPattern } from "./generate-patterns";
+import { shouldEvict, loadEvictionAllowlist, appendEvictionLog } from "../promote/auto-eviction";
+import { loadRuleStats } from "../promote/rules";
 
 // ── Default Domains ──
 
@@ -200,11 +202,34 @@ export async function getContextRules(
     return ALLOWED_TYPES.has(t);
   });
 
-  // 4. Build rule objects
+  // 4. Auto-eviction filter — exclude low-value rules from injection
+  const ruleStatsMap = loadRuleStats();
+  const allowlist = loadEvictionAllowlist();
+  const afterEviction = filtered.filter(([id]) => {
+    const stats = ruleStatsMap.get(id);
+    if (!stats) return true;
+    const eviction = shouldEvict(stats, allowlist);
+    if (eviction) {
+      appendEvictionLog({
+        ruleId: id,
+        trigger: eviction.trigger,
+        reason: eviction.reason,
+        avgRating: stats.avgCorrelatedRating,
+        injections: stats.injectionCount,
+        highActivations: stats.highRatingActivations,
+        lowActivations: stats.lowRatingActivations,
+        timestamp: new Date().toISOString(),
+      });
+      return false;
+    }
+    return true;
+  });
+
+  // 5. Build rule objects
   const resultIds = new Set<string>();
   const rules: Rule[] = [];
 
-  for (const [id, score] of filtered) {
+  for (const [id, score] of afterEviction) {
     resultIds.add(id);
     const node = graph.nodes[id];
 
@@ -221,7 +246,7 @@ export async function getContextRules(
     });
   }
 
-  // 5. Trajectory backfill
+  // 6. Trajectory backfill
   if (signalDir && rules.length < limit) {
     const remaining = limit - rules.length;
     const trajectories = queryTrajectoriesSync(domains, signalDir, remaining);

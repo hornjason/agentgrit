@@ -10,6 +10,7 @@ import { promoteRule } from "../../src/promote/bridge";
 import { recordPromotion } from "../../src/promote/ledger";
 import { randomUUID } from "crypto";
 import { findDuplicates } from "../../src/promote/evict";
+import { addToEvictionAllowlist, readEvictionLog } from "../../src/promote/auto-eviction";
 import { backfillLearnedCommand } from "./backfill-learned";
 
 function icon(status: BudgetStatus): string {
@@ -477,6 +478,25 @@ export async function rulesCommand(args: string[]): Promise<void> {
     await backfillLearnedCommand(args.slice(1));
   } else if (sub === "classify") {
     showClassify(args.includes("--detail"));
+  } else if (sub === "restore") {
+    const ruleId = args[1];
+    if (!ruleId || ruleId === "--help") {
+      console.log("  Usage: agentgrit rules restore <rule-id>");
+      console.log("  Adds a rule to the eviction allowlist so it will not be auto-evicted.\n");
+      console.log("  Recently evicted rules:");
+      const entries = readEvictionLog();
+      const seen = new Set<string>();
+      for (const e of entries.slice(-20).reverse()) {
+        if (seen.has(e.ruleId)) continue;
+        seen.add(e.ruleId);
+        console.log(`    ${e.ruleId} — ${e.trigger} (${e.timestamp.split("T")[0]})`);
+      }
+      if (seen.size === 0) console.log("    (none)");
+      return;
+    }
+    addToEvictionAllowlist(ruleId);
+    console.log(`  Restored: ${ruleId}`);
+    console.log("  This rule will no longer be auto-evicted from context injection.\n");
   } else {
     showList(base);
     console.log("");

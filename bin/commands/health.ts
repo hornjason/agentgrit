@@ -5,6 +5,7 @@ import { readSessionContext } from "../../src/graph/context";
 import type { ReconcileReport } from "../../src/daemon/reconcile";
 import { runDoctor as runDoctorSrc } from "../../src/daemon/doctor";
 import type { DoctorReport } from "../../src/daemon/doctor";
+import { readEvictionLog } from "../../src/promote/auto-eviction";
 
 interface RuleStatEntry {
   id: string;
@@ -51,9 +52,21 @@ interface ToolAuditEntry {
   session_id?: string;
 }
 
+interface RedAlert {
+  severity: "warning" | "critical";
+  message: string;
+}
+
+interface RedAlertSection {
+  alerts: RedAlert[];
+  evictionsLast24h: number;
+  trajPendingReview: number;
+}
+
 interface HealthData {
   session: SessionSection;
   ruleLifecycle: RuleLifecycleSection;
+  redAlerts: RedAlertSection;
   filesRead: FilesReadSection;
   reconciliation: ReconciliationSection;
   doctor: DoctorSectionSummary;
@@ -209,6 +222,87 @@ function gatherRuleLifecycle(): RuleLifecycleSection {
   };
 }
 
+function gatherRedAlerts(): RedAlertSection {
+  const alerts: RedAlert[] = [];
+  const stats = loadRuleStats();
+
+  // High-volume underperformers
+  if (stats) {
+    for (const e of Object.values(stats)) {
+      if (e.injection_count > 200 && e.avg_correlated_rating < 4.0) {
+        alerts.push({
+          severity: "critical",
+          message: `Rule ${e.id}: ${e.injection_count} injections, ${e.avg_correlated_rating.toFixed(1)} avg — eviction candidate`,
+        });
+      }
+    }
+  }
+
+  // Volume drift: compare current signal count against 7-day average
+  const ratingsPath = join(getBaseDir(), "signals", "ratings.jsonl");
+  if (existsSync(ratingsPath)) {
+    try {
+      const lines = readFileSync(ratingsPath, "utf-8").split("\n").filter(l => l.trim());
+      const now = Date.now();
+      const dayMs = 24 * 60 * 60 * 1000;
+      const todayCount = lines.filter(l => {
+        try {
+          const ts = new Date(JSON.parse(l).timestamp).getTime();
+          return now - ts < dayMs;
+        } catch { return false; }
+      }).length;
+      const weekCount = lines.filter(l => {
+        try {
+          const ts = new Date(JSON.parse(l).timestamp).getTime();
+          return now - ts < 7 * dayMs;
+        } catch { return false; }
+      }).length;
+      const weekDailyAvg = weekCount / 7;
+      if (weekDailyAvg > 0) {
+        const drift = ((todayCount - weekDailyAvg) / weekDailyAvg) * 100;
+        if (Math.abs(drift) > 20) {
+          alerts.push({
+            severity: "warning",
+            message: `Signal volume drift: ${drift > 0 ? "+" : ""}${drift.toFixed(0)}% from 7-day baseline (today: ${todayCount}, avg: ${weekDailyAvg.toFixed(1)})`,
+          });
+        }
+      }
+    } catch { /* skip */ }
+  }
+
+  // Eviction count (last 24h)
+  const evictionEntries = readEvictionLog();
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const evictionsLast24h = evictionEntries.filter(e => {
+    try { return now - new Date(e.timestamp).getTime() < dayMs; } catch { return false; }
+  }).length;
+
+  // traj-* flagging
+  let trajCount = 0;
+  if (stats) {
+    for (const id of Object.keys(stats)) {
+      if (id.startsWith("traj-")) trajCount++;
+    }
+  }
+
+  // Flat BM25 detection
+  const precisionPath = join(getBaseDir(), "state", "precision-eval.json");
+  if (existsSync(precisionPath)) {
+    try {
+      const raw = JSON.parse(readFileSync(precisionPath, "utf-8"));
+      if (typeof raw.meanPrecision5 === "number" && raw.meanPrecision5 === 0) {
+        alerts.push({
+          severity: "critical",
+          message: "BM25 scores undifferentiated — P@5=0 in last precision eval",
+        });
+      }
+    } catch { /* skip */ }
+  }
+
+  return { alerts, evictionsLast24h, trajPendingReview: trajCount };
+}
+
 function loadToolAudit(issueFilter?: number): ToolAuditEntry[] {
   const auditPath = signalPath("tool-audit.jsonl");
   if (!existsSync(auditPath)) return [];
@@ -353,6 +447,22 @@ function printHuman(data: HealthData): void {
     console.log("");
   }
 
+  // RED ALERTS
+  console.log("RED ALERTS");
+  if (data.redAlerts.alerts.length === 0 && data.redAlerts.evictionsLast24h === 0 && data.redAlerts.trajPendingReview === 0) {
+    console.log("  no alerts\n");
+  } else {
+    for (const alert of data.redAlerts.alerts) {
+      const icon = alert.severity === "critical" ? "✗" : "⚠";
+      console.log(`  ${icon} ${alert.message}`);
+    }
+    console.log(`  Auto-evicted (24h): ${data.redAlerts.evictionsLast24h} rules`);
+    if (data.redAlerts.trajPendingReview > 0) {
+      console.log(`  ⚠ traj-* rules pending review: ${data.redAlerts.trajPendingReview}`);
+    }
+    console.log("");
+  }
+
   // FILES READ
   console.log("FILES READ (this session)");
   if (!data.filesRead.available) {
@@ -396,11 +506,12 @@ export async function healthCommand(args: string[]): Promise<void> {
 
   const session = gatherSession();
   const ruleLifecycle = gatherRuleLifecycle();
+  const redAlerts = gatherRedAlerts();
   const filesRead = gatherFilesRead(opts.issue);
   const reconciliation = gatherReconciliation();
   const doctor = await gatherDoctor();
 
-  const data: HealthData = { session, ruleLifecycle, filesRead, reconciliation, doctor };
+  const data: HealthData = { session, ruleLifecycle, redAlerts, filesRead, reconciliation, doctor };
 
   if (opts.json) {
     console.log(JSON.stringify(data, null, 2));
