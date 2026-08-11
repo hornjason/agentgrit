@@ -46,9 +46,9 @@ export const EVAL_TASKS: EvalTask[] = [
     expectedDomains: ["algorithm"],
     expectedRuleIds: [
       "feedback_algorithm_learn_backlog_promotion",
-      "feedback_design_complete_before_building",
       "feedback_clarify_before_documenting",
-      "success_council_then_research_then_ship",
+      "feedback_read_project_docs_before_investigating",
+      "feedback_dialog_and_questions",
     ],
   },
   {
@@ -59,7 +59,7 @@ export const EVAL_TASKS: EvalTask[] = [
       "feedback_no_auth",
       "feedback_rook_no_destructive_tests",
       "feedback_security_review_architecture_first",
-      "steering_first_principles_over_bolt_ons",
+      "feedback_project_state_live_updates",
     ],
   },
   {
@@ -69,8 +69,8 @@ export const EVAL_TASKS: EvalTask[] = [
     expectedRuleIds: [
       "feedback_mac_mini_l4_deployment",
       "feedback_scraper_runs_on_host_not_hero",
+      "feedback_hero_is_l3_no_browser",
       "reference_ghcr_credentials",
-      "success_council_diagnose_ship_deploy",
     ],
   },
   {
@@ -81,7 +81,7 @@ export const EVAL_TASKS: EvalTask[] = [
       "feedback_condition-driven-waits-browser-automation",
       "feedback_verify_rendered_ui_not_just_code",
       "feedback_run_new_specs_against_test_first",
-      "feedback_page-route-predicate-over-glob",
+      "feedback_testing_new_user",
     ],
   },
   {
@@ -92,7 +92,7 @@ export const EVAL_TASKS: EvalTask[] = [
       "feedback_architecture_in_mandatory_read_path",
       "feedback_design_complete_before_building",
       "feedback_research_before_implement",
-      "success_signal-architecture-overhaul",
+      "steering_minimal_scope",
     ],
   },
   {
@@ -101,9 +101,9 @@ export const EVAL_TASKS: EvalTask[] = [
     expectedDomains: ["data"],
     expectedRuleIds: [
       "feedback_before_after_audit_pattern",
-      "feedback_incomplete-capture-cannot-process",
-      "success_signal-architecture-overhaul",
       "feedback_capture-incomplete-no-learning-section",
+      "feedback_incomplete-capture-cannot-extract-lesson",
+      "feedback_consolidate-corrections-before-stating",
     ],
   },
   {
@@ -113,8 +113,8 @@ export const EVAL_TASKS: EvalTask[] = [
     expectedRuleIds: [
       "feedback_doc_cascade_on_ship",
       "feedback_post_findings_to_issues",
-      "feedback_grill_logs_findings_as_issues",
-      "feedback_bypass_permissions_all_agents",
+      "feedback_articulate-requests-clearly",
+      "success_council_audit_loop_to_A",
     ],
   },
   {
@@ -123,9 +123,9 @@ export const EVAL_TASKS: EvalTask[] = [
     expectedDomains: ["escalation"],
     expectedRuleIds: [
       "feedback_audit_before_fixing",
-      "feedback_read_project_docs_before_investigating",
-      "steering_first_principles_over_bolt_ons",
-      "feedback_proactive-spot-check-patterns",
+      "feedback_quinn_after_every_ui_commit",
+      "feedback_playwright_project_routing",
+      "feedback_harness_compaction",
     ],
   },
   {
@@ -134,9 +134,9 @@ export const EVAL_TASKS: EvalTask[] = [
     expectedDomains: ["memory"],
     expectedRuleIds: [
       "feedback_mechanicals_over_memory",
-      "feedback_capture-incomplete-no-learning-section",
-      "feedback_capture_decisions_immediately",
       "feedback_design_complete_before_building",
+      "feedback_deep_root_cause_tracing",
+      "feedback_harness_compaction",
     ],
   },
   {
@@ -144,10 +144,10 @@ export const EVAL_TASKS: EvalTask[] = [
     description: "Fix broken domain propagation in knowledge graph builder",
     expectedDomains: ["algorithm", "process"],
     expectedRuleIds: [
-      "feedback_design_complete_before_building",
-      "feedback_no_false_completions",
       "steering_one_change_when_debugging",
       "steering_surgical_fixes_only",
+      "feedback_root_cause_multi_layer",
+      "feedback_design_complete_before_building",
     ],
   },
 ];
