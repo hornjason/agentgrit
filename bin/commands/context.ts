@@ -15,14 +15,17 @@ import {
   computeSmartDefaults,
   formatGraphContext,
 } from "../../src/graph/context";
+import { diagnoseBM25, tokenize } from "../../src/graph/bm25";
+import { RRF_WEIGHTS } from "../../src/graph/retrieval";
 
 const GRAPH_CONTEXT_PATH = join(homedir(), ".claude", "MEMORY", "STATE", "GRAPH-CONTEXT.md");
 
-function parseArgs(args: string[]): { text?: string; issue?: number; file?: string; limit: number } {
+function parseArgs(args: string[]): { text?: string; issue?: number; file?: string; limit: number; verbose: boolean } {
   let text: string | undefined;
   let issue: number | undefined;
   let file: string | undefined;
   let limit = 10;
+  let verbose = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--text" && args[i + 1]) {
@@ -33,10 +36,12 @@ function parseArgs(args: string[]): { text?: string; issue?: number; file?: stri
       file = args[++i];
     } else if (args[i] === "--limit" && args[i + 1]) {
       limit = parseInt(args[++i], 10) || 10;
+    } else if (args[i] === "--verbose") {
+      verbose = true;
     }
   }
 
-  return { text, issue, file, limit };
+  return { text, issue, file, limit, verbose };
 }
 
 function resolveInputText(opts: { text?: string; issue?: number; file?: string }): string {
@@ -123,6 +128,29 @@ async function doRefresh(args: string[]): Promise<void> {
   const signalDir = resolveSignalDir();
   const index = buildIndexFromDir(memoryDir);
 
+  const searchText = inputText || domains.join(" ");
+
+  if (opts.verbose) {
+    const terms = tokenize(searchText);
+    console.log(`  Query terms: [${terms.join(", ")}]`);
+
+    const diag = diagnoseBM25(index, searchText);
+    console.log(`  BM25 Diagnostic:`);
+    console.log(`    Corpus: ${diag.corpusSize} docs, avg length ${diag.avgDocLen.toFixed(1)}`);
+    console.log(`    Vocabulary: ${diag.vocabularySize} terms`);
+    console.log(`    Query terms in vocab: [${diag.queryTermsInVocab.join(", ")}]`);
+    console.log(`    Query terms missing: [${diag.queryTermsMissing.join(", ")}]`);
+    console.log(`    IDF stats: min=${diag.idfStats.min.toFixed(3)} max=${diag.idfStats.max.toFixed(3)} mean=${diag.idfStats.mean.toFixed(3)} stddev=${diag.idfStats.stddev.toFixed(3)}`);
+    console.log(`    Root cause: ${diag.rootCause}`);
+    console.log(`    Evidence: ${diag.rootCauseEvidence}`);
+    console.log(`  Top 10 BM25 scores:`);
+    for (const s of diag.topScores) {
+      console.log(`    ${s.id}: ${s.score.toFixed(4)}`);
+    }
+    console.log(`  RRF weights: bm25=${RRF_WEIGHTS.bm25} graph=${RRF_WEIGHTS.graph} vector=${RRF_WEIGHTS.vector}`);
+    console.log(`  Domains detected: [${domains.join(", ")}] (source: ${domainSource})`);
+  }
+
   const rules = await getContextRules(
     graph, index, domains, opts.limit, signalDir,
     inputText || undefined,
@@ -155,12 +183,13 @@ export async function contextCommand(args: string[]): Promise<void> {
   if (sub === "refresh") {
     await doRefresh(subArgs);
   } else {
-    console.log("  Usage: agentgrit context refresh [--text TEXT | --issue N | --file PATH]");
+    console.log("  Usage: agentgrit context refresh [--text TEXT | --issue N | --file PATH] [--verbose]");
     console.log("  Options:");
     console.log("    --text TEXT   Use text directly for domain detection");
     console.log("    --issue N     Fetch GitHub issue N as input text");
     console.log("    --file PATH   Read file contents as input text");
     console.log("    --limit N     Max context rules (default: 10)");
+    console.log("    --verbose     Show BM25 diagnostic, scores, and query analysis");
   }
 
   console.log("");

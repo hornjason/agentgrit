@@ -16,6 +16,7 @@ import { writeFileSync, mkdirSync } from "fs";
 import { readGraph } from "../../src/graph/builder";
 import { buildIndexFromDir } from "../../src/graph/bm25";
 import { getContextRules } from "../../src/graph/context";
+import { evaluatePrecision } from "../../src/evaluate/precision";
 
 function getJudgeConfig(): JudgeConfig | null {
   const config = loadConfig();
@@ -338,12 +339,14 @@ export async function evalCommand(args: string[]): Promise<void> {
     console.log("    agentgrit eval session");
     console.log("    agentgrit eval recall [--generate] [--bootstrap] [--live]");
     console.log("    agentgrit eval effectiveness");
+    console.log("    agentgrit eval precision");
     console.log("");
-    console.log("  Evaluates traces, sessions, recall, or rule effectiveness.");
+    console.log("  Evaluates traces, sessions, recall, precision, or rule effectiveness.");
     console.log("  Traces loads from algorithm-reflections.jsonl or session transcripts.");
     console.log("  --generate builds a gold set from the knowledge graph + transcripts.");
     console.log("  --bootstrap builds recall-scores.json from session-context-history.jsonl.");
     console.log("  --live re-runs getContextRules for each gold session (measures current retrieval).");
+    console.log("  precision runs 10 diverse tasks and measures precision@5 and precision@10.");
     console.log("  effectiveness compares correction frequency before/after rule promotion.\n");
     return;
   }
@@ -595,8 +598,35 @@ export async function evalCommand(args: string[]): Promise<void> {
       ? Math.round((effective.length / results.length) * 100)
       : 0;
     console.log(`  Summary: ${effective.length}/${results.length} rules effective (${effectiveRate}%)\n`);
+  } else if (sub === "precision") {
+    console.log("  Mode: precision@k evaluation\n");
+
+    const result = await evaluatePrecision();
+
+    const maxDesc = 55;
+    console.log("  " + "Task".padEnd(maxDesc) + " P@5    P@10   Domains");
+    console.log("  " + "-".repeat(maxDesc + 25));
+
+    for (const t of result.tasks) {
+      const desc = t.description.length > maxDesc
+        ? t.description.slice(0, maxDesc - 3) + "..."
+        : t.description.padEnd(maxDesc);
+      const p5 = t.precision5.toFixed(3).padEnd(7);
+      const p10 = t.precision10.toFixed(3).padEnd(7);
+      console.log(`  ${desc} ${p5}${p10}${t.expectedDomains.join(",")}`);
+    }
+
+    console.log("  " + "-".repeat(maxDesc + 25));
+    const meanLabel = "MEAN".padEnd(maxDesc);
+    console.log(`  ${meanLabel} ${result.meanPrecision5.toFixed(3).padEnd(7)}${result.meanPrecision10.toFixed(3)}`);
+
+    const stateDir = join(base, "state");
+    if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true });
+    const outputPath = join(stateDir, "precision-eval.json");
+    writeFileSync(outputPath, JSON.stringify(result, null, 2));
+    console.log(`\n  Results written to: ${outputPath}\n`);
   } else {
     console.log(`  Unknown eval target: ${sub}`);
-    console.log(`  Valid targets: traces, session, recall, effectiveness\n`);
+    console.log(`  Valid targets: traces, session, recall, effectiveness, precision\n`);
   }
 }

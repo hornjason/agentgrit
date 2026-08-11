@@ -78,6 +78,7 @@ interface RuleLifecycleSection {
   bottomByCorrelation?: Array<{ id: string; avgRating: number; injections: number }>;
   promotions30d: string;
   evictions: string;
+  precision5?: number;
 }
 
 interface FilesReadSection {
@@ -164,9 +165,22 @@ function loadRuleStats(): Record<string, RuleStatEntry> | null {
   }
 }
 
+function loadPrecisionEval(): number | undefined {
+  const precisionPath = join(getBaseDir(), "state", "precision-eval.json");
+  if (!existsSync(precisionPath)) return undefined;
+  try {
+    const raw = JSON.parse(readFileSync(precisionPath, "utf-8"));
+    return typeof raw.meanPrecision5 === "number" ? raw.meanPrecision5 : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function gatherRuleLifecycle(): RuleLifecycleSection {
   const stats = loadRuleStats();
-  if (!stats) return { available: false, promotions30d: "no data", evictions: "no data" };
+  const precision5 = loadPrecisionEval();
+
+  if (!stats) return { available: false, promotions30d: "no data", evictions: "no data", precision5 };
 
   const entries = Object.values(stats)
     .filter(e => typeof e.avg_correlated_rating === "number" && e.injection_count > 0);
@@ -191,6 +205,7 @@ function gatherRuleLifecycle(): RuleLifecycleSection {
     bottomByCorrelation: bottom5,
     promotions30d: "no data",
     evictions: "no data",
+    precision5,
   };
 }
 
@@ -333,6 +348,8 @@ function printHuman(data: HealthData): void {
     }
     console.log(`  Promotions (30d): ${data.ruleLifecycle.promotions30d}`);
     console.log(`  Evictions: ${data.ruleLifecycle.evictions}`);
+    const p5 = data.ruleLifecycle.precision5;
+    console.log(`  Precision@5: ${p5 != null ? `${p5.toFixed(3)} (from last eval)` : "no precision data"}`);
     console.log("");
   }
 

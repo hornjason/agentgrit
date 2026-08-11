@@ -136,3 +136,90 @@ export function searchIndex(
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
 }
+
+// ── BM25 Diagnostic ──
+
+export interface BM25Diagnostic {
+  corpusSize: number;
+  avgDocLen: number;
+  vocabularySize: number;
+  queryTerms: string[];
+  queryTermsInVocab: string[];
+  queryTermsMissing: string[];
+  idfStats: { min: number; max: number; mean: number; stddev: number };
+  topScores: Array<{ id: string; score: number }>;
+  rootCause: "short-query" | "flat-idf" | "missing-terms" | "low-variance" | "empty-corpus" | "healthy";
+  rootCauseEvidence: string;
+}
+
+export function diagnoseBM25(index: BM25Index, query: string): BM25Diagnostic {
+  const queryTerms = tokenize(query);
+
+  const idfValues = Object.values(index.vocabulary).map(v => v.idf);
+  const idfMin = idfValues.length > 0 ? Math.min(...idfValues) : 0;
+  const idfMax = idfValues.length > 0 ? Math.max(...idfValues) : 0;
+  const idfMean = idfValues.length > 0
+    ? idfValues.reduce((a, b) => a + b, 0) / idfValues.length
+    : 0;
+  const idfVariance = idfValues.length > 0
+    ? idfValues.reduce((sum, v) => sum + (v - idfMean) ** 2, 0) / idfValues.length
+    : 0;
+  const idfStddev = Math.sqrt(idfVariance);
+
+  const inVocab = queryTerms.filter(t => t in index.vocabulary);
+  const missing = queryTerms.filter(t => !(t in index.vocabulary));
+
+  const scores = index.docs.map(doc => ({
+    id: doc.id,
+    score: scoreDoc(doc, queryTerms, index.vocabulary, index.avgDocLen),
+  }));
+  const topScores = scores
+    .filter(s => s.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 10);
+
+  let rootCause: BM25Diagnostic["rootCause"];
+  let rootCauseEvidence: string;
+
+  if (index.docCount === 0) {
+    rootCause = "empty-corpus";
+    rootCauseEvidence = "Index contains 0 documents";
+  } else if (queryTerms.length < 2) {
+    rootCause = "short-query";
+    rootCauseEvidence = `Query has ${queryTerms.length} term(s): [${queryTerms.join(", ")}]`;
+  } else if (missing.length > queryTerms.length / 2) {
+    rootCause = "missing-terms";
+    rootCauseEvidence = `${missing.length}/${queryTerms.length} query terms not in vocabulary: [${missing.join(", ")}]`;
+  } else if (idfStddev < 0.5) {
+    rootCause = "flat-idf";
+    rootCauseEvidence = `IDF stddev=${idfStddev.toFixed(4)} (< 0.5 threshold). All terms have similar rarity`;
+  } else if (topScores.length >= 2) {
+    const scoreVals = topScores.map(s => s.score);
+    const scoreMean = scoreVals.reduce((a, b) => a + b, 0) / scoreVals.length;
+    const scoreVar = scoreVals.reduce((sum, v) => sum + (v - scoreMean) ** 2, 0) / scoreVals.length;
+    const scoreStddev = Math.sqrt(scoreVar);
+    if (scoreStddev < 0.01) {
+      rootCause = "low-variance";
+      rootCauseEvidence = `Top ${topScores.length} scores have stddev=${scoreStddev.toFixed(6)} (< 0.01 threshold)`;
+    } else {
+      rootCause = "healthy";
+      rootCauseEvidence = `Score variance=${scoreStddev.toFixed(4)}, IDF stddev=${idfStddev.toFixed(4)}, ${inVocab.length}/${queryTerms.length} terms matched`;
+    }
+  } else {
+    rootCause = "healthy";
+    rootCauseEvidence = `IDF stddev=${idfStddev.toFixed(4)}, ${inVocab.length}/${queryTerms.length} terms matched`;
+  }
+
+  return {
+    corpusSize: index.docCount,
+    avgDocLen: index.avgDocLen,
+    vocabularySize: Object.keys(index.vocabulary).length,
+    queryTerms,
+    queryTermsInVocab: inVocab,
+    queryTermsMissing: missing,
+    idfStats: { min: idfMin, max: idfMax, mean: idfMean, stddev: idfStddev },
+    topScores,
+    rootCause,
+    rootCauseEvidence,
+  };
+}
