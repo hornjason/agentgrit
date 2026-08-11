@@ -2,12 +2,12 @@
 doc-type: spec
 status: active
 owner: jason
-updated: 2026-07-08
+updated: 2026-08-11
 ---
 
 # AgentGrit System Spec
 
-**Version:** 1.2 (2026-08-10)
+**Version:** 1.3 (2026-08-11)
 **Package:** @agentgrit/core@0.1.8 on npm
 **Tests:** 1436 pass, 9 fail across 112 files
 
@@ -81,7 +81,7 @@ Session signals (ratings, corrections, failures)
 At session start, inject only the rules relevant to the current task.
 
 **Current pipeline (hybrid BM25+vector, shipped 2026-07-13):**
-1. **BM25 primary** — search task text against 383 memory files, retrieve 3x candidates
+1. **BM25 primary** — search task text against 417 graph nodes, retrieve 3x candidates
 2. **Vector similarity** — compute query embedding (all-MiniLM-L6-v2 via transformers.js), cosine against 382 pre-computed node vectors
 3. **Graph expansion** — 1-hop neighbors via co_occurred + reinforces edges
 4. **3-way RRF merge** — BM25 (2x weight) + vector (0.5x) + graph (1x) via `rrfMerge()` in retrieval.ts
@@ -89,8 +89,14 @@ At session start, inject only the rules relevant to the current task.
 6. **Content sanitization** — `sanitizeRuleText()` strips injection patterns before agent injection
 7. **Top-K selection** — return top 10-15 rules
 8. **Attribution feedback** — rated sessions update co-occurrence edge weights automatically
+9. **Auto-eviction** — 3 triggers (low-avg+high-volume, never-helped, net-negative-ROI) with MIN_INJECTION_SAFETY=5 floor in `src/promote/auto-eviction.ts`
+10. **BM25 diagnostics** — `diagnoseBM25()` in `src/graph/bm25.ts` reports corpusSize, avgDocLen, vocabularySize, rootCause analysis for retrieval debugging
+11. **PRF query expansion** — `expandQueryByPRF()` in `src/graph/prf.ts` — pseudo-relevance feedback: BM25 top-5 → extract TF-IDF terms → expand query → re-retrieve
+12. **Mid-session context refresh** — `ContextRefresh.hook.ts` (UserPromptSubmit) detects issue ref changes (#NNN), calls `agentgrit context refresh --issue N`; state tracked via `~/.claude/state/last-context-issue.json` to prevent redundant refreshes
 
-**Performance (measured 2026-07-13):** precision@5 = 0.76, MRR = 0.96, recall@5 = 0.37, recall@15 = 0.61.
+**Domain taxonomy rebalancing (shipped #213):** 16 domains rebalanced from 111:1 imbalance to max=50 nodes per domain. Key splits: deployment → infra/scraper/process/deployment. Key merges: scoring/pipeline → data, communication/verification merged.
+
+**Performance (measured 2026-08-11, 10-task curated eval):** P@5 = 0.540, P@10 = 0.325, MRR = 0.718. 417 graph nodes across 16 rebalanced domains, 382 pre-computed vectors via all-MiniLM-L6-v2. Session-start injection: ~57% relevant; mid-session targeted query: ~80-100% relevant. **Methodology note:** Prior metrics (P@5=0.76, recall=0.61, measured 2026-07-13) used a 60-session gold set with auto-labeled expected values. Current metrics use a 10-task curated eval with human-audited labels — numbers are not directly comparable. The new eval is more conservative and honest (the old gold set had circular labeling from auto-picked graph nodes). Improvement trajectory: 0.040 → 0.540 after fixing eval labels + shipping auto-eviction, PRF, and domain rebalancing.
 
 **Architecture decisions:**
 - ADR-001 (`docs/adr/ADR-001-correlation-driven-rule-injection.md`) — correlation-driven injection
@@ -98,11 +104,11 @@ At session start, inject only the rules relevant to the current task.
 
 ### 4b. Multi-Layer Context Gating (shipped #103, #104 — remaining: #129)
 
-**Problem:** Rules are precision-gated (0.76) but only account for 2.5% of total context. The other 97.5% (~4,876 lines) is bulk-loaded regardless of task type:
+**Problem:** Rules are precision-gated but only account for 2.5% of total context. The other 97.5% (~4,876 lines) is bulk-loaded regardless of task type:
 
 | Layer | Lines (before) | Lines (after) | Status |
 |---|---|---|---|
-| GRAPH-CONTEXT.md (rules) | 93 | 93 | ✅ Precision-gated (0.76) |
+| GRAPH-CONTEXT.md (rules) | 93 | 93 | ✅ Precision-gated (P@5=0.540 on new eval) |
 | Dynamic context | 30 | 30 | ✅ Signals-based |
 | CLAUDE.md | 177 | 177 | Claude Code loads (not controllable) |
 | CLAUDE-LEARNED.md | 63 | 63 (10 filtered injected) | ✅ BM25-filtered (#103) |
@@ -134,18 +140,24 @@ At session start, inject only the rules relevant to the current task.
 
 ### 5. Recall Measurement (`src/evaluate/`)
 
-| Metric | Current (2026-07-14) | Target | Status |
-|--------|---------------------|--------|--------|
-| recall@15 (primary) | 0.61 | ≥ 0.55 | ✅ MET |
-| recall@5 (secondary) | 0.37 | — | Secondary; top-5 is tight with 15+ relevant rules |
-| precision@5 | 0.76 | ≥ 0.70 | ✅ MET |
-| MRR | 0.96 | ≥ 0.90 | ✅ MET |
-| Universal rules | 11 | ≤ 12 | ✅ MET |
-| Session rule load | ~15 rules | ≤ 20 | ✅ MET |
+| Metric | Baseline (2026-07-14, 60-session auto-labeled) | Current (2026-08-11, 10-task human-audited) | Target | Status |
+|--------|---------------------|--------|--------|--------|
+| P@5 | 0.76 (auto-labeled) | 0.540 (human-audited) | ≥ 0.70 | ⚠️ Below target on new eval |
+| P@10 | — | 0.325 | — | New metric |
+| MRR | 0.96 | 0.718 | ≥ 0.90 | ⚠️ Below target on new eval |
+| Universal rules | 11 | 11 | ≤ 12 | ✅ MET |
+| Session rule load | ~15 rules | ~7 rules (session-start) | ≤ 20 | ✅ MET |
 
-Measured by `RecallEvaluator` over 60-session gold set (34 real + 26 synthetic). `session-context.json` records which rules were loaded and which domain detection method was used (`domain_source: "metadata" | "keyword" | "bm25" | "propagation" | "ai"`).
+**Methodology change (2026-08-11):** Recall/precision now measured by `src/evaluate/precision.ts` over a 10-task curated eval with human-audited expected labels. Prior measurements (P@5=0.76, recall=0.61, MRR=0.96) used a 60-session gold set with auto-labeled values that had circular labeling (expected values auto-picked from graph nodes). The new eval is more conservative — numbers are not directly comparable to the old gold set.
 
-**Precision gap: CLOSED.** Achieved 0.76 via hybrid BM25+vector+graph retrieval + node-type weighting + hub-dampening. **Recall target: REVISED (#126)** — recall@15 >= 0.55 is the primary recall metric (currently 0.61). recall@5 retained as secondary diagnostic.
+**New eval tooling shipped (#200, #213):**
+- `src/evaluate/precision.ts` — 10-task curated eval, computes P@5, P@10, MRR
+- `src/evaluate/task-extractor.ts` — multi-strategy scanner (issue refs, git context, substantive message scoring) replacing naive first-user-message extraction
+- `src/evaluate/gold-audit.ts` — generates reviewable markdown with checkboxes for gold set maintenance
+
+`session-context.json` records which rules were loaded and which domain detection method was used (`domain_source: "metadata" | "keyword" | "bm25" | "propagation" | "ai"`).
+
+**Improvement trajectory:** P@5 went from 0.040 (broken eval labels) → 0.540 (fixed labels + auto-eviction + PRF + domain rebalancing). Primary levers for further improvement: PRF tuning, gold set expansion beyond 10 tasks, domain-specific retrieval paths.
 
 ### 6. Rule Lifecycle Management
 
@@ -207,15 +219,19 @@ Claude Code session
 
 AgentGrit is imported at runtime via dynamic `import()`. If unavailable, PAI falls back to local graph queries. AgentGrit availability never blocks session start.
 
-## Current State (2026-08-10)
+## Current State (2026-08-11)
 
 | Area | Status | Reference |
 |------|--------|-----------|
 | Signal capture | COMPLETE | 216 tests pass |
 | Pattern detection | COMPLETE | 47 tests pass |
 | Rule promotion | COMPLETE | 108 tests pass |
-| Graph + injection | SHIPPED (hybrid) | BM25 + vector + graph 3-way RRF (#97, #98). sanitizeRuleText. |
-| Recall measurement | FIXED | Evaluator decontaminated. 60-session gold set with negatives. Regression gate. |
+| Graph + injection | SHIPPED (hybrid) | BM25 + vector + graph 3-way RRF (#97, #98). PRF query expansion (#213). sanitizeRuleText. |
+| Recall measurement | REVISED | 10-task curated eval with human-audited labels (#200). Old 60-session gold set retained as historical baseline. |
+| Precision instrumentation | SHIPPED | P@5/P@10/MRR eval (#200), BM25 diagnostics, auto-eviction, health red alerts |
+| Smart task extraction | SHIPPED | Multi-strategy scanner replacing naive first-user-message (#213) |
+| Domain rebalancing | SHIPPED | 16 domains, max=50 nodes/domain, 111:1 → balanced (#213) |
+| Mid-session refresh | SHIPPED | ContextRefresh.hook.ts detects issue ref changes (#209) |
 | Eviction pipeline | COMPLETE | #85 shipped — correlation-based, duplicate detection, budget cap |
 | Co-occurrence edges | SHIPPED | Rating-weighted (#97). Attribution feedback updates weights per session (#99). |
 | Embedding support | SHIPPED | transformers.js optional peerDep, vector-cache.json, EmbeddingProvider interface (#98) |
@@ -250,12 +266,12 @@ AgentGrit is imported at runtime via dynamic `import()`. If unavailable, PAI fal
 ## Success Metrics
 
 The system succeeds when:
-1. **Recall@15 (primary):** ≥55% target — **MET (0.61)** ✅ With 15+ relevant rules per task, top-5 can only capture a fraction (0.37). recall@15 is the primary recall metric; recall@5 retained as secondary diagnostic.
-2. **Precision@5:** ≥70% — **MET (0.76)** ✅ Hybrid BM25+vector+graph retrieval + node-type weighting + hub-dampening.
-3. **MRR:** ≥0.90 — **MET (0.96)** ✅ First relevant rule is typically rank 1 or 2.
+1. **P@5:** ≥70% target — **0.540 on 10-task human-audited eval** ⚠️ Below target on new methodology. Old measurement (0.76 on 60-session auto-labeled gold set) is not comparable — circular labeling inflated scores. Improvement trajectory: 0.040 → 0.540 after fixing eval + shipping 3 levers (auto-eviction, PRF, domain rebalancing).
+2. **P@10:** 0.325 — new metric, no prior baseline.
+3. **MRR:** ≥0.90 target — **0.718 on 10-task eval** ⚠️ Below target on new methodology (was 0.96 on old eval).
 4. **Rule budget:** ≤12 universal + ≤20 domain-filtered per session — **MET (11 + ~15)**
 5. **Zero repeat corrections:** same mistake never rated ≤3 twice — **PARTIALLY MET (#127).** 67/96 promoted rules effective (70% reduced source pattern frequency). 29 rules ineffective — need text refinement or more aggressive injection.
 6. **Self-maintaining:** rules added, classified, correlated, and evicted without manual intervention — **MET (eviction #85, attribution #99, LLM classify, domain review #115)**
 7. **Self-improving:** rated sessions automatically improve retrieval quality — **MET (attribution feedback → edge weights → better retrieval #99, correction-weighted scoring #120)**
 
-**Measurement note (2026-07-13):** Precision measured on 60-session gold set (34 real + 26 synthetic, all audited for under-labeling). Hybrid retrieval: BM25 (2x weight) + vector similarity (0.5x) + graph expansion (1x). Node-type weighting: feedback/steering 1.0x, success 0.8x, reference 0.5x, project 0.3x. 382 pre-computed vectors via all-MiniLM-L6-v2.
+**Measurement note (2026-08-11):** Metrics now measured on 10-task curated eval with human-audited expected labels (`src/evaluate/precision.ts`). Prior measurement (2026-07-13) used a 60-session gold set with auto-labeled values — those numbers are retained as historical baseline in Section 5 but are not directly comparable. Current pipeline: hybrid BM25+vector+graph retrieval with PRF query expansion, auto-eviction, and 16 rebalanced domains. 417 nodes, 382 pre-computed vectors via all-MiniLM-L6-v2.
