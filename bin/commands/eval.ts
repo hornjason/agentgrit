@@ -15,9 +15,10 @@ import type { RubricConfig, Score, Rule, GraphNode } from "../../src/adapters/ty
 import { writeFileSync, mkdirSync } from "fs";
 import { readGraph } from "../../src/graph/builder";
 import { buildIndexFromDir } from "../../src/graph/bm25";
-import { getContextRules } from "../../src/graph/context";
+import { getContextRules, detectDomains } from "../../src/graph/context";
 import { evaluatePrecision, type PrecisionEvalResult } from "../../src/evaluate/precision";
 import type { RetrievalStrategy } from "../../src/graph/context";
+import { formatAuditReport, parseAuditFile, buildGoldSetFromAudit, type AuditSession } from "../../src/evaluate/gold-audit";
 
 function getJudgeConfig(): JudgeConfig | null {
   const config = loadConfig();
@@ -341,6 +342,8 @@ export async function evalCommand(args: string[]): Promise<void> {
     console.log("    agentgrit eval recall [--generate] [--bootstrap] [--live]");
     console.log("    agentgrit eval effectiveness");
     console.log("    agentgrit eval precision [--strategy current|embeddings] [--compare]");
+    console.log("    agentgrit eval gold audit [--limit N] [--output PATH]");
+    console.log("    agentgrit eval gold apply --file PATH");
     console.log("");
     console.log("  Evaluates traces, sessions, recall, precision, or rule effectiveness.");
     console.log("  Traces loads from algorithm-reflections.jsonl or session transcripts.");
@@ -685,8 +688,133 @@ export async function evalCommand(args: string[]): Promise<void> {
       writeFileSync(outputPath, JSON.stringify(result, null, 2));
       console.log(`\n  Results written to: ${outputPath}\n`);
     }
+  } else if (sub === "gold") {
+    const goldSub = args[1];
+
+    if (!goldSub || goldSub === "--help") {
+      console.log("  Usage:");
+      console.log("    agentgrit eval gold audit [--limit N] [--output PATH]");
+      console.log("    agentgrit eval gold apply --file PATH");
+      console.log("");
+      console.log("  audit   Generate a reviewable audit file from session transcripts.");
+      console.log("          Mark rules as relevant [x] then run apply to build gold set.");
+      console.log("  apply   Parse a completed audit file and generate gold-set.json.\n");
+      return;
+    }
+
+    if (goldSub === "audit") {
+      let limit = 50;
+      const limitIdx = args.indexOf("--limit");
+      if (limitIdx !== -1 && args[limitIdx + 1]) {
+        limit = parseInt(args[limitIdx + 1], 10) || 50;
+      }
+
+      let outputPath: string | null = null;
+      const outputIdx = args.indexOf("--output");
+      if (outputIdx !== -1 && args[outputIdx + 1]) {
+        outputPath = args[outputIdx + 1];
+      }
+
+      const transcriptDir = resolveTranscriptDir();
+      if (!transcriptDir || !existsSync(transcriptDir)) {
+        console.log("  No transcript directory found. Set transcriptDir in config.json.\n");
+        return;
+      }
+
+      const graph = readGraph();
+      if (!graph || Object.keys(graph.nodes).length === 0) {
+        console.log("  No knowledge graph found. Run 'agentgrit graph build' first.\n");
+        return;
+      }
+
+      const memoryDir = resolveMemoryDir();
+      const index = buildIndexFromDir(memoryDir);
+
+      const files = readdirSync(transcriptDir)
+        .filter((f) => f.endsWith(".jsonl"))
+        .slice(-limit);
+
+      console.log(`  Auditing ${files.length} sessions from ${transcriptDir}...`);
+      console.log(`  Graph: ${Object.keys(graph.nodes).length} nodes\n`);
+
+      const auditSessions: AuditSession[] = [];
+
+      for (const file of files) {
+        const filePath = join(transcriptDir, file);
+        const trace = await loadTraceFromTranscript(filePath);
+        if (!trace) continue;
+
+        const sessionId = basename(file, ".jsonl");
+        const taskDescription = trace.input;
+        const domains = detectDomains(taskDescription);
+        const rules = await getContextRules(graph, index, domains, 15, undefined, taskDescription);
+
+        auditSessions.push({
+          sessionId,
+          taskDescription: taskDescription.slice(0, 500),
+          domains,
+          rules: rules.map((r, i) => ({
+            id: r.id,
+            text: r.text.slice(0, 200),
+            rank: i + 1,
+          })),
+        });
+      }
+
+      const report = formatAuditReport(auditSessions);
+      const dest = outputPath ?? join(base, "state", "gold-audit.md");
+      const destDir = join(dest, "..");
+      if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true });
+      writeFileSync(dest, report);
+
+      console.log(`  Audited: ${auditSessions.length} sessions`);
+      console.log(`  Output: ${dest}\n`);
+    } else if (goldSub === "apply") {
+      const fileIdx = args.indexOf("--file");
+      const filePath = fileIdx !== -1 ? args[fileIdx + 1] : null;
+
+      if (!filePath) {
+        console.log("  Usage: agentgrit eval gold apply --file PATH\n");
+        return;
+      }
+
+      if (!existsSync(filePath)) {
+        console.log(`  File not found: ${filePath}\n`);
+        return;
+      }
+
+      const content = readFileSync(filePath, "utf-8");
+      const parsed = parseAuditFile(content);
+
+      if (parsed.length === 0) {
+        console.log("  No sessions found in audit file. Check format.\n");
+        return;
+      }
+
+      let totalRelevant = 0;
+      let totalExcluded = 0;
+      for (const s of parsed) {
+        totalRelevant += s.relevantRules.length;
+        totalExcluded += s.excludedRules.length;
+      }
+
+      const goldSet = buildGoldSetFromAudit(parsed);
+
+      const stateDir = join(base, "state");
+      if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true });
+      const goldPath = join(stateDir, "gold-set.json");
+      writeFileSync(goldPath, JSON.stringify({ ...goldSet, humanValidated: true }, null, 2));
+
+      console.log(`  Sessions processed: ${parsed.length}`);
+      console.log(`  Rules marked relevant: ${totalRelevant}`);
+      console.log(`  Rules excluded: ${totalExcluded}`);
+      console.log(`  Gold set written to: ${goldPath}\n`);
+    } else {
+      console.log(`  Unknown gold subcommand: ${goldSub}`);
+      console.log(`  Valid subcommands: audit, apply\n`);
+    }
   } else {
     console.log(`  Unknown eval target: ${sub}`);
-    console.log(`  Valid targets: traces, session, recall, effectiveness, precision\n`);
+    console.log(`  Valid targets: traces, session, recall, effectiveness, precision, gold\n`);
   }
 }
