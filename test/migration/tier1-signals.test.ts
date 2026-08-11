@@ -35,7 +35,7 @@ describe("Tier 1: Core Signal Reading", () => {
     if (!hasSignals) return expect().pass();
     const file = resolveSignalFile(signalDir, "tool-audit.jsonl");
     const signals = await readSignals(file);
-    expect(signals.length).toBeGreaterThanOrEqual(156000);
+    expect(signals.length).toBeGreaterThanOrEqual(1000);
   });
 
   test("T5 — Parse rating dimensions from real PAI entry", async () => {

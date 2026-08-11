@@ -36,8 +36,7 @@ function expandHome(p: string): string {
 }
 
 const PIPELINE_FILES: PipelineFile[] = [
-  { name: "ratings.jsonl (PAI)", path: "~/.claude/MEMORY/LEARNING/SIGNALS/ratings.jsonl", purpose: "Raw session ratings", yellowDays: 3, redDays: 7 },
-  { name: "ratings.jsonl (AgentGrit)", path: "~/.agentgrit/signals/ratings.jsonl", purpose: "Mirrored ratings", yellowDays: 3, redDays: 7 },
+  { name: "ratings.jsonl", path: "~/.claude/MEMORY/LEARNING/SIGNALS/ratings.jsonl", purpose: "Raw session ratings", yellowDays: 3, redDays: 7 },
   { name: "rule-stats.json", path: "~/.agentgrit/state/rule-stats.json", purpose: "Per-rule correlation stats", yellowDays: 3, redDays: 7 },
   { name: "session-context.json", path: "~/.agentgrit/state/session-context.json", purpose: "Active rules + domains", yellowDays: 1, redDays: 3 },
   { name: "eviction-candidates.json", path: "~/.agentgrit/state/eviction-candidates.json", purpose: "Stale rule candidates", yellowDays: 7, redDays: 14 },

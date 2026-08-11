@@ -85,7 +85,7 @@ export function rubricsDir(): string {
 }
 
 export function signalPath(filename: string): string {
-  return join(signalsDir(), filename);
+  return join(resolveSignalDir(), filename);
 }
 
 export function statePath(filename: string): string {

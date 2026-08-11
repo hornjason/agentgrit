@@ -51,11 +51,12 @@ describe("paths", () => {
     expect(mod.rubricsDir()).toBe(join(homedir(), ".agentgrit", "rubrics"));
   });
 
-  test("signalPath joins filename to signals dir", async () => {
+  test("signalPath joins filename to resolved signal dir", async () => {
     delete process.env.AGENTGRIT_DIR;
     const mod = await import("../../src/adapters/paths");
+    const resolved = mod.resolveSignalDir();
     expect(mod.signalPath("ratings.jsonl")).toBe(
-      join(homedir(), ".agentgrit", "signals", "ratings.jsonl"),
+      join(resolved, "ratings.jsonl"),
     );
   });
 

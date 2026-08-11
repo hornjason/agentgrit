@@ -47,8 +47,7 @@ describe("dashboard command", () => {
     const html = await generateDashboardHtml({ noOpen: true, outputPath: DASHBOARD_PATH });
 
     // AC-1: HTML contains pipeline file entries
-    expect(html).toContain("ratings.jsonl (PAI)");
-    expect(html).toContain("ratings.jsonl (AgentGrit)");
+    expect(html).toContain("ratings.jsonl");
     expect(html).toContain("rule-stats.json");
     expect(html).toContain("session-context.json");
     expect(html).toContain("eviction-candidates.json");
@@ -58,7 +57,7 @@ describe("dashboard command", () => {
     // AC-1: Status badges present
     const statusMatches = html.match(/GREEN|YELLOW|RED/g);
     expect(statusMatches).toBeTruthy();
-    expect(statusMatches!.length).toBeGreaterThanOrEqual(7);
+    expect(statusMatches!.length).toBeGreaterThanOrEqual(6);
 
     // AC-2: Phase section
     expect(html).toContain("Phase 1");
