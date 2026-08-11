@@ -6,7 +6,7 @@ describe("formatAuditSession", () => {
     const session: AuditSession = {
       sessionId: "abc123",
       taskDescription: "Fix the broken deploy pipeline",
-      domains: ["deployment", "pipeline"],
+      domains: ["deployment", "data"],
       rules: [
         { id: "feedback_mac_mini_deploy", text: "Mac Mini deployment requires Dockerfile rebuild", rank: 1 },
         { id: "feedback_scraper_host", text: "Scraper runs on host not hero", rank: 2 },
@@ -15,7 +15,7 @@ describe("formatAuditSession", () => {
     const output = formatAuditSession(session);
     expect(output).toContain("=== Session: abc123 ===");
     expect(output).toContain("Fix the broken deploy pipeline");
-    expect(output).toContain("deployment, pipeline");
+    expect(output).toContain("deployment, data");
     expect(output).toContain("feedback_mac_mini_deploy");
     expect(output).toContain("Mac Mini deployment requires Dockerfile rebuild");
     expect(output).toContain("Relevant? [ ]");

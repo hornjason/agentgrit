@@ -11,10 +11,10 @@ import { loadPatterns } from "./generate-patterns";
 // ── Domain Taxonomy ──
 
 export const DOMAINS = [
-  "verification", "escalation", "scope", "delivery", "communication",
-  "deployment", "security", "ui-testing", "data", "browser",
+  "testing", "escalation", "scope", "delivery",
+  "deployment", "security", "ui", "data", "browser",
   "memory", "algorithm", "delegation", "architecture",
-  "scoring", "pipeline",
+  "infra", "scraper", "process",
 ] as const;
 
 type Domain = (typeof DOMAINS)[number];
@@ -722,7 +722,7 @@ export function updateGraph(graph: Graph, newRules: Rule[]): Graph {
   for (const rule of newRules) {
     const hash = computeHash(rule.text);
     const classified = keywordClassify(rule.id, rule.text, rule.text);
-    const domains = classified || ["verification"];
+    const domains = classified || ["testing"];
     const domainSource: GraphNode["domainSource"] = classified ? "keyword" : undefined;
 
     if (updated.nodes[rule.id]) {

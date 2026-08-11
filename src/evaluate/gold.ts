@@ -42,7 +42,7 @@ export function resetGoldPatterns(): void {
   _goldPatterns = null;
 }
 
-export function inferDomains(text: string, fallbackDomains = ["verification", "delivery"]): string[] {
+export function inferDomains(text: string, fallbackDomains = ["testing", "delivery"]): string[] {
   const matched = new Set<string>();
   for (const { pattern, domain } of getGoldPatterns()) {
     if (pattern.test(text)) matched.add(domain);

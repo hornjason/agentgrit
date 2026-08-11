@@ -35,18 +35,18 @@ function makeGraph(nodes: GraphNode[], edges: Graph["edges"] = []): Graph {
 describe("queryGraph", () => {
   test("returns empty for empty graph", () => {
     const graph = makeGraph([]);
-    const result = queryGraph(graph, ["verification"]);
+    const result = queryGraph(graph, ["testing"]);
     expect(result).toEqual([]);
   });
 
   test("returns matching domain nodes", () => {
     const graph = makeGraph([
-      makeNode("a", ["verification"]),
+      makeNode("a", ["testing"]),
       makeNode("b", ["deployment"]),
-      makeNode("c", ["verification", "scope"]),
+      makeNode("c", ["testing", "scope"]),
     ]);
 
-    const result = queryGraph(graph, ["verification"]);
+    const result = queryGraph(graph, ["testing"]);
     expect(result.length).toBeGreaterThan(0);
     const ids = result.map(r => r.primary.id);
     expect(ids).toContain("a");
@@ -56,21 +56,21 @@ describe("queryGraph", () => {
 
   test("respects limit", () => {
     const nodes = Array.from({ length: 20 }, (_, i) =>
-      makeNode(`node-${i}`, ["verification"]),
+      makeNode(`node-${i}`, ["testing"]),
     );
     const graph = makeGraph(nodes);
 
-    const result = queryGraph(graph, ["verification"], 5);
+    const result = queryGraph(graph, ["testing"], 5);
     expect(result.length).toBeLessThanOrEqual(5);
   });
 
   test("ranks nodes with better domain match higher", () => {
     const graph = makeGraph([
-      makeNode("exact", ["verification", "scope"]),
-      makeNode("partial", ["verification"]),
+      makeNode("exact", ["testing", "scope"]),
+      makeNode("partial", ["testing"]),
     ]);
 
-    const result = queryGraph(graph, ["verification", "scope"]);
+    const result = queryGraph(graph, ["testing", "scope"]);
     expect(result.length).toBe(2);
     expect(result[0].primary.id).toBe("exact");
   });
@@ -78,15 +78,15 @@ describe("queryGraph", () => {
   test("includes connected nodes in clusters", () => {
     const graph = makeGraph(
       [
-        makeNode("primary", ["verification"]),
-        makeNode("sibling", ["verification"]),
+        makeNode("primary", ["testing"]),
+        makeNode("sibling", ["testing"]),
       ],
       [
         { from: "primary", to: "sibling", relationship: "reinforces", strength: 0.8 },
       ],
     );
 
-    const result = queryGraph(graph, ["verification"]);
+    const result = queryGraph(graph, ["testing"]);
     expect(result.length).toBe(1);
     expect(result[0].primary.id).toBe("primary");
     expect(result[0].connected.length).toBe(1);
@@ -96,15 +96,15 @@ describe("queryGraph", () => {
   test("deduplicates nodes across clusters", () => {
     const graph = makeGraph(
       [
-        makeNode("a", ["verification"]),
-        makeNode("b", ["verification"]),
+        makeNode("a", ["testing"]),
+        makeNode("b", ["testing"]),
       ],
       [
         { from: "a", to: "b", relationship: "same_domain", strength: 0.5 },
       ],
     );
 
-    const result = queryGraph(graph, ["verification"]);
+    const result = queryGraph(graph, ["testing"]);
     const allIds = result.flatMap(c => [c.primary.id, ...c.connected.map(cn => cn.node.id)]);
     const uniqueIds = new Set(allIds);
     expect(uniqueIds.size).toBe(allIds.length);
@@ -112,18 +112,18 @@ describe("queryGraph", () => {
 
   test("handles multi-domain query", () => {
     const graph = makeGraph([
-      makeNode("deploy-verify", ["deployment", "verification"]),
+      makeNode("deploy-verify", ["deployment", "testing"]),
       makeNode("scope-only", ["scope"]),
       makeNode("deploy-only", ["deployment"]),
     ]);
 
-    const result = queryGraph(graph, ["deployment", "verification"]);
+    const result = queryGraph(graph, ["deployment", "testing"]);
     expect(result[0].primary.id).toBe("deploy-verify");
   });
 
   test("returns all nodes when no domains specified", () => {
     const graph = makeGraph([
-      makeNode("a", ["verification"]),
+      makeNode("a", ["testing"]),
       makeNode("b", ["deployment"]),
     ]);
 
@@ -134,16 +134,16 @@ describe("queryGraph", () => {
   test("score reflects edge connectivity", () => {
     const graph = makeGraph(
       [
-        makeNode("connected", ["verification"]),
-        makeNode("isolated", ["verification"]),
-        makeNode("helper", ["verification"]),
+        makeNode("connected", ["testing"]),
+        makeNode("isolated", ["testing"]),
+        makeNode("helper", ["testing"]),
       ],
       [
         { from: "connected", to: "helper", relationship: "reinforces", strength: 0.9 },
       ],
     );
 
-    const result = queryGraph(graph, ["verification"]);
+    const result = queryGraph(graph, ["testing"]);
     const connectedCluster = result.find(c => c.primary.id === "connected");
     const isolatedCluster = result.find(c => c.primary.id === "isolated");
 

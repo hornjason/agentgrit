@@ -67,9 +67,9 @@ afterEach(() => {
 });
 
 describe("loadSeedPatterns", () => {
-  test("returns all 14 domain patterns", () => {
+  test("returns all 16 domain patterns", () => {
     const seeds = loadSeedPatterns();
-    expect(seeds.length).toBe(14);
+    expect(seeds.length).toBe(16);
     const domains = seeds.map(s => s.domain);
     for (const d of DOMAINS) {
       expect(domains).toContain(d);
@@ -178,7 +178,7 @@ describe("loadPatterns", () => {
 
   test("falls back to seed patterns when no cache", () => {
     const loaded = loadPatterns();
-    expect(loaded.length).toBe(14);
+    expect(loaded.length).toBe(16);
   });
 });
 
@@ -186,7 +186,7 @@ describe("generatePatterns", () => {
   test("returns seed patterns for empty graph", () => {
     const graph = makeGraph([]);
     const patterns = generatePatterns(graph);
-    expect(patterns.length).toBe(14);
+    expect(patterns.length).toBe(16);
     const domains = patterns.map(p => p.domain);
     for (const d of DOMAINS) {
       expect(domains).toContain(d);
@@ -239,11 +239,11 @@ describe("generatePatterns", () => {
     }
   });
 
-  test("output covers all 14 domains from DOMAINS constant", () => {
+  test("output covers all 16 domains from DOMAINS constant", () => {
     const graph = makeGraph([]);
     const patterns = generatePatterns(graph);
     const domainSet = new Set(patterns.map(p => p.domain));
-    expect(domainSet.size).toBe(14);
+    expect(domainSet.size).toBe(16);
     for (const d of DOMAINS) {
       expect(domainSet.has(d)).toBe(true);
     }
@@ -353,11 +353,11 @@ describe("bigram extraction", () => {
 });
 
 describe("cascadePattern generation", () => {
-  test("all 14 domains get cascadePattern when enough nodes exist", () => {
+  test("all 16 domains get cascadePattern when enough nodes exist", () => {
     const descs: Record<string, string> = {
       deployment: "deploy rebuild container docker makefile production server",
       security: "security scan vulnerability credential auth token secret",
-      "ui-testing": "quinn playwright visual test screenshot validation",
+      "ui": "quinn playwright visual test screenshot validation",
       browser: "iframe page.fill page.route selector sso login scraper",
       delegation: "spawn agent worktree pre-brief handoff delegate marcus",
       escalation: "escalate bring specialist wrong approach stuck diagnos",
@@ -382,7 +382,7 @@ describe("cascadePattern generation", () => {
     for (const p of patterns) {
       if (p.cascadePattern) cascadeCount++;
     }
-    expect(cascadeCount).toBe(14);
+    expect(cascadeCount).toBe(16);
   });
 
   test("cascadePattern contains word-boundary markers for unigrams", () => {
@@ -434,11 +434,11 @@ describe("regression: seed vs generated pattern agreement", () => {
     { input: "arch-decision record architecture decision in ADR", expectedDomains: ["architecture"], source: "keywordClassify" },
     // From context.test.ts detectDomains
     { input: "run make rebuild to deploy", expectedDomains: ["deployment"], source: "detectDomains" },
-    { input: "verify before answering", expectedDomains: ["verification"], source: "detectDomains" },
+    { input: "verify before answering", expectedDomains: ["testing"], source: "detectDomains" },
     { input: "run security scan on vulnerability", expectedDomains: ["security"], source: "detectDomains" },
     { input: "stay focused on minimal scope", expectedDomains: ["scope"], source: "detectDomains" },
     { input: "spawn agent with worktree isolation", expectedDomains: ["delegation"], source: "detectDomains" },
-    { input: "run playwright visual test", expectedDomains: ["ui-testing"], source: "detectDomains" },
+    { input: "run playwright visual test", expectedDomains: ["ui"], source: "detectDomains" },
   ];
 
   function classifyWithPatterns(text: string, patterns: DomainPattern[]): string[] {
@@ -455,7 +455,7 @@ describe("regression: seed vs generated pattern agreement", () => {
     const descs: Record<string, string> = {
       deployment: "deploy rebuild container docker makefile production server",
       security: "security scan vulnerability credential auth token secret encrypt access control",
-      "ui-testing": "quinn playwright visual test screenshot validation",
+      "ui": "quinn playwright visual test screenshot validation",
       browser: "iframe page.fill page.route selector sso login scraper",
       delegation: "spawn agent worktree pre-brief handoff delegate marcus",
       escalation: "escalate bring specialist wrong approach stuck diagnos",
@@ -510,10 +510,10 @@ describe("regression: seed vs generated pattern agreement", () => {
 });
 
 describe("loadHybridPatterns", () => {
-  test("returns all 14 domains", () => {
+  test("returns all 16 domains", () => {
     const graph = makeGraph([]);
     const hybrid = loadHybridPatterns(graph);
-    expect(hybrid.length).toBe(14);
+    expect(hybrid.length).toBe(16);
     for (const d of DOMAINS) {
       expect(hybrid.find(p => p.domain === d)).toBeDefined();
     }

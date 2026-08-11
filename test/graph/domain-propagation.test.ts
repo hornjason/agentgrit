@@ -22,8 +22,8 @@ function makeNode(id: string, domains: string[], overrides?: Partial<GraphNode>)
 describe("propagateFromNeighbors", () => {
   test("classifies node when >= 2 co_occurred neighbors share domain", () => {
     const nodes: Record<string, GraphNode> = {
-      a: makeNode("a", ["verification"]),
-      b: makeNode("b", ["verification"]),
+      a: makeNode("a", ["testing"]),
+      b: makeNode("b", ["testing"]),
       target: makeNode("target", []),
     };
     const edges: GraphEdge[] = [
@@ -34,13 +34,13 @@ describe("propagateFromNeighbors", () => {
     const count = propagateFromNeighbors(nodes, edges);
 
     expect(count).toBe(1);
-    expect(nodes.target.domains).toEqual(["verification"]);
+    expect(nodes.target.domains).toEqual(["testing"]);
     expect(nodes.target.domainSource).toBe("propagation");
   });
 
   test("skips when only 1 classified neighbor", () => {
     const nodes: Record<string, GraphNode> = {
-      a: makeNode("a", ["verification"]),
+      a: makeNode("a", ["testing"]),
       unclassified: makeNode("unclassified", []),
       target: makeNode("target", []),
     };
@@ -57,7 +57,7 @@ describe("propagateFromNeighbors", () => {
 
   test("weights reinforces edges higher than co_occurred", () => {
     const nodes: Record<string, GraphNode> = {
-      a: makeNode("a", ["verification"]),
+      a: makeNode("a", ["testing"]),
       b: makeNode("b", ["deployment"]),
       c: makeNode("c", ["deployment"]),
       target: makeNode("target", []),
@@ -77,8 +77,8 @@ describe("propagateFromNeighbors", () => {
 
   test("ignores same_domain edges (zero weight)", () => {
     const nodes: Record<string, GraphNode> = {
-      a: makeNode("a", ["verification"]),
-      b: makeNode("b", ["verification"]),
+      a: makeNode("a", ["testing"]),
+      b: makeNode("b", ["testing"]),
       target: makeNode("target", []),
     };
     const edges: GraphEdge[] = [
@@ -117,8 +117,8 @@ describe("propagateFromNeighbors", () => {
 
   test("does not overwrite already classified nodes", () => {
     const nodes: Record<string, GraphNode> = {
-      a: makeNode("a", ["verification"]),
-      b: makeNode("b", ["verification"]),
+      a: makeNode("a", ["testing"]),
+      b: makeNode("b", ["testing"]),
       existing: makeNode("existing", ["deployment"]),
     };
     const edges: GraphEdge[] = [
@@ -133,7 +133,7 @@ describe("propagateFromNeighbors", () => {
 
   test("requires weighted vote sum >= 2", () => {
     const nodes: Record<string, GraphNode> = {
-      a: makeNode("a", ["verification"]),
+      a: makeNode("a", ["testing"]),
       b: makeNode("b", ["deployment"]),
       target: makeNode("target", []),
     };
@@ -177,7 +177,7 @@ describe("inferFromBM25", () => {
   test("skips when fewer than 3 classified nodes exist", () => {
     const nodes: Record<string, GraphNode> = {
       d1: makeNode("d1", ["deployment"], { description: "deploy thing" }),
-      d2: makeNode("d2", ["verification"], { description: "verify thing" }),
+      d2: makeNode("d2", ["testing"], { description: "verify thing" }),
       target: makeNode("target", [], { description: "deploy thing to verify" }),
     };
 
@@ -190,7 +190,7 @@ describe("inferFromBM25", () => {
   test("skips when top-3 disagree", () => {
     const nodes: Record<string, GraphNode> = {
       d1: makeNode("d1", ["deployment"], { name: "deploy", description: "deploy something" }),
-      d2: makeNode("d2", ["verification"], { name: "verify", description: "verify something" }),
+      d2: makeNode("d2", ["testing"], { name: "verify", description: "verify something" }),
       d3: makeNode("d3", ["security"], { name: "secure", description: "security scan" }),
       d4: makeNode("d4", ["scope"], { name: "scope", description: "scope check" }),
       target: makeNode("target", [], { name: "generic", description: "deploy verify secure scope" }),
@@ -231,9 +231,9 @@ describe("propagateDomains (combined)", () => {
   test("runs both phases — neighbor first, then BM25", () => {
     const nodes: Record<string, GraphNode> = {
       // Classified seed nodes
-      v1: makeNode("v1", ["verification"], { name: "verify-first", description: "Read source first verify before answering" }),
-      v2: makeNode("v2", ["verification"], { name: "verify-assert", description: "Check before claim verify data" }),
-      v3: makeNode("v3", ["verification"], { name: "verify-state", description: "Verify state before operations" }),
+      v1: makeNode("v1", ["testing"], { name: "verify-first", description: "Read source first verify before answering" }),
+      v2: makeNode("v2", ["testing"], { name: "verify-assert", description: "Check before claim verify data" }),
+      v3: makeNode("v3", ["testing"], { name: "verify-state", description: "Verify state before operations" }),
       // Unclassified — reachable by co_occurred
       neighbor_target: makeNode("neighbor_target", [], { name: "check-rule", description: "Some rule about checking" }),
       // Unclassified — only reachable by BM25
@@ -247,7 +247,7 @@ describe("propagateDomains (combined)", () => {
     const total = propagateDomains(nodes, edges);
 
     expect(total).toBeGreaterThanOrEqual(1);
-    expect(nodes.neighbor_target.domains).toEqual(["verification"]);
+    expect(nodes.neighbor_target.domains).toEqual(["testing"]);
     expect(nodes.neighbor_target.domainSource).toBe("propagation");
 
     if (nodes.bm25_target.domains[0]) {
@@ -259,14 +259,14 @@ describe("propagateDomains (combined)", () => {
     const nodes: Record<string, GraphNode> = {
       a: makeNode("a", ["deployment"]),
       b: makeNode("b", ["security"]),
-      c: makeNode("c", ["verification"]),
+      c: makeNode("c", ["testing"]),
     };
 
     propagateDomains(nodes, []);
 
     expect(nodes.a.domains).toEqual(["deployment"]);
     expect(nodes.b.domains).toEqual(["security"]);
-    expect(nodes.c.domains).toEqual(["verification"]);
+    expect(nodes.c.domains).toEqual(["testing"]);
   });
 
   test("handles empty graph", () => {

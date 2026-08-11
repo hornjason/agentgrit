@@ -33,10 +33,10 @@ describe("Tier 5: Evaluation", () => {
   test("T25: recall@5 on constructed gold set scores > 0", () => {
     // Build a gold set from rules with known domains
     const availableRules = [
-      makeRule("verify-facts", ["verification"]),
-      makeRule("check-scope", ["scope", "verification"]),
+      makeRule("verify-facts", ["testing"]),
+      makeRule("check-scope", ["scope", "testing"]),
       makeRule("deploy-safety", ["deployment"]),
-      makeRule("test-first", ["verification"]),
+      makeRule("test-first", ["testing"]),
       makeRule("escalation-rule", ["escalation"]),
     ];
 
@@ -48,7 +48,7 @@ describe("Tier 5: Evaluation", () => {
     ];
 
     const result = evaluateRecall(
-      ["verification"],
+      ["testing"],
       injectedRules,
       ["ship"],
       ["ship", "tdd"],

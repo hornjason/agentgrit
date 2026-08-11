@@ -109,7 +109,8 @@ describe("Tier 7: CLI End-to-End", () => {
       return;
     }
 
-    const graph = await buildGraph(memoryDir, stateOutputDir);
+    const tempRd = join(base, "rule-domains.json");
+    const graph = await buildGraph(memoryDir, stateOutputDir, tempRd);
 
     expect(graph.nodeCount).toBeGreaterThan(200);
     expect(graph.edgeCount).toBeGreaterThan(0);
@@ -125,7 +126,7 @@ describe("Tier 7: CLI End-to-End", () => {
       return;
     }
 
-    const clusters = queryGraph(graph, ["verification"], 5);
+    const clusters = queryGraph(graph, ["testing"], 5);
 
     expect(clusters.length).toBeGreaterThan(0);
 
@@ -154,7 +155,7 @@ describe("Tier 7: CLI End-to-End", () => {
     }
 
     // Step 1: Graph build
-    const graph = await buildGraph(memoryDir, join(base, "state"));
+    const graph = await buildGraph(memoryDir, join(base, "state"), join(base, "rule-domains.json"));
     expect(graph.nodeCount).toBeGreaterThan(0);
 
     // Step 2: Review

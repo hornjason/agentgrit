@@ -175,7 +175,7 @@ describe("eviction lifecycle — vertical slice", () => {
     seedLearnedMd([evictId, "feedback_keep"]);
     seedRuleDomains({
       [evictId]: { domains: ["deployment"], source: "auto" },
-      ["feedback_keep"]: { domains: ["verification"], source: "auto" },
+      ["feedback_keep"]: { domains: ["testing"], source: "auto" },
     });
 
     const candidates = [
@@ -241,7 +241,7 @@ describe("eviction lifecycle — vertical slice", () => {
   test("removeFromRuleDomains only removes specified IDs", () => {
     seedRuleDomains({
       "rule_a": { domains: ["deployment"], source: "auto" },
-      "rule_b": { domains: ["verification"], source: "auto" },
+      "rule_b": { domains: ["testing"], source: "auto" },
       "rule_c": { domains: ["scope"], source: "reviewed" },
     });
 
@@ -327,7 +327,7 @@ describe("eviction lifecycle — vertical slice", () => {
 
     seedRuleDomains({
       "feedback_exists": { domains: ["deployment"], source: "auto" },
-      "feedback_deleted": { domains: ["verification"], source: "auto" },
+      "feedback_deleted": { domains: ["testing"], source: "auto" },
     });
 
     // Build graph — only feedback_exists has a file

@@ -15,7 +15,7 @@ function mockGraph(nodeNames: string[] = []): Graph {
       type: "rule",
       name,
       description: `Description for ${name}`,
-      domains: ["verification"],
+      domains: ["testing"],
       severity: 3,
       occurrence_count: 0,
       last_updated: new Date().toISOString(),

@@ -60,7 +60,7 @@ afterEach(() => {
 describe("removeFromRuleDomains", () => {
   test("removes specified rule IDs from rule-domains.json", () => {
     makeRuleDomains({
-      "rule-a": { domains: ["verification"], source: "auto" },
+      "rule-a": { domains: ["testing"], source: "auto" },
       "rule-b": { domains: ["deployment"], source: "reviewed" },
       "rule-c": { domains: ["engineering"], source: "auto" },
     });
@@ -80,7 +80,7 @@ describe("removeFromRuleDomains", () => {
 
   test("no-op when ruleIds is empty", () => {
     makeRuleDomains({
-      "rule-a": { domains: ["verification"], source: "auto" },
+      "rule-a": { domains: ["testing"], source: "auto" },
     });
 
     removeFromRuleDomains([], RULE_DOMAINS);
@@ -91,7 +91,7 @@ describe("removeFromRuleDomains", () => {
 
   test("no-op when rule ID not found in file", () => {
     makeRuleDomains({
-      "rule-a": { domains: ["verification"], source: "auto" },
+      "rule-a": { domains: ["testing"], source: "auto" },
     });
     const before = readFileSync(RULE_DOMAINS, "utf-8");
 
@@ -122,10 +122,10 @@ describe("pruneLearnedRules cleans up rule-domains.json", () => {
     persistRuleStats(stats, STATE_DIR);
 
     makeRuleDomains({
-      "rule-0": { domains: ["verification"], source: "auto" },
+      "rule-0": { domains: ["testing"], source: "auto" },
       "rule-1": { domains: ["deployment"], source: "auto" },
       "rule-2": { domains: ["engineering"], source: "auto" },
-      "rule-3": { domains: ["verification"], source: "auto" },
+      "rule-3": { domains: ["testing"], source: "auto" },
       "rule-4": { domains: ["engineering"], source: "reviewed" },
     });
 
@@ -154,7 +154,7 @@ describe("pruneLearnedRules cleans up rule-domains.json", () => {
     writeFileSync(LEARNED_MD, makeLearnedMd(rules));
 
     makeRuleDomains({
-      "rule-0": { domains: ["verification"], source: "auto" },
+      "rule-0": { domains: ["testing"], source: "auto" },
       "rule-1": { domains: ["deployment"], source: "auto" },
       "rule-2": { domains: ["engineering"], source: "auto" },
     });
@@ -174,11 +174,11 @@ describe("pruneTobudget cleans up rule-domains.json", () => {
     writeFileSync(CLAUDE_MD, makeClaudeMd(30));
 
     makeRuleDomains({
-      "rule-0": { domains: ["verification"], source: "auto" },
+      "rule-0": { domains: ["testing"], source: "auto" },
       "rule-5": { domains: ["deployment"], source: "auto" },
       "rule-28": { domains: ["engineering"], source: "auto" },
       "rule-29": { domains: ["engineering"], source: "auto" },
-      "other-rule": { domains: ["verification"], source: "reviewed" },
+      "other-rule": { domains: ["testing"], source: "reviewed" },
     });
 
     const result = await pruneTobudget(CLAUDE_MD, Tier.Global, {

@@ -26,7 +26,7 @@ interface CohortDefinition {
 
 const COHORT_DEFINITIONS: CohortDefinition[] = [
   {
-    name: "verification",
+    name: "testing",
     description: "Failures related to asserting without verifying",
     ablatable: false,
     keywords: ["verify", "assert", "claim", "check", "confirm", "evidence"],
@@ -56,7 +56,7 @@ const COHORT_DEFINITIONS: CohortDefinition[] = [
     ],
   },
   {
-    name: "communication",
+    name: "delivery",
     description: "Communication and context failures",
     ablatable: true,
     keywords: [

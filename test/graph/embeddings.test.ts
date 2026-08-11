@@ -214,7 +214,7 @@ describe("computeAndSaveCache", () => {
   test("computes vectors for all graph nodes and saves", async () => {
     const graph = makeGraph([
       makeNode("rule_a", ["deployment"], "Deploy with containers"),
-      makeNode("rule_b", ["verification"], "Verify before asserting"),
+      makeNode("rule_b", ["testing"], "Verify before asserting"),
     ]);
 
     const provider = new MockEmbeddingProvider(384);

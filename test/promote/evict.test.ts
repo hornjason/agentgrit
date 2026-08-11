@@ -104,7 +104,7 @@ describe("findEvictionCandidates", () => {
     ];
     persistRuleStats(stats, STATE_DIR);
     makeRuleDomains({
-      "reviewed-rule": { domains: ["verification"], source: "reviewed" },
+      "reviewed-rule": { domains: ["testing"], source: "reviewed" },
     });
 
     const candidates = findEvictionCandidates({ stateDir: STATE_DIR, ruleDomainsPath: RULE_DOMAINS });
@@ -118,7 +118,7 @@ describe("findEvictionCandidates", () => {
     ];
     persistRuleStats(stats, STATE_DIR);
     makeRuleDomains({
-      "auto-rule": { domains: ["verification"], source: "auto" },
+      "auto-rule": { domains: ["testing"], source: "auto" },
     });
 
     const candidates = findEvictionCandidates({ stateDir: STATE_DIR, ruleDomainsPath: RULE_DOMAINS });
@@ -190,7 +190,7 @@ describe("findEvictionCandidates", () => {
     ];
     persistRuleStats(stats, STATE_DIR);
     makeRuleDomains({
-      "stale-reviewed": { domains: ["verification"], source: "reviewed" },
+      "stale-reviewed": { domains: ["testing"], source: "reviewed" },
     });
 
     const candidates = findEvictionCandidates({ stateDir: STATE_DIR, ruleDomainsPath: RULE_DOMAINS });
@@ -411,7 +411,7 @@ describe("evictRules", () => {
   test("removes evicted rules from rule-domains.json", async () => {
     await Bun.write(CLAUDE_LEARNED, makeClaudeLearned(["evict-me"]));
     makeRuleDomains({
-      "evict-me": { domains: ["verification"], source: "auto" },
+      "evict-me": { domains: ["testing"], source: "auto" },
       "keep-me": { domains: ["deployment"], source: "reviewed" },
     });
 

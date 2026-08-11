@@ -64,7 +64,7 @@ describe("hybridRetrieve", () => {
     // Set up graph with domain-tagged nodes
     const graph = makeGraph([
       makeNode("deploy_rule", ["deployment"]),
-      makeNode("verify_rule", ["verification"]),
+      makeNode("verify_rule", ["testing"]),
       makeNode("scope_rule", ["scope"]),
     ]);
 
@@ -99,7 +99,7 @@ describe("hybridRetrieve", () => {
     const index = buildIndex([]);
     const graph = makeGraph([]);
 
-    const results = hybridRetrieve("anything", ["verification"], graph, index);
+    const results = hybridRetrieve("anything", ["testing"], graph, index);
     expect(results).toEqual([]);
   });
 

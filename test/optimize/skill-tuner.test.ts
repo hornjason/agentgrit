@@ -109,7 +109,7 @@ describe("tuneSkill", () => {
       evaluate: async () => {
         evalCount++;
         return makeEvalResult(0.5 + evalCount * 0.05, [
-          { name: "verification", passed: false },
+          { name: "testing", passed: false },
           { name: "environment-check", passed: true },
           { name: "single-hypothesis", passed: false },
         ]);
@@ -133,7 +133,7 @@ describe("tuneSkill", () => {
 
     expect(capturedCriteria.length).toBeGreaterThanOrEqual(1);
     for (const criteria of capturedCriteria) {
-      expect(criteria).toContain("verification");
+      expect(criteria).toContain("testing");
       expect(criteria).toContain("single-hypothesis");
     }
   });

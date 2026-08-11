@@ -65,7 +65,7 @@ export const EVAL_TASKS: EvalTask[] = [
   {
     id: 3,
     description: "Fix Docker container failing to start on Mac Mini",
-    expectedDomains: ["deployment"],
+    expectedDomains: ["infra"],
     expectedRuleIds: [
       "feedback_mac_mini_l4_deployment",
       "feedback_scraper_runs_on_host_not_hero",
@@ -76,7 +76,7 @@ export const EVAL_TASKS: EvalTask[] = [
   {
     id: 4,
     description: "Playwright test for new user onboarding flow keeps timing out",
-    expectedDomains: ["ui-testing"],
+    expectedDomains: ["ui"],
     expectedRuleIds: [
       "feedback_condition-driven-waits-browser-automation",
       "feedback_verify_rendered_ui_not_just_code",
@@ -142,7 +142,7 @@ export const EVAL_TASKS: EvalTask[] = [
   {
     id: 10,
     description: "Fix broken domain propagation in knowledge graph builder",
-    expectedDomains: ["algorithm", "deployment"],
+    expectedDomains: ["algorithm", "process"],
     expectedRuleIds: [
       "feedback_design_complete_before_building",
       "feedback_no_false_completions",

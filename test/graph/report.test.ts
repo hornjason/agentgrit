@@ -2,7 +2,7 @@ import { describe, test, expect } from "bun:test";
 import type { Graph } from "../../src/graph/types";
 import type { GraphNode, GraphEdge } from "../../src/adapters/types";
 
-function makeNode(id: string, domains: string[] = ["verification"], severity: number = 3): GraphNode {
+function makeNode(id: string, domains: string[] = ["testing"], severity: number = 3): GraphNode {
   return {
     id,
     file: `${id}.md`,
@@ -24,8 +24,8 @@ function makeEdge(from: string, to: string, relationship: string = "same_domain"
 
 function makeGraph(overrides: Partial<Graph> = {}): Graph {
   const nodes: Record<string, GraphNode> = {
-    "verify-before-assert": makeNode("verify-before-assert", ["verification"]),
-    "read-source-first": makeNode("read-source-first", ["verification"]),
+    "verify-before-assert": makeNode("verify-before-assert", ["testing"]),
+    "read-source-first": makeNode("read-source-first", ["testing"]),
     "delegate-to-marcus": makeNode("delegate-to-marcus", ["delegation"]),
     "never-force-push": makeNode("never-force-push", ["security"]),
     "isolated-node": makeNode("isolated-node", ["data"]),
@@ -65,7 +65,7 @@ describe("generateReport", () => {
     const { generateReport } = await import("../../src/graph/report");
     const report = generateReport(makeGraph());
 
-    const verificationCount = report.domainDistribution.find((d) => d.domain === "verification");
+    const verificationCount = report.domainDistribution.find((d) => d.domain === "testing");
     expect(verificationCount?.count).toBe(2);
 
     const delegationCount = report.domainDistribution.find((d) => d.domain === "delegation");
@@ -143,7 +143,7 @@ describe("formatReportMarkdown", () => {
     expect(md).toContain("## Section 2: Coverage Analysis");
     expect(md).toContain("### Domain Distribution");
     expect(md).toContain("### Edge Type Breakdown");
-    expect(md).toContain("verification");
+    expect(md).toContain("testing");
   });
 
   test("shows conflicts when present", async () => {

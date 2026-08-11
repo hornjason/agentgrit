@@ -55,7 +55,7 @@ describe("checkEvalRegression", () => {
   test("passes on first run when no watermark exists", async () => {
     const nodes: Record<string, GraphNode> = {
       r1: makeNode("r1", ["deployment"], "deploy container rebuild makefile"),
-      r2: makeNode("r2", ["verification"], "verify before answering check source"),
+      r2: makeNode("r2", ["testing"], "verify before answering check source"),
     };
     const graph = makeGraph(nodes);
 
@@ -90,7 +90,7 @@ describe("checkEvalRegression", () => {
   test("passes when precision stays stable", async () => {
     const nodes: Record<string, GraphNode> = {
       r1: makeNode("r1", ["deployment"], "deploy container rebuild makefile"),
-      r2: makeNode("r2", ["verification"], "verify before answering check"),
+      r2: makeNode("r2", ["testing"], "verify before answering check"),
     };
     const graph = makeGraph(nodes);
 
@@ -126,7 +126,7 @@ describe("checkEvalRegression", () => {
   test("blocks when precision drops >= 0.05", async () => {
     const nodes: Record<string, GraphNode> = {
       r1: makeNode("r1", ["deployment"], "deploy container rebuild"),
-      r2: makeNode("r2", ["verification"], "verify before answering"),
+      r2: makeNode("r2", ["testing"], "verify before answering"),
     };
     const graph = makeGraph(nodes);
 

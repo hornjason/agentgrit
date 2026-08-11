@@ -27,7 +27,7 @@ function makeRule(id: string, text: string, tier: Tier = Tier.Global): Rule {
     id,
     text,
     tier,
-    tags: ["verification"],
+    tags: ["testing"],
     created: new Date().toISOString(),
     correlationScore: 0,
     sourceSignals: [],

@@ -34,8 +34,8 @@ function makeGraph(nodes: Record<string, GraphNode>, edges: Graph["edges"] = [])
 const mockInference = mock(() =>
   Promise.resolve({
     success: true,
-    output: '{"domains": ["verification"]}',
-    parsed: { domains: ["verification"] },
+    output: '{"domains": ["testing"]}',
+    parsed: { domains: ["testing"] },
     latencyMs: 100,
     level: "fast" as const,
     provider: "claude" as const,
@@ -57,8 +57,8 @@ describe("classifyIsolatedNodes", () => {
     mockInference.mockImplementation(() =>
       Promise.resolve({
         success: true,
-        output: '{"domains": ["verification"]}',
-        parsed: { domains: ["verification"] },
+        output: '{"domains": ["testing"]}',
+        parsed: { domains: ["testing"] },
         latencyMs: 100,
         level: "fast" as const,
         provider: "claude" as const,
@@ -70,7 +70,7 @@ describe("classifyIsolatedNodes", () => {
     const { classifyIsolatedNodes } = await import("../../src/graph/classify-isolated");
 
     const nodes: Record<string, GraphNode> = {
-      classified: makeNode("classified", ["verification"]),
+      classified: makeNode("classified", ["testing"]),
       connected: makeNode("connected", []),
       isolated: makeNode("isolated", []),
     };
@@ -82,7 +82,7 @@ describe("classifyIsolatedNodes", () => {
 
     expect(results.length).toBe(1);
     expect(results[0].nodeId).toBe("isolated");
-    expect(results[0].domains).toEqual(["verification"]);
+    expect(results[0].domains).toEqual(["testing"]);
     expect(results[0].source).toBe("ai");
     expect(mockInference).toHaveBeenCalledTimes(1);
   });
@@ -106,7 +106,7 @@ describe("classifyIsolatedNodes", () => {
     const { classifyIsolatedNodes } = await import("../../src/graph/classify-isolated");
 
     const nodes: Record<string, GraphNode> = {
-      a: makeNode("a", ["verification"]),
+      a: makeNode("a", ["testing"]),
       has_edges: makeNode("has_edges", []),
     };
     const graph = makeGraph(nodes, [
@@ -137,7 +137,7 @@ describe("classifyIsolatedNodes", () => {
     const { classifyIsolatedNodes } = await import("../../src/graph/classify-isolated");
 
     const nodes: Record<string, GraphNode> = {
-      a: makeNode("a", ["verification"]),
+      a: makeNode("a", ["testing"]),
       b: makeNode("b", ["scope"]),
     };
     const graph = makeGraph(nodes, [
@@ -180,8 +180,8 @@ describe("classifyIsolatedNodes", () => {
     mockInference.mockImplementation(() =>
       Promise.resolve({
         success: true,
-        output: '{"domains": ["verification", "not-a-real-domain"]}',
-        parsed: { domains: ["verification", "not-a-real-domain"] },
+        output: '{"domains": ["testing", "not-a-real-domain"]}',
+        parsed: { domains: ["testing", "not-a-real-domain"] },
         latencyMs: 100,
         level: "fast" as const,
         provider: "claude" as const,
@@ -196,7 +196,7 @@ describe("classifyIsolatedNodes", () => {
     const results = await classifyIsolatedNodes(graph, { dryRun: true });
 
     expect(results.length).toBe(1);
-    expect(results[0].domains).toEqual(["verification"]);
+    expect(results[0].domains).toEqual(["testing"]);
   });
 
   test("sets domainSource to 'ai' on classified nodes when not dryRun", async () => {
@@ -209,7 +209,7 @@ describe("classifyIsolatedNodes", () => {
 
     await classifyIsolatedNodes(graph, { dryRun: false });
 
-    expect(nodes.isolated.domains).toEqual(["verification"]);
+    expect(nodes.isolated.domains).toEqual(["testing"]);
     expect(nodes.isolated.domainSource).toBe("ai");
   });
 });

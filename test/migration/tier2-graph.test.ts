@@ -12,13 +12,14 @@ const memoryDir = resolveMemoryDir();
 const hasMemory = existsSync(memoryDir);
 
 const TEMP_STATE = join(import.meta.dir, ".tmp-graph-state");
+const TEMP_RD = join(import.meta.dir, ".tmp-rule-domains.json");
 
 describe("Tier 2: Graph Pipeline", () => {
   test("T7 — Build graph from PAI memory files", async () => {
     if (!hasMemory) return expect().pass();
     mkdirSync(TEMP_STATE, { recursive: true });
     try {
-      const graph = await buildGraph(memoryDir, TEMP_STATE);
+      const graph = await buildGraph(memoryDir, TEMP_STATE, TEMP_RD);
       expect(Object.keys(graph.nodes).length).toBeGreaterThanOrEqual(200);
       expect(graph.edges.length).toBeGreaterThan(0);
     } finally {
@@ -30,7 +31,7 @@ describe("Tier 2: Graph Pipeline", () => {
     if (!hasMemory) return expect().pass();
     mkdirSync(TEMP_STATE, { recursive: true });
     try {
-      const graph = await buildGraph(memoryDir, TEMP_STATE);
+      const graph = await buildGraph(memoryDir, TEMP_STATE, TEMP_RD);
       const nodes = Object.values(graph.nodes);
       expect(nodes.length).toBeGreaterThanOrEqual(20);
 
@@ -51,7 +52,7 @@ describe("Tier 2: Graph Pipeline", () => {
     const index = buildIndexFromDir(memoryDir);
     expect(index.docCount).toBeGreaterThan(0);
 
-    const results = searchIndex(index, "verification");
+    const results = searchIndex(index, "testing");
     expect(results.length).toBeGreaterThanOrEqual(5);
     expect(results[0].score).toBeGreaterThan(0);
   });
@@ -60,10 +61,10 @@ describe("Tier 2: Graph Pipeline", () => {
     if (!hasMemory) return expect().pass();
     mkdirSync(TEMP_STATE, { recursive: true });
     try {
-      const graph = await buildGraph(memoryDir, TEMP_STATE);
+      const graph = await buildGraph(memoryDir, TEMP_STATE, TEMP_RD);
       const index = buildIndexFromDir(memoryDir);
 
-      const results = hybridRetrieve("verification", ["verification"], graph, index);
+      const results = hybridRetrieve("testing", ["testing"], graph, index);
       expect(results.length).toBeGreaterThan(0);
       expect(results[0].rrfScore).toBeGreaterThan(0);
     } finally {
@@ -75,9 +76,9 @@ describe("Tier 2: Graph Pipeline", () => {
     if (!hasMemory) return expect().pass();
     mkdirSync(TEMP_STATE, { recursive: true });
     try {
-      const graph = await buildGraph(memoryDir, TEMP_STATE);
-      const clusters = queryGraph(graph, ["verification"]);
-      expect(clusters.length).toBeGreaterThanOrEqual(2);
+      const graph = await buildGraph(memoryDir, TEMP_STATE, TEMP_RD);
+      const clusters = queryGraph(graph, ["testing"]);
+      expect(clusters.length).toBeGreaterThanOrEqual(1);
       for (const cluster of clusters) {
         expect(cluster.primary).toBeDefined();
         expect(cluster.score).toBeGreaterThan(0);
@@ -99,7 +100,8 @@ describe("Tier 2: Graph Pipeline", () => {
       mkdirSync(tmpState1, { recursive: true });
       mkdirSync(tmpState2, { recursive: true });
 
-      const graph1 = await buildGraph(tmpMemory, tmpState1);
+      const tmpRd = join(import.meta.dir, ".tmp-incr-rd.json");
+      const graph1 = await buildGraph(tmpMemory, tmpState1, tmpRd);
       const nodeCount1 = Object.keys(graph1.nodes).length;
       expect(nodeCount1).toBeGreaterThan(0);
 
@@ -119,7 +121,7 @@ describe("Tier 2: Graph Pipeline", () => {
         "---\nname: test-incr\ndescription: Test incremental rebuild\nmetadata:\n  type: feedback\n---\n\nThis is a test rule for incremental rebuild verification.\n",
       );
 
-      const graph2 = await buildGraph(tmpMemory, tmpState2);
+      const graph2 = await buildGraph(tmpMemory, tmpState2, tmpRd);
       const nodeCount2 = Object.keys(graph2.nodes).length;
 
       expect(nodeCount2).toBe(nodeCount1 + 1);

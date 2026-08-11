@@ -37,7 +37,7 @@ export function updateRuleDomains(
   rule: Rule,
   ruleDomainsPath: string,
 ): string[] {
-  const domains = keywordClassify(rule.id, rule.text, rule.text) ?? ["verification"];
+  const domains = keywordClassify(rule.id, rule.text, rule.text) ?? ["testing"];
 
   let file: RuleDomainsFile;
   if (existsSync(ruleDomainsPath)) {

@@ -53,7 +53,7 @@ function seedSessionContext(): void {
         { id: "rule-b", text: "Test rule B" },
         { id: "rule-c", text: "Test rule C" },
       ],
-      domains: ["verification", "delivery", "scoring"],
+      domains: ["testing", "delivery", "algorithm"],
       domain_source: "bm25",
       timestamp: new Date().toISOString(),
       ttl: 86400000,
@@ -129,7 +129,7 @@ describe("health command", () => {
     expect(result.stdout).toContain("Rules injected: 15");
     expect(result.stdout).toContain("3.2 KB");
     expect(result.stdout).toContain("Context lines: 847");
-    expect(result.stdout).toContain("verification");
+    expect(result.stdout).toContain("testing");
     expect(result.stdout).toContain("bm25");
   });
 

@@ -83,7 +83,7 @@ describe("system invariants", () => {
     // Create 30 learned rules as string array (the format filterLearnedRules expects)
     const rules: string[] = [];
     for (let i = 0; i < 30; i++) {
-      rules.push(`- **rule-${i}:** Rule about ${["deployment", "testing", "verification", "security", "monitoring"][i % 5]} workflow number ${i}`);
+      rules.push(`- **rule-${i}:** Rule about ${["deployment", "testing", "testing", "security", "monitoring"][i % 5]} workflow number ${i}`);
     }
 
     // filterLearnedRules with default topK=10 should return at most 10
@@ -107,7 +107,7 @@ describe("system invariants", () => {
     const totalContextLines = 42;
 
     // Write session context — uses AGENTGRIT_DIR for path resolution
-    writeSessionContext(rules, ["deployment", "verification"], "keyword", totalContextLines);
+    writeSessionContext(rules, ["deployment", "testing"], "keyword", totalContextLines);
 
     // Read session-context-history.jsonl and verify last entry
     const historyPath = join(STATE_DIR, "session-context-history.jsonl");

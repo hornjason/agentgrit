@@ -99,12 +99,12 @@ describe("keywordClassify", () => {
 
   test("classifies scoring rules", () => {
     const result = keywordClassify("score-v2", "scorer", "v2 scoring signals ratings scorer effectiveness");
-    expect(result).toEqual(["scoring"]);
+    expect(result).toEqual(["algorithm"]);
   });
 
   test("classifies pipeline rules", () => {
     const result = keywordClassify("pipe-daemon", "lifecycle", "promote rule evict daemon cycle pipeline");
-    expect(result).toEqual(["pipeline"]);
+    expect(result).toEqual(["data"]);
   });
 
   test("classifies scope rules", () => {
@@ -286,7 +286,7 @@ describe("updateGraph", () => {
       nodeCount: 1,
       edgeCount: 0,
       nodes: {
-        existing: makeNode("existing", ["verification"], { content_hash: "old-hash", occurrence_count: 5 }),
+        existing: makeNode("existing", ["testing"], { content_hash: "old-hash", occurrence_count: 5 }),
       },
       edges: [],
     };
@@ -322,12 +322,12 @@ description: Check before claiming
 Always read source first and verify before answering any question.`);
 
     const rdPath = writeRuleDomains({
-      feedback_verify: { domains: ["verification", "data"], source: "reviewed" },
+      feedback_verify: { domains: ["testing", "data"], source: "reviewed" },
     });
 
     const graph = await buildGraph(RULES_DIR, STATE_DIR, rdPath);
 
-    expect(graph.nodes["feedback_verify"].domains).toEqual(["verification", "data"]);
+    expect(graph.nodes["feedback_verify"].domains).toEqual(["testing", "data"]);
   });
 
   test("leaves unmatched nodes with keyword-classified domains", async () => {
@@ -381,12 +381,12 @@ description: Check things
 Always verify before answering.`);
 
     const rdPath = writeRuleDomains({
-      feedback_verify: { domains: ["verification", "nonexistent_domain"], source: "reviewed" },
+      feedback_verify: { domains: ["testing", "nonexistent_domain"], source: "reviewed" },
     });
 
     const graph = await buildGraph(RULES_DIR, STATE_DIR, rdPath);
 
-    expect(graph.nodes["feedback_verify"].domains).toEqual(["verification"]);
+    expect(graph.nodes["feedback_verify"].domains).toEqual(["testing"]);
   });
 
   test("loadRuleDomains returns null for missing file", () => {
@@ -434,13 +434,13 @@ description: Verify before answering
 Always verify before answering.`);
 
     const rdPath = writeRuleDomains({
-      "feedback_verify_before_answering": { domains: ["verification", "data"], source: "reviewed" },
+      "feedback_verify_before_answering": { domains: ["testing", "data"], source: "reviewed" },
       "verify-before-answering": { domains: ["scope"], source: "reviewed" },
     });
 
     const graph = await buildGraph(RULES_DIR, STATE_DIR, rdPath);
 
-    expect(graph.nodes["feedback_verify_before_answering"].domains).toEqual(["verification", "data"]);
+    expect(graph.nodes["feedback_verify_before_answering"].domains).toEqual(["testing", "data"]);
   });
 
   test("same-domain edges reflect overridden domains", async () => {
@@ -483,8 +483,8 @@ describe("buildCoOccurrenceEdges", () => {
     ].join("\n"), "utf-8");
 
     const nodes: Record<string, GraphNode> = {
-      rule_a: makeNode("rule_a", ["verification"]),
-      rule_b: makeNode("rule_b", ["verification"]),
+      rule_a: makeNode("rule_a", ["testing"]),
+      rule_b: makeNode("rule_b", ["testing"]),
       rule_c: makeNode("rule_c", ["scope"]),
     };
 
@@ -505,8 +505,8 @@ describe("buildCoOccurrenceEdges", () => {
     writeFileSync(historyPath, JSON.stringify({ ruleIds: ["rule_a", "rule_b"] }), "utf-8");
 
     const nodes: Record<string, GraphNode> = {
-      rule_a: makeNode("rule_a", ["verification"]),
-      rule_b: makeNode("rule_b", ["verification"]),
+      rule_a: makeNode("rule_a", ["testing"]),
+      rule_b: makeNode("rule_b", ["testing"]),
     };
 
     const existing = new Set(["rule_a::rule_b"]);
@@ -520,8 +520,8 @@ describe("buildCoOccurrenceEdges", () => {
     writeFileSync(historyPath, JSON.stringify({ ruleIds: ["rule_a", "rule_b", "missing_rule"] }), "utf-8");
 
     const nodes: Record<string, GraphNode> = {
-      rule_a: makeNode("rule_a", ["verification"]),
-      rule_b: makeNode("rule_b", ["verification"]),
+      rule_a: makeNode("rule_a", ["testing"]),
+      rule_b: makeNode("rule_b", ["testing"]),
     };
 
     const edges = buildCoOccurrenceEdges(nodes, new Set(), historyPath);
@@ -533,7 +533,7 @@ describe("buildCoOccurrenceEdges", () => {
 
   test("returns empty for missing history file", () => {
     const nodes: Record<string, GraphNode> = {
-      rule_a: makeNode("rule_a", ["verification"]),
+      rule_a: makeNode("rule_a", ["testing"]),
     };
     const edges = buildCoOccurrenceEdges(nodes, new Set(), join(TMP_DIR, "nonexistent.jsonl"));
     expect(edges.length).toBe(0);
@@ -548,8 +548,8 @@ describe("buildCoOccurrenceEdges", () => {
     writeFileSync(ratingsPath, JSON.stringify({ session_id: "s1", rating: 9 }), "utf-8");
 
     const nodes: Record<string, GraphNode> = {
-      rule_a: makeNode("rule_a", ["verification"]),
-      rule_b: makeNode("rule_b", ["verification"]),
+      rule_a: makeNode("rule_a", ["testing"]),
+      rule_b: makeNode("rule_b", ["testing"]),
     };
 
     const edges = buildCoOccurrenceEdges(nodes, new Set(), historyPath, ratingsPath);
@@ -564,8 +564,8 @@ describe("buildCoOccurrenceEdges", () => {
     writeFileSync(ratingsPath, JSON.stringify({ session_id: "s1", rating: 3 }), "utf-8");
 
     const nodes: Record<string, GraphNode> = {
-      rule_a: makeNode("rule_a", ["verification"]),
-      rule_b: makeNode("rule_b", ["verification"]),
+      rule_a: makeNode("rule_a", ["testing"]),
+      rule_b: makeNode("rule_b", ["testing"]),
     };
 
     const edges = buildCoOccurrenceEdges(nodes, new Set(), historyPath, ratingsPath);
@@ -580,8 +580,8 @@ describe("buildCoOccurrenceEdges", () => {
     writeFileSync(ratingsPath, "", "utf-8");
 
     const nodes: Record<string, GraphNode> = {
-      rule_a: makeNode("rule_a", ["verification"]),
-      rule_b: makeNode("rule_b", ["verification"]),
+      rule_a: makeNode("rule_a", ["testing"]),
+      rule_b: makeNode("rule_b", ["testing"]),
     };
 
     const edges = buildCoOccurrenceEdges(nodes, new Set(), historyPath, ratingsPath);
@@ -596,8 +596,8 @@ describe("buildCoOccurrenceEdges", () => {
     writeFileSync(ratingsPath, JSON.stringify({ session_id: "s1", rating: 9 }), "utf-8");
 
     const nodes: Record<string, GraphNode> = {
-      rule_a: makeNode("rule_a", ["verification"]),
-      rule_b: makeNode("rule_b", ["verification"]),
+      rule_a: makeNode("rule_a", ["testing"]),
+      rule_b: makeNode("rule_b", ["testing"]),
     };
 
     const edges = buildCoOccurrenceEdges(nodes, new Set(), historyPath, ratingsPath);
@@ -611,8 +611,8 @@ describe("buildCoOccurrenceEdges", () => {
     writeFileSync(ratingsPath, JSON.stringify({ session_id: "s1", rating: NaN }), "utf-8");
 
     const nodes: Record<string, GraphNode> = {
-      rule_a: makeNode("rule_a", ["verification"]),
-      rule_b: makeNode("rule_b", ["verification"]),
+      rule_a: makeNode("rule_a", ["testing"]),
+      rule_b: makeNode("rule_b", ["testing"]),
     };
 
     const edges = buildCoOccurrenceEdges(nodes, new Set(), historyPath, ratingsPath);
@@ -627,8 +627,8 @@ describe("buildCoOccurrenceEdges", () => {
     writeFileSync(ratingsPath, JSON.stringify({ session_id: "s1", rating: -1 }), "utf-8");
 
     const nodes: Record<string, GraphNode> = {
-      rule_a: makeNode("rule_a", ["verification"]),
-      rule_b: makeNode("rule_b", ["verification"]),
+      rule_a: makeNode("rule_a", ["testing"]),
+      rule_b: makeNode("rule_b", ["testing"]),
     };
 
     const edges = buildCoOccurrenceEdges(nodes, new Set(), historyPath, ratingsPath);
@@ -643,8 +643,8 @@ describe("buildCoOccurrenceEdges", () => {
     writeFileSync(ratingsPath, JSON.stringify({ session_id: "s1", rating: 999 }), "utf-8");
 
     const nodes: Record<string, GraphNode> = {
-      rule_a: makeNode("rule_a", ["verification"]),
-      rule_b: makeNode("rule_b", ["verification"]),
+      rule_a: makeNode("rule_a", ["testing"]),
+      rule_b: makeNode("rule_b", ["testing"]),
     };
 
     const edges = buildCoOccurrenceEdges(nodes, new Set(), historyPath, ratingsPath);
@@ -659,8 +659,8 @@ describe("buildCoOccurrenceEdges", () => {
     writeFileSync(ratingsPath, JSON.stringify({ session_id: "s1", rating: Infinity }), "utf-8");
 
     const nodes: Record<string, GraphNode> = {
-      rule_a: makeNode("rule_a", ["verification"]),
-      rule_b: makeNode("rule_b", ["verification"]),
+      rule_a: makeNode("rule_a", ["testing"]),
+      rule_b: makeNode("rule_b", ["testing"]),
     };
 
     const edges = buildCoOccurrenceEdges(nodes, new Set(), historyPath, ratingsPath);
@@ -674,7 +674,7 @@ describe("buildCoOccurrenceEdges", () => {
     for (let i = 0; i < 30; i++) {
       const id = `rule_${i}`;
       ruleIds.push(id);
-      nodes[id] = makeNode(id, ["verification"]);
+      nodes[id] = makeNode(id, ["testing"]);
     }
     // 30 rules in one session = 435 pairs, should cap at 200
     writeFileSync(historyPath, JSON.stringify({ ruleIds }), "utf-8");

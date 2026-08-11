@@ -87,7 +87,7 @@ describe("end-to-end handoff chain", () => {
     // 5. Verify context injection works — a deployment query should find the deploy rule
     const index = buildIndexFromDir(RULES_DIR);
     initHybridDetection(graph);
-    const rules = await getContextRules(graph, index, ["deployment", "verification"], 10, undefined, "deploy verification production");
+    const rules = await getContextRules(graph, index, ["deployment", "testing"], 10, undefined, "deploy verification production");
 
     const ruleIds = rules.map(r => r.id);
     expect(ruleIds).toContain("feedback_verify_before_deploy");
@@ -99,7 +99,7 @@ describe("end-to-end handoff chain", () => {
       version: 1,
       reviewed: false,
       rules: {
-        "deleted_rule_one": { domains: ["verification"], source: "auto" },
+        "deleted_rule_one": { domains: ["testing"], source: "auto" },
         "deleted_rule_two": { domains: ["deployment"], source: "auto" },
         "stale_orphan": { domains: ["scope"], source: "auto" },
       },
@@ -139,7 +139,7 @@ describe("end-to-end handoff chain", () => {
       reviewed: false,
       rules: {
         "feedback_reviewed_rule": {
-          domains: ["verification", "deployment"],
+          domains: ["testing", "deployment"],
           source: "reviewed",
         },
         "stale_entry": { domains: ["scope"], source: "auto" },

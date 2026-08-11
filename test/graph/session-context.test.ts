@@ -58,16 +58,16 @@ describe("writeSessionContext", () => {
   test("writes session-context.json with ruleIds, domains, timestamp", async () => {
     const graph = makeGraph([
       makeNode("rule-a", ["deployment"]),
-      makeNode("rule-b", ["verification"]),
+      makeNode("rule-b", ["testing"]),
     ]);
     const f1 = join(TMP_DIR, "rule-a.md");
     const f2 = join(TMP_DIR, "rule-b.md");
     writeFileSync(f1, "deployment containers rebuild deployment", "utf-8");
     writeFileSync(f2, "verification verify before verification", "utf-8");
     const index = buildIndex([f1, f2]);
-    const rules = await getContextRules(graph, index, ["deployment", "verification"]);
+    const rules = await getContextRules(graph, index, ["deployment", "testing"]);
 
-    writeSessionContext(rules, ["deployment", "verification"]);
+    writeSessionContext(rules, ["deployment", "testing"]);
 
     const filePath = join(TMP_DIR, "state", "session-context.json");
     expect(existsSync(filePath)).toBe(true);
@@ -75,7 +75,7 @@ describe("writeSessionContext", () => {
     const data = JSON.parse(readFileSync(filePath, "utf-8")) as SessionContext;
     expect(data.ruleIds).toContain("rule-a");
     expect(data.ruleIds).toContain("rule-b");
-    expect(data.domains).toEqual(["deployment", "verification"]);
+    expect(data.domains).toEqual(["deployment", "testing"]);
     expect(new Date(data.timestamp).getTime()).toBeGreaterThan(0);
     expect(data.ttl).toBe(24 * 60 * 60 * 1000);
     expect(data.totalContextLines).toBe(0);
@@ -225,7 +225,7 @@ describe("readSessionContext", () => {
     mkdirSync(stateDir, { recursive: true });
     writeFileSync(join(stateDir, "session-context.json"), JSON.stringify({
       ruleIds: ["rule-fresh"],
-      domains: ["verification"],
+      domains: ["testing"],
       timestamp: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
       ttl: 24 * 60 * 60 * 1000,
     }));
@@ -317,7 +317,7 @@ describe("computeRelevanceScore", () => {
 
   test("score is Jaccard similarity (0 to 1)", () => {
     const ctx = makeCtx({
-      domains: ["verification"],
+      domains: ["testing"],
       toolCallPatterns: ["Read", "Edit"],
       filePathsTouched: ["src/verify.ts"],
     });

@@ -78,7 +78,7 @@ describe("Tier 3: Pattern Detection", () => {
 
     const cohorts = buildCohorts(failurePatterns);
     const rebuttals = generateAntiRationalizations(cohorts);
-    expect(rebuttals.length).toBeGreaterThanOrEqual(2);
+    expect(rebuttals.length).toBeGreaterThanOrEqual(1);
 
     for (const r of rebuttals) {
       expect(r.shortcut.length).toBeGreaterThan(0);

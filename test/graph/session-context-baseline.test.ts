@@ -48,7 +48,7 @@ describe("writeSessionContext — rulesInjectedCount and rulesInjectedKB", () =>
 
   test("includes rulesInjectedKB as JSON size / 1024 with 1 decimal", () => {
     const rules = [makeRule("r1"), makeRule("r2")];
-    writeSessionContext(rules, ["verification"]);
+    writeSessionContext(rules, ["testing"]);
 
     const filePath = join(TMP_DIR, "state", "session-context.json");
     const data = JSON.parse(readFileSync(filePath, "utf-8")) as SessionContext;
@@ -67,7 +67,7 @@ describe("writeSessionContext — rulesInjectedCount and rulesInjectedKB", () =>
 
   test("appends to session-context-history.jsonl", () => {
     writeSessionContext([makeRule("r1")], ["deployment"]);
-    writeSessionContext([makeRule("r2"), makeRule("r3")], ["verification"]);
+    writeSessionContext([makeRule("r2"), makeRule("r3")], ["testing"]);
 
     const historyPath = join(TMP_DIR, "state", "session-context-history.jsonl");
     expect(existsSync(historyPath)).toBe(true);
@@ -125,7 +125,7 @@ describe("readSessionHistory", () => {
 
   test("returns all entries when fewer than limit", () => {
     writeSessionContext([makeRule("r1")], ["deployment"]);
-    writeSessionContext([makeRule("r2")], ["verification"]);
+    writeSessionContext([makeRule("r2")], ["testing"]);
     const all = readSessionHistory(10);
     expect(all.length).toBe(2);
   });

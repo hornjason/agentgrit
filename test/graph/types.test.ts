@@ -35,7 +35,7 @@ describe("graph types", () => {
         type: "rule",
         name: "test",
         description: "Test node",
-        domains: ["verification"],
+        domains: ["testing"],
         severity: 3,
         occurrence_count: 0,
         last_updated: "",
@@ -44,7 +44,7 @@ describe("graph types", () => {
       },
       connected: [],
       score: 0.5,
-      domains: ["verification"],
+      domains: ["testing"],
     };
     expect(cluster.score).toBe(0.5);
   });
@@ -98,7 +98,7 @@ describe("graph types", () => {
       type: "rule",
       name: "test",
       description: "Test node",
-      domains: ["verification"],
+      domains: ["testing"],
       severity: 3,
       occurrence_count: 0,
       last_updated: "",

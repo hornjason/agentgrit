@@ -23,7 +23,7 @@ import { loadRuleStats } from "../promote/rules";
 // ── Default Domains ──
 
 const _cfg = loadConfig();
-const DEFAULT_DOMAINS = _cfg.thresholds?.defaultDomains ?? ["verification", "delivery", "deployment"];
+const DEFAULT_DOMAINS = _cfg.thresholds?.defaultDomains ?? ["testing", "delivery", "process"];
 
 // ── Domain Detection from Text ──
 
@@ -834,12 +834,12 @@ export async function getWorkContextDomains(signalDir: string): Promise<string[]
 
 const PATH_DOMAIN_MAP: Array<{ pattern: RegExp; domain: string }> = [
   { pattern: /src\/graph\//, domain: "graph" },
-  { pattern: /src\/capture\//, domain: "scoring" },
-  { pattern: /src\/daemon\//, domain: "pipeline" },
+  { pattern: /src\/capture\//, domain: "algorithm" },
+  { pattern: /src\/daemon\//, domain: "data" },
   { pattern: /src\/detect\//, domain: "algorithm" },
   { pattern: /src\/adapters\//, domain: "architecture" },
   { pattern: /bin\/commands\//, domain: "delegation" },
-  { pattern: /test\//, domain: "verification" },
+  { pattern: /test\//, domain: "testing" },
   { pattern: /hooks\//, domain: "deployment" },
   { pattern: /\.tsx?$/, domain: "code" },
   { pattern: /\.md$/, domain: "documentation" },

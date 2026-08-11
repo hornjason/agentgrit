@@ -61,13 +61,13 @@ describe("hybrid BM25+vector retrieval", () => {
 
     const index = buildIndex([f1, f2, f3]);
     const graph = makeGraph([
-      makeNode("verify_before_answering", ["verification"], "Verify before asserting anything"),
+      makeNode("verify_before_answering", ["testing"], "Verify before asserting anything"),
       makeNode("incomplete_delivery", ["delivery"], "Complete delivery audit self-check"),
       makeNode("deploy_gate", ["deployment"], "Deploy with make rebuild"),
     ]);
 
     // Results without vector cache
-    const withoutCache = await getContextRules(graph, index, ["verification"], 10, undefined, "verify before answering");
+    const withoutCache = await getContextRules(graph, index, ["testing"], 10, undefined, "verify before answering");
 
     // Create vector cache (should be ignored)
     const cachePath = join(TMP_DIR, "vector-cache.json");
@@ -78,7 +78,7 @@ describe("hybrid BM25+vector retrieval", () => {
     saveVectorCache(vectors, "test", 4, cachePath);
 
     // Results with vector cache — should be identical since vector path is removed
-    const withCache = await getContextRules(graph, index, ["verification"], 10, undefined, "verify before answering", cachePath);
+    const withCache = await getContextRules(graph, index, ["testing"], 10, undefined, "verify before answering", cachePath);
 
     expect(withCache.map(r => r.id)).toEqual(withoutCache.map(r => r.id));
     expect(withCache.map(r => r.correlationScore)).toEqual(withoutCache.map(r => r.correlationScore));
@@ -92,12 +92,12 @@ describe("hybrid BM25+vector retrieval", () => {
 
     const index = buildIndex([f1, f2]);
     const graph = makeGraph([
-      makeNode("rule_a", ["verification"], "Verify before asserting"),
+      makeNode("rule_a", ["testing"], "Verify before asserting"),
       makeNode("rule_b", ["deployment"], "Deploy production containers"),
     ]);
 
-    const withoutCache = await getContextRules(graph, index, ["verification"], 10, undefined, "verify before asserting");
-    const withMissingCache = await getContextRules(graph, index, ["verification"], 10, undefined, "verify before asserting", join(TMP_DIR, "nonexistent.json"));
+    const withoutCache = await getContextRules(graph, index, ["testing"], 10, undefined, "verify before asserting");
+    const withMissingCache = await getContextRules(graph, index, ["testing"], 10, undefined, "verify before asserting", join(TMP_DIR, "nonexistent.json"));
 
     expect(withMissingCache.map(r => r.id)).toEqual(withoutCache.map(r => r.id));
     expect(withMissingCache.map(r => r.text)).toEqual(withoutCache.map(r => r.text));
@@ -108,14 +108,14 @@ describe("hybrid BM25+vector retrieval", () => {
     writeFileSync(f1, "verify check source before answering", "utf-8");
     const index = buildIndex([f1]);
     const graph = makeGraph([
-      makeNode("rule_x", ["verification"], "Verify check source"),
+      makeNode("rule_x", ["testing"], "Verify check source"),
     ]);
 
     // Save cache with no vectors for our rules
     const cachePath = join(TMP_DIR, "empty-vectors.json");
     saveVectorCache(new Map(), "test", 4, cachePath);
 
-    const result = await getContextRules(graph, index, ["verification"], 10, undefined, "verify source", cachePath);
+    const result = await getContextRules(graph, index, ["testing"], 10, undefined, "verify source", cachePath);
     expect(result.length).toBe(1);
     expect(result[0].id).toBe("rule_x");
   });

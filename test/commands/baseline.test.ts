@@ -38,7 +38,7 @@ describe("baseline capture", () => {
     mkdirSync(sigDir, { recursive: true });
 
     writeSessionContext([makeRule("r1"), makeRule("r2")], ["deployment"]);
-    writeSessionContext([makeRule("r3")], ["verification"]);
+    writeSessionContext([makeRule("r3")], ["testing"]);
 
     writeFileSync(join(sigDir, "ratings.jsonl"), "");
     writeFileSync(join(sigDir, "corrections.jsonl"), "");

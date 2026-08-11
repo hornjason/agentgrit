@@ -94,7 +94,7 @@ describe("updateRuleDomains", () => {
       version: 1,
       reviewed: false,
       rules: {
-        "existing-rule": { domains: ["verification"], source: "manual" },
+        "existing-rule": { domains: ["testing"], source: "manual" },
       },
     };
     writeFileSync(RULE_DOMAINS_PATH, JSON.stringify(existing));
@@ -128,9 +128,9 @@ describe("updateRuleDomains", () => {
     const rule = makeRule("agentgrit-xyzzy-nonsense", "xyzzy nonsense gibberish");
     const domains = updateRuleDomains(rule, RULE_DOMAINS_PATH);
 
-    expect(domains).toEqual(["verification"]);
+    expect(domains).toEqual(["testing"]);
     const file = JSON.parse(readFileSync(RULE_DOMAINS_PATH, "utf-8"));
-    expect(file.rules["agentgrit-xyzzy-nonsense"].domains).toEqual(["verification"]);
+    expect(file.rules["agentgrit-xyzzy-nonsense"].domains).toEqual(["testing"]);
   });
 });
 

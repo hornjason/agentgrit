@@ -33,10 +33,10 @@ function makeGraph(nodes: Record<string, { domains: string[]; domainSource?: str
 describe("reviewDomains", () => {
   test("promotes rules when auto domains fully match inferred", () => {
     const ruleDomains = {
-      "rule-a": { domains: ["verification"], source: "auto" },
+      "rule-a": { domains: ["testing"], source: "auto" },
     };
     const graph = makeGraph({
-      "rule-a": { domains: ["verification"], domainSource: "keyword" },
+      "rule-a": { domains: ["testing"], domainSource: "keyword" },
     });
 
     const results = reviewDomains(ruleDomains, graph);
@@ -47,10 +47,10 @@ describe("reviewDomains", () => {
 
   test("promotes when at least half the auto domains match", () => {
     const ruleDomains = {
-      "rule-b": { domains: ["verification", "deployment"], source: "auto" },
+      "rule-b": { domains: ["testing", "deployment"], source: "auto" },
     };
     const graph = makeGraph({
-      "rule-b": { domains: ["verification"], domainSource: "bm25" },
+      "rule-b": { domains: ["testing"], domainSource: "bm25" },
     });
 
     const results = reviewDomains(ruleDomains, graph);
@@ -60,7 +60,7 @@ describe("reviewDomains", () => {
 
   test("marks disagreement when less than half of valid auto domains match", () => {
     const ruleDomains = {
-      "rule-c": { domains: ["verification", "deployment", "scope"], source: "auto" },
+      "rule-c": { domains: ["testing", "deployment", "scope"], source: "auto" },
     };
     const graph = makeGraph({
       "rule-c": { domains: ["memory"], domainSource: "bm25" },
@@ -99,7 +99,7 @@ describe("reviewDomains", () => {
 
   test("marks no-inference when node not found and no learned text", () => {
     const ruleDomains = {
-      "rule-missing": { domains: ["verification"], source: "auto" },
+      "rule-missing": { domains: ["testing"], source: "auto" },
     };
     const graph = makeGraph({});
 
@@ -110,7 +110,7 @@ describe("reviewDomains", () => {
 
   test("marks no-inference when node has empty domains and no learned text", () => {
     const ruleDomains = {
-      "rule-empty": { domains: ["verification"], source: "auto" },
+      "rule-empty": { domains: ["testing"], source: "auto" },
     };
     const graph = makeGraph({
       "rule-empty": { domains: [], domainSource: undefined },
@@ -122,11 +122,11 @@ describe("reviewDomains", () => {
 
   test("skips already-reviewed rules", () => {
     const ruleDomains = {
-      "rule-reviewed": { domains: ["verification"], source: "reviewed" },
+      "rule-reviewed": { domains: ["testing"], source: "reviewed" },
       "rule-auto": { domains: ["scope"], source: "auto" },
     };
     const graph = makeGraph({
-      "rule-reviewed": { domains: ["verification"] },
+      "rule-reviewed": { domains: ["testing"] },
       "rule-auto": { domains: ["scope"] },
     });
 
@@ -137,10 +137,10 @@ describe("reviewDomains", () => {
 
   test("matches nodes via normalized IDs (prefix stripping + dash to underscore)", () => {
     const ruleDomains = {
-      "feedback_verify_before_answering": { domains: ["verification"], source: "auto-fallback" },
+      "feedback_verify_before_answering": { domains: ["testing"], source: "auto-fallback" },
     };
     const graph = makeGraph({
-      "verify-before-answering": { domains: ["verification"], domainSource: "keyword" },
+      "verify-before-answering": { domains: ["testing"], domainSource: "keyword" },
     });
 
     const results = reviewDomains(ruleDomains, graph);
@@ -165,10 +165,10 @@ describe("reviewDomains", () => {
 
   test("calculates correct agreement ratio for partial overlap", () => {
     const ruleDomains = {
-      "rule-partial": { domains: ["verification", "deployment", "scope", "memory"], source: "auto" },
+      "rule-partial": { domains: ["testing", "deployment", "scope", "memory"], source: "auto" },
     };
     const graph = makeGraph({
-      "rule-partial": { domains: ["verification", "scope"], domainSource: "bm25" },
+      "rule-partial": { domains: ["testing", "scope"], domainSource: "bm25" },
     });
 
     const results = reviewDomains(ruleDomains, graph);
@@ -197,7 +197,7 @@ describe("reviewDomains", () => {
 describe("reviewDomains with learned rules text", () => {
   test("uses keyword classification on learned rule text when no graph node", () => {
     const ruleDomains = {
-      "always-use-makefile-targets-for-containers": { domains: ["deployment"], source: "auto" },
+      "always-use-makefile-targets-for-containers": { domains: ["infra"], source: "auto" },
     };
     const graph = makeGraph({});
     const learnedText = new Map([
@@ -206,18 +206,18 @@ describe("reviewDomains with learned rules text", () => {
 
     const results = reviewDomains(ruleDomains, graph, learnedText);
     expect(results[0].status).toBe("reviewed");
-    expect(results[0].inferredDomains).toContain("deployment");
+    expect(results[0].inferredDomains).toContain("infra");
   });
 
   test("falls back to BM25 when keyword classification returns nothing", () => {
     const graph = makeGraph({
-      "node-a": { domains: ["verification"], description: "verify data before answering questions" },
-      "node-b": { domains: ["verification"], description: "always verify before asserting facts" },
-      "node-c": { domains: ["verification"], description: "check and verify all assertions" },
+      "node-a": { domains: ["testing"], description: "verify data before answering questions" },
+      "node-b": { domains: ["testing"], description: "always verify before asserting facts" },
+      "node-c": { domains: ["testing"], description: "check and verify all assertions" },
       "node-d": { domains: ["scope"], description: "minimal scope only asked changes" },
     });
     const ruleDomains = {
-      "check-assertions-carefully": { domains: ["verification"], source: "auto" },
+      "check-assertions-carefully": { domains: ["testing"], source: "auto" },
     };
     const learnedText = new Map([
       ["check-assertions-carefully", "Before asserting any fact, verify it against the actual data and source."],

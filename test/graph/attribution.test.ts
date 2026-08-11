@@ -9,7 +9,7 @@ import type { Graph } from "../../src/graph/types";
 function makeSessionContext(ruleIds: string[]): SessionContext {
   return {
     ruleIds,
-    domains: ["verification"],
+    domains: ["testing"],
     domain_source: "keyword",
     timestamp: new Date().toISOString(),
     ttl: 86400000,
@@ -25,8 +25,8 @@ function makeGraph(edgeStrength: number): Graph {
     nodeCount: 3,
     edgeCount: 2,
     nodes: {
-      r1: { id: "r1", file: "r1.md", type: "rule", name: "Rule 1", description: "test", domains: ["verification"], severity: 5, occurrence_count: 1, last_updated: new Date().toISOString(), content_hash: "a", memoryType: "rule" },
-      r2: { id: "r2", file: "r2.md", type: "rule", name: "Rule 2", description: "test", domains: ["verification"], severity: 5, occurrence_count: 1, last_updated: new Date().toISOString(), content_hash: "b", memoryType: "rule" },
+      r1: { id: "r1", file: "r1.md", type: "rule", name: "Rule 1", description: "test", domains: ["testing"], severity: 5, occurrence_count: 1, last_updated: new Date().toISOString(), content_hash: "a", memoryType: "rule" },
+      r2: { id: "r2", file: "r2.md", type: "rule", name: "Rule 2", description: "test", domains: ["testing"], severity: 5, occurrence_count: 1, last_updated: new Date().toISOString(), content_hash: "b", memoryType: "rule" },
       r3: { id: "r3", file: "r3.md", type: "rule", name: "Rule 3", description: "test", domains: ["deployment"], severity: 5, occurrence_count: 1, last_updated: new Date().toISOString(), content_hash: "c", memoryType: "rule" },
     },
     edges: [

@@ -54,9 +54,9 @@ describe("detectDomains", () => {
     expect(domains).toContain("deployment");
   });
 
-  test("detects verification domain", () => {
-    const domains = detectDomains("verify before answering");
-    expect(domains).toContain("verification");
+  test("detects testing domain", () => {
+    const domains = detectDomains("run unit test gate before deploying");
+    expect(domains).toContain("testing");
   });
 
   test("detects multiple domains", () => {
@@ -86,17 +86,17 @@ describe("detectDomains", () => {
 
   test("detects ui-testing domain", () => {
     const domains = detectDomains("run playwright visual test");
-    expect(domains).toContain("ui-testing");
+    expect(domains).toContain("ui");
   });
 
   test("detects scoring domain from issue 130 text", () => {
     const domains = detectDomains("v2 scoring signals ratings scorer effectiveness");
-    expect(domains).toContain("scoring");
+    expect(domains).toContain("algorithm");
   });
 
   test("detects pipeline domain", () => {
     const domains = detectDomains("promote rule evict daemon cycle pipeline health");
-    expect(domains).toContain("pipeline");
+    expect(domains).toContain("data");
   });
 });
 
@@ -109,21 +109,21 @@ describe("hybrid detectDomains", () => {
       makeNode("alg2", ["algorithm"], "promoted rules corrections improve algorithm effectiveness eval"),
       makeNode("alg3", ["algorithm"], "ineffective rules refine text fix domain mismatch algorithm"),
       makeNode("alg4", ["algorithm"], "eval effectiveness shows rules effective promoted corrections phase"),
-      makeNode("ver1", ["verification"], "verify check before answer source first look before"),
-      makeNode("ver2", ["verification"], "verify behavior change effective rules domain patterns"),
-      makeNode("ver3", ["verification"], "review verify effectiveness rule injection domain mismatch"),
-      makeNode("ver4", ["verification"], "check verify rules corrections decreasing effectiveness behavior"),
-      makeNode("ui1", ["ui-testing"], "quinn playwright visual test screenshot validation"),
-      makeNode("ui2", ["ui-testing"], "playwright page screenshot visual regression testing"),
-      makeNode("ui3", ["ui-testing"], "quinn validates visual appearance screenshot compare"),
-      makeNode("ui4", ["ui-testing"], "browser visual test quinn playwright launch"),
+      makeNode("ver1", ["testing"], "verify check before answer source first look before"),
+      makeNode("ver2", ["testing"], "verify behavior change effective rules domain patterns"),
+      makeNode("ver3", ["testing"], "review verify effectiveness rule injection domain mismatch"),
+      makeNode("ver4", ["testing"], "check verify rules corrections decreasing effectiveness behavior"),
+      makeNode("ui1", ["ui"], "quinn playwright visual test screenshot validation"),
+      makeNode("ui2", ["ui"], "playwright page screenshot visual regression testing"),
+      makeNode("ui3", ["ui"], "quinn validates visual appearance screenshot compare"),
+      makeNode("ui4", ["ui"], "browser visual test quinn playwright launch"),
     ]);
   }
 
   test("seed-only detectDomains misses #131 text", () => {
     const domains = detectDomains(ISSUE_131_TEXT);
     expect(domains).not.toContain("algorithm");
-    expect(domains).not.toContain("verification");
+    expect(domains).not.toContain("testing");
   });
 
   test("hybrid detectDomains finds algorithm and verification for #131 text", () => {
@@ -131,25 +131,25 @@ describe("hybrid detectDomains", () => {
     initHybridDetection(graph);
     const domains = detectDomains(ISSUE_131_TEXT);
     expect(domains).toContain("algorithm");
-    expect(domains).toContain("verification");
+    expect(domains).toContain("testing");
   });
 
   test("hybrid detectDomains does NOT return ui-testing for #131 text", () => {
     const graph = buildHybridGraph();
     initHybridDetection(graph);
     const domains = detectDomains(ISSUE_131_TEXT);
-    expect(domains).not.toContain("ui-testing");
+    expect(domains).not.toContain("ui");
   });
 
   test("existing seed-based detections still work with hybrid active", () => {
     const graph = buildHybridGraph();
     initHybridDetection(graph);
     expect(detectDomains("run make rebuild to deploy")).toContain("deployment");
-    expect(detectDomains("verify before answering")).toContain("verification");
+    expect(detectDomains("verify before answering")).toContain("testing");
     expect(detectDomains("run security scan on vulnerability")).toContain("security");
     expect(detectDomains("stay focused on minimal scope")).toContain("scope");
     expect(detectDomains("spawn agent with worktree isolation")).toContain("delegation");
-    expect(detectDomains("run playwright visual test")).toContain("ui-testing");
+    expect(detectDomains("run playwright visual test")).toContain("ui");
   });
 
   test("unclassifiable text still returns empty with hybrid", () => {
@@ -162,7 +162,7 @@ describe("hybrid detectDomains", () => {
     const graph = buildHybridGraph();
     initHybridDetection(graph);
     const domains = detectDomains("something about quinn");
-    expect(domains).toContain("ui-testing");
+    expect(domains).toContain("ui");
     const domains2 = detectDomains("just a random word");
     expect(domains2).toEqual([]);
   });
@@ -172,7 +172,7 @@ describe("getContextRules", () => {
   test("returns rules for matching domains", async () => {
     const graph = makeGraph([
       makeNode("deploy_gate", ["deployment"], "Run make rebuild before deploying"),
-      makeNode("verify_first", ["verification"], "Verify endpoints are up"),
+      makeNode("verify_first", ["testing"], "Verify endpoints are up"),
       makeNode("scope_guard", ["scope"], "Keep changes minimal"),
     ]);
 
@@ -205,7 +205,7 @@ describe("getContextRules", () => {
 
   test("falls back to default domains when empty", async () => {
     const graph = makeGraph([
-      makeNode("verify_rule", ["verification"], "Always verify"),
+      makeNode("verify_rule", ["testing"], "Always verify"),
       makeNode("deliver_rule", ["delivery"], "Complete delivery"),
       makeNode("deploy_rule", ["deployment"], "Deploy correctly"),
     ]);
@@ -271,13 +271,13 @@ describe("getContextRules", () => {
 
   test("rule text comes from node", async () => {
     const graph = makeGraph([
-      makeNode("test_rule", ["verification"], "Always verify before asserting anything"),
+      makeNode("test_rule", ["testing"], "Always verify before asserting anything"),
     ]);
     const f1 = join(TMP_DIR, "test_rule.md");
     writeFileSync(f1, "verification verify before asserting anything", "utf-8");
     const index = buildIndex([f1]);
 
-    const rules = await getContextRules(graph, index, ["verification"]);
+    const rules = await getContextRules(graph, index, ["testing"]);
     expect(rules[0].text).toBe("Always verify before asserting anything");
   });
 
@@ -367,7 +367,7 @@ describe("getContextRules", () => {
       makeNode("read_spec_at_every_decision", ["delivery"], "Re-read driving spec at every decision point"),
       makeNode("read_templates_before_acs", ["delivery"], "Read TEMPLATES.md before writing any ship artifact"),
       makeNode("incomplete_delivery", ["delivery"], "Self-audit against all requirements before claiming done"),
-      makeNode("verify_first", ["verification"], "Verify endpoints before asserting success"),
+      makeNode("verify_first", ["testing"], "Verify endpoints before asserting success"),
       makeNode("scope_guard", ["scope"], "Keep changes minimal and focused"),
       makeNode("deploy_gate", ["deployment"], "Run make rebuild before deploying"),
       makeNode("security_scan", ["security"], "Run security vulnerability scan"),
@@ -475,7 +475,7 @@ describe("getContextRules", () => {
           {
             id: "traj-1",
             task: "fix auth",
-            domains: ["verification"],
+            domains: ["testing"],
             summary: "Fixed auth flow with retry",
             rating: 9,
             timestamp: new Date().toISOString(),
@@ -484,7 +484,7 @@ describe("getContextRules", () => {
       }),
     );
 
-    const rules = await getContextRules(graph, index, ["verification"], 10, trajDir);
+    const rules = await getContextRules(graph, index, ["testing"], 10, trajDir);
     expect(rules.length).toBe(1);
     expect(rules[0].id).toBe("traj-1");
     expect(rules[0].text).toContain("[trajectory]");
@@ -499,9 +499,9 @@ describe("getContextRules diversity cap", () => {
       makeNode(`deploy_${i}`, ["deployment"], `Deployment rule ${i} for containers`),
     );
     const uiNodes = [
-      makeNode("ui_playwright", ["ui-testing"], "Quinn playwright visual test screenshot"),
-      makeNode("ui_screenshot", ["ui-testing"], "Screenshot comparison visual regression"),
-      makeNode("ui_browser", ["ui-testing"], "Browser visual test quinn playwright launch"),
+      makeNode("ui_playwright", ["ui"], "Quinn playwright visual test screenshot"),
+      makeNode("ui_screenshot", ["ui"], "Screenshot comparison visual regression"),
+      makeNode("ui_browser", ["ui"], "Browser visual test quinn playwright launch"),
     ];
     const graph = makeGraph([...deployNodes, ...uiNodes]);
 
@@ -515,7 +515,7 @@ describe("getContextRules diversity cap", () => {
     });
     const index = buildIndex(files);
 
-    const rules = await getContextRules(graph, index, ["deployment", "ui-testing"], 15);
+    const rules = await getContextRules(graph, index, ["deployment", "ui"], 15);
     const domainCounts: Record<string, number> = {};
     for (const r of rules) {
       const d = graph.nodes[r.id]?.domains[0] || "unknown";
@@ -524,7 +524,7 @@ describe("getContextRules diversity cap", () => {
     // With 2 domains, cap = ceil(15/2) = 8 per domain
     expect(domainCounts["deployment"] || 0).toBeLessThanOrEqual(8);
     // ui-testing should be represented
-    expect(domainCounts["ui-testing"] || 0).toBeGreaterThan(0);
+    expect(domainCounts["ui"] || 0).toBeGreaterThan(0);
   });
 
   test("AC-2: Quinn playwright query gets ui-testing rules in top 3", async () => {
@@ -533,9 +533,9 @@ describe("getContextRules diversity cap", () => {
       makeNode(`deploy_${i}`, ["deployment"], `Deployment containers visual test pipeline rule ${i}`),
     );
     const uiNodes = [
-      makeNode("ui_playwright_test", ["ui-testing"], "Quinn playwright visual test screenshot validation"),
-      makeNode("ui_visual_regression", ["ui-testing"], "Playwright page screenshot visual regression testing"),
-      makeNode("ui_quinn_validates", ["ui-testing"], "Quinn validates visual appearance screenshot compare"),
+      makeNode("ui_playwright_test", ["ui"], "Quinn playwright visual test screenshot validation"),
+      makeNode("ui_visual_regression", ["ui"], "Playwright page screenshot visual regression testing"),
+      makeNode("ui_quinn_validates", ["ui"], "Quinn validates visual appearance screenshot compare"),
     ];
     const graph = makeGraph([...deployNodes, ...uiNodes]);
     // Embedding edges connect ui-testing → deployment (1-hop expansion leaks deploy nodes in)
@@ -560,11 +560,11 @@ describe("getContextRules diversity cap", () => {
 
     // Single detected domain — deploy leaks via embedding edge expansion + BM25 overlap
     const rules = await getContextRules(
-      graph, index, ["ui-testing"], 15, undefined,
+      graph, index, ["ui"], 15, undefined,
       "Fix Quinn playwright visual test",
     );
     const top3 = rules.slice(0, 3);
-    const uiInTop3 = top3.filter(r => graph.nodes[r.id]?.domains[0] === "ui-testing").length;
+    const uiInTop3 = top3.filter(r => graph.nodes[r.id]?.domains[0] === "ui").length;
     expect(uiInTop3).toBeGreaterThanOrEqual(2);
   });
 

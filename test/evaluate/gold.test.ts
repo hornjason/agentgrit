@@ -8,8 +8,8 @@ function makeNode(id: string, domains: string[], severity = 5): GraphNode {
 
 describe("inferDomains", () => {
   test("detects deployment domain", () => { expect(inferDomains("rebuilt the container and deployed via docker")).toContain("deployment"); });
-  test("detects verification domain", () => { expect(inferDomains("the assertion was incorrect and wrong")).toContain("verification"); });
-  test("returns fallback when no pattern matches", () => { expect(inferDomains("hello world")).toEqual(["verification", "delivery"]); });
+  test("detects verification domain", () => { expect(inferDomains("the assertion was incorrect and wrong")).toContain("testing"); });
+  test("returns fallback when no pattern matches", () => { expect(inferDomains("hello world")).toEqual(["testing", "delivery"]); });
   test("accepts custom fallback", () => { expect(inferDomains("hello world", ["custom"])).toEqual(["custom"]); });
   test("deduplicates domains", () => { const d = inferDomains("verify check assert wrong incorrect"); expect(d.length).toBe(new Set(d).size); });
 });
@@ -38,20 +38,20 @@ describe("buildRuleList", () => {
 
 describe("autoLabel", () => {
   test("labels sessions not in gold set", async () => {
-    const nodes: Record<string, GraphNode> = { r1: makeNode("r1", ["verification"]), r2: makeNode("r2", ["deployment"]) };
+    const nodes: Record<string, GraphNode> = { r1: makeNode("r1", ["testing"]), r2: makeNode("r2", ["deployment"]) };
     const sessions = [{ sessionId: "s1", timestamp: "2026-01-01T00:00:00Z", description: "verified assertions were correct", transcript: "checking that assertions work correctly" }];
     const { gold, result } = await autoLabel(sessions, nodes, { labeled: {}, totalLabeled: 0, updated: "" }, { maxRulesPerSession: 25, classifier: async () => ["r1"] });
     expect(result.labeled).toBe(1); expect(result.skipped).toBe(0);
     expect(gold.labeled["s1"]).toBeDefined(); expect(gold.labeled["s1"].autoLabeled).toBe(true); expect(gold.totalLabeled).toBe(1);
   });
   test("skips sessions already in gold set", async () => {
-    const nodes: Record<string, GraphNode> = { r1: makeNode("r1", ["verification"]) };
+    const nodes: Record<string, GraphNode> = { r1: makeNode("r1", ["testing"]) };
     const existingGold: GoldSet = { labeled: { s1: { sessionId: "s1", description: "existing", relevantRules: ["r1"], autoLabeled: true } }, totalLabeled: 1, updated: "2026-01-01" };
     const { result } = await autoLabel([{ sessionId: "s1", timestamp: "2026-01-01T00:00:00Z", description: "test", transcript: "test" }], nodes, existingGold, { maxRulesPerSession: 25, classifier: async () => ["r1"] });
     expect(result.skipped).toBe(1); expect(result.labeled).toBe(0);
   });
   test("uses domain fallback when classifier returns empty", async () => {
-    const nodes: Record<string, GraphNode> = { r1: makeNode("r1", ["verification"]) };
+    const nodes: Record<string, GraphNode> = { r1: makeNode("r1", ["testing"]) };
     const sessions = [{ sessionId: "s1", timestamp: "2026-01-01T00:00:00Z", description: "checking verify assertion", transcript: "verification workflow" }];
     const { gold } = await autoLabel(sessions, nodes, { labeled: {}, totalLabeled: 0, updated: "" }, { maxRulesPerSession: 25, classifier: async () => [] });
     expect(gold.labeled["s1"]).toBeDefined(); expect(gold.labeled["s1"].relevantRules.length).toBeGreaterThan(0);

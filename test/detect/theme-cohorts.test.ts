@@ -34,7 +34,7 @@ describe("buildCohorts", () => {
     expect(cohorts.length).toBeGreaterThan(0);
 
     const names = cohorts.map((c) => c.name);
-    expect(names).toContain("verification");
+    expect(names).toContain("testing");
     expect(names).toContain("scope");
     expect(names).toContain("delegation");
   });
@@ -46,7 +46,7 @@ describe("buildCohorts", () => {
     ];
 
     const cohorts = buildCohorts(patterns);
-    const verificationCohort = cohorts.find((c) => c.name === "verification");
+    const verificationCohort = cohorts.find((c) => c.name === "testing");
     expect(verificationCohort).toBeDefined();
     expect(verificationCohort!.totalFrequency).toBe(8);
     expect(verificationCohort!.avgSeverity).toBe(7);
@@ -79,7 +79,7 @@ describe("buildCohorts", () => {
     ];
 
     const cohorts = buildCohorts(patterns);
-    const verificationCohort = cohorts.find((c) => c.name === "verification");
+    const verificationCohort = cohorts.find((c) => c.name === "testing");
     expect(verificationCohort).toBeDefined();
     expect(verificationCohort!.ablatable).toBe(false);
   });

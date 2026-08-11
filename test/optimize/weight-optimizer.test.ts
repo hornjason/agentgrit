@@ -24,7 +24,7 @@ function makeGraph(nodeIds: string[]): Graph {
       type: "feedback",
       name: id.replace(/_/g, " "),
       description: `Rule about ${id.replace(/_/g, " ")}`,
-      domains: ["verification"],
+      domains: ["testing"],
       severity: 5,
       occurrence_count: 1,
       last_updated: new Date().toISOString(),
@@ -64,7 +64,7 @@ afterEach(() => {
 describe("optimizeRRFWeights", () => {
   test("returns result with correct shape", async () => {
     const nodeIds = ["r1", "r2", "r3", "r4", "r5"];
-    const goldSet = makeGoldSet({ s1: { description: "verification rule", relevantRules: ["r1", "r2"], domains: ["verification"] } });
+    const goldSet = makeGoldSet({ s1: { description: "verification rule", relevantRules: ["r1", "r2"], domains: ["testing"] } });
     const goldPath = join(TMP_DIR, "gold.json");
     writeFileSync(goldPath, JSON.stringify(goldSet));
 
@@ -101,7 +101,7 @@ describe("optimizeRRFWeights", () => {
 
   test("history includes initial baseline", async () => {
     const nodeIds = ["r1", "r2", "r3"];
-    const goldSet = makeGoldSet({ s1: { description: "verification", relevantRules: ["r1"], domains: ["verification"] } });
+    const goldSet = makeGoldSet({ s1: { description: "testing", relevantRules: ["r1"], domains: ["testing"] } });
     const goldPath = join(TMP_DIR, "gold.json");
     writeFileSync(goldPath, JSON.stringify(goldSet));
 
@@ -117,7 +117,7 @@ describe("optimizeRRFWeights", () => {
 
   test("writes state log when stateDir provided", async () => {
     const nodeIds = ["r1", "r2", "r3"];
-    const goldSet = makeGoldSet({ s1: { description: "r1 rule verification", relevantRules: ["r1"], domains: ["verification"] } });
+    const goldSet = makeGoldSet({ s1: { description: "r1 rule verification", relevantRules: ["r1"], domains: ["testing"] } });
     const goldPath = join(TMP_DIR, "gold.json");
     writeFileSync(goldPath, JSON.stringify(goldSet));
 
@@ -155,7 +155,7 @@ describe("optimizeRRFWeights", () => {
   });
 
   test("weights never go negative", async () => {
-    const goldSet = makeGoldSet({ s1: { description: "rule verification", relevantRules: ["r1"], domains: ["verification"] } });
+    const goldSet = makeGoldSet({ s1: { description: "rule verification", relevantRules: ["r1"], domains: ["testing"] } });
     const goldPath = join(TMP_DIR, "gold.json");
     writeFileSync(goldPath, JSON.stringify(goldSet));
 
