@@ -4,11 +4,11 @@ import { execSync } from "child_process";
 import { homedir } from "os";
 import { getBaseDir, resolveMemoryDir, resolveSignalDir } from "../../src/adapters/paths";
 import { readGraph } from "../../src/graph/builder";
-import { queryGraph } from "../../src/graph/query";
 import { buildIndexFromDir } from "../../src/graph/bm25";
 import {
   initHybridDetection,
   detectDomains,
+  detectDomainsBM25,
   getContextRules,
   retrieveByEmbeddingSeed,
   writeSessionContext,
@@ -109,7 +109,8 @@ async function doRefresh(args: string[]): Promise<void> {
   let domainSource: "metadata" | "keyword" | "bm25" = "keyword";
 
   if (inputText) {
-    domains = detectDomains(inputText);
+    domains = detectDomainsBM25(inputText);
+    domainSource = "bm25";
   }
 
   if (domains.length === 0) {
@@ -189,9 +190,7 @@ async function doRefresh(args: string[]): Promise<void> {
     );
   }
 
-  const clusters = queryGraph(graph, domains, 5);
-
-  const markdown = formatGraphContext(clusters, rules, domains);
+  const markdown = formatGraphContext(rules, domains);
 
   const dir = dirname(GRAPH_CONTEXT_PATH);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -201,7 +200,6 @@ async function doRefresh(args: string[]): Promise<void> {
   writeSessionContext(rules, domains, domainSource, totalContextLines);
 
   console.log(`  Domains: [${domains.join(", ")}]`);
-  console.log(`  Clusters: ${clusters.length}`);
   console.log(`  Rules: ${rules.length}`);
   console.log(`  Output: ${GRAPH_CONTEXT_PATH}`);
   console.log(`  Lines: ${totalContextLines}`);

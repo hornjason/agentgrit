@@ -7,7 +7,7 @@
  *   - PAI Tools/VoyageReranker.ts — optional reranking of candidates
  */
 
-import type { Graph, BM25Index } from "./types";
+import type { Graph, BM25Index, DocEntry, VocabEntry } from "./types";
 import { Tier, type Rule, type EmbeddingProvider } from "../adapters/types";
 import { loadConfig } from "../adapters/paths";
 import { searchIndex, tokenize } from "./bm25";
@@ -91,6 +91,53 @@ export function detectDomains(text: string): string[] {
   }
 
   return domains.size > 0 ? Array.from(domains) : [];
+}
+
+// ── BM25-based Domain Detection ──
+
+import seedData from "./domain-seeds.json";
+
+let _domainBM25Index: BM25Index | null = null;
+
+function getDomainBM25Index(): BM25Index {
+  if (_domainBM25Index) return _domainBM25Index;
+
+  const docs: DocEntry[] = [];
+  for (const entry of seedData.patterns) {
+    const termText = entry.terms.join(" ");
+    const tokens = tokenize(termText);
+    const counts: Record<string, number> = {};
+    for (const t of tokens) counts[t] = (counts[t] || 0) + 1;
+    docs.push({ id: entry.domain, tokens: counts, len: tokens.length });
+  }
+
+  const N = docs.length;
+  const avgDocLen = N > 0 ? docs.reduce((sum, d) => sum + d.len, 0) / N : 0;
+  const df: Record<string, number> = {};
+  for (const doc of docs) {
+    for (const term of Object.keys(doc.tokens)) {
+      df[term] = (df[term] || 0) + 1;
+    }
+  }
+  const vocabulary: Record<string, VocabEntry> = {};
+  for (const [term, dfVal] of Object.entries(df)) {
+    const idf = Math.log((N - dfVal + 0.5) / (dfVal + 0.5) + 1);
+    vocabulary[term] = { idf, df: dfVal };
+  }
+
+  _domainBM25Index = { builtAt: new Date().toISOString(), docCount: N, avgDocLen, vocabulary, docs };
+  return _domainBM25Index;
+}
+
+export function detectDomainsBM25(text: string): string[] {
+  const index = getDomainBM25Index();
+  const results = searchIndex(index, text, 16);
+  if (results.length === 0) return [];
+
+  const topScore = results[0].score;
+  const threshold = topScore * 0.3;
+  const filtered = results.filter(r => r.score >= threshold);
+  return filtered.slice(0, 3).map(r => r.id);
 }
 
 // ── Sanitize Rule Text ──
@@ -898,34 +945,18 @@ export function computeSmartDefaults(signalDir: string): string[] {
 
 // ── Graph Context Formatter ──
 
-import type { RankedCluster } from "./types";
-
 export function formatGraphContext(
-  clusters: RankedCluster[],
   rules: Rule[],
   domains: string[],
 ): string {
   const timestamp = new Date().toISOString();
   const lines: string[] = [
     `# Graph Context — ${domains.join(", ")}`,
-    `*Generated: ${timestamp} | ${clusters.length} clusters + ${rules.length} context rules from [${domains.join(", ")}]*`,
+    `*Generated: ${timestamp} | ${rules.length} context rules from [${domains.join(", ")}]*`,
     "",
-    "## Most Relevant Rules for This Session",
+    "## Context Rules (correlation-ranked)",
     "",
   ];
-
-  for (let i = 0; i < clusters.length; i++) {
-    const c = clusters[i];
-    lines.push(`### Cluster ${i + 1}: ${c.primary.name} (${c.primary.domains.join(", ")})`);
-    lines.push(c.primary.description);
-    for (const conn of c.connected.slice(0, 3)) {
-      lines.push(`↳ ${conn.relationship} (${conn.strength.toFixed(1)}): ${conn.node.name}`);
-    }
-    lines.push("");
-  }
-
-  lines.push("## Context Rules (correlation-ranked)");
-  lines.push("");
 
   for (const rule of rules) {
     const tag = rule.tags[0] || "general";
