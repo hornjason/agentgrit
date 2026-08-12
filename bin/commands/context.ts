@@ -101,7 +101,7 @@ async function doRefresh(args: string[]): Promise<void> {
 
   initHybridDetection(graph);
 
-  const issueWeights: RRFWeights | undefined = opts.issue
+  const issueWeights: RRFWeights | undefined = inputText
     ? { bm25: 3, graph: 0.2, vector: 1 }
     : undefined;
 
@@ -159,7 +159,7 @@ async function doRefresh(args: string[]): Promise<void> {
       console.log(`    ${s.id}: ${s.score.toFixed(4)}`);
     }
     const effectiveWeights = issueWeights ?? RRF_WEIGHTS;
-    console.log(`  RRF weights: bm25=${effectiveWeights.bm25} graph=${effectiveWeights.graph} vector=${effectiveWeights.vector}${issueWeights ? " (issue-boosted)" : ""}`);
+    console.log(`  RRF weights: bm25=${effectiveWeights.bm25} graph=${effectiveWeights.graph} vector=${effectiveWeights.vector}${issueWeights ? " (mid-session boosted)" : ""}`);
 
     console.log(`  Domains detected: [${domains.join(", ")}] (source: ${domainSource})`);
   }
