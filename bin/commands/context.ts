@@ -19,7 +19,7 @@ import {
 } from "../../src/graph/context";
 import { loadVectorCache } from "../../src/graph/embeddings";
 import { diagnoseBM25, tokenize } from "../../src/graph/bm25";
-import { RRF_WEIGHTS } from "../../src/graph/retrieval";
+import { RRF_WEIGHTS, type RRFWeights } from "../../src/graph/retrieval";
 
 const GRAPH_CONTEXT_PATH = join(homedir(), ".claude", "MEMORY", "STATE", "GRAPH-CONTEXT.md");
 
@@ -101,6 +101,10 @@ async function doRefresh(args: string[]): Promise<void> {
 
   initHybridDetection(graph);
 
+  const issueWeights: RRFWeights | undefined = opts.issue
+    ? { bm25: 3, graph: 0.2, vector: 1 }
+    : undefined;
+
   let domains: string[] = [];
   let domainSource: "metadata" | "keyword" | "bm25" = "keyword";
 
@@ -154,7 +158,9 @@ async function doRefresh(args: string[]): Promise<void> {
     for (const s of diag.topScores) {
       console.log(`    ${s.id}: ${s.score.toFixed(4)}`);
     }
-    console.log(`  RRF weights: bm25=${RRF_WEIGHTS.bm25} graph=${RRF_WEIGHTS.graph} vector=${RRF_WEIGHTS.vector}`);
+    const effectiveWeights = issueWeights ?? RRF_WEIGHTS;
+    console.log(`  RRF weights: bm25=${effectiveWeights.bm25} graph=${effectiveWeights.graph} vector=${effectiveWeights.vector}${issueWeights ? " (issue-boosted)" : ""}`);
+
     console.log(`  Domains detected: [${domains.join(", ")}] (source: ${domainSource})`);
   }
 
@@ -173,13 +179,13 @@ async function doRefresh(args: string[]): Promise<void> {
       console.log("  Warning: no vector cache found, falling back to current strategy");
       rules = await getContextRules(
         graph, index, domains, opts.limit, signalDir,
-        inputText || undefined,
+        inputText || undefined, undefined, undefined, issueWeights,
       );
     }
   } else {
     rules = await getContextRules(
       graph, index, domains, opts.limit, signalDir,
-      inputText || undefined,
+      inputText || undefined, undefined, undefined, issueWeights,
     );
   }
 
