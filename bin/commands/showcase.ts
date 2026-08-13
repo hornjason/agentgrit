@@ -1,8 +1,11 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
+import { spawnSync } from "child_process";
 import { getBaseDir, stateDir, loadConfig, resolveSignalFile } from "../../src/adapters/paths";
 import { renderShowcase } from "../../src/showcase/template";
+import { runDoctor } from "../../src/daemon/doctor";
 import type { ShowcaseMetrics, DomainEntry, RulePerformer, HealthCheck } from "../../src/showcase/template";
+import type { CheckStatus } from "../../src/daemon/doctor";
 
 function countLines(filePath: string): number {
   if (!existsSync(filePath)) return 0;
@@ -42,7 +45,13 @@ interface GraphData {
   nodes?: Record<string, { domains: string[] }>;
 }
 
-function gatherMetrics(): ShowcaseMetrics {
+function doctorStatusToHealth(status: CheckStatus): "green" | "amber" | "red" {
+  if (status === "ok") return "green";
+  if (status === "warning") return "amber";
+  return "red";
+}
+
+async function gatherMetrics(): Promise<ShowcaseMetrics> {
   const config = loadConfig();
   const base = getBaseDir();
   const state = stateDir();
@@ -144,6 +153,60 @@ function gatherMetrics(): ShowcaseMetrics {
     detail: `${effectiveness}% of tracked rules effective`,
   });
 
+  // Compliance Tests card
+  const complianceDir = join(base, "..", "agentgrit", "test", "compliance");
+  const altComplianceDir = join(process.cwd(), "test", "compliance");
+  const compDir = existsSync(complianceDir) ? complianceDir : altComplianceDir;
+  if (existsSync(compDir)) {
+    const result = spawnSync("bun", ["test", compDir], {
+      cwd: existsSync(complianceDir) ? join(base, "..", "agentgrit") : process.cwd(),
+      timeout: 30_000,
+      encoding: "utf-8",
+    });
+    const output = (result.stdout ?? "") + (result.stderr ?? "");
+    const passMatch = output.match(/(\d+)\s+pass/);
+    const skipMatch = output.match(/(\d+)\s+skip/);
+    const failMatch = output.match(/(\d+)\s+fail/);
+    const pass = passMatch ? parseInt(passMatch[1], 10) : 0;
+    const skip = skipMatch ? parseInt(skipMatch[1], 10) : 0;
+    const fail = failMatch ? parseInt(failMatch[1], 10) : 0;
+    healthChecks.push({
+      label: "Compliance Tests",
+      status: fail > 0 ? "red" : skip > 0 ? "amber" : "green",
+      detail: `${pass} pass, ${skip} skip, ${fail} fail`,
+    });
+  } else {
+    healthChecks.push({
+      label: "Compliance Tests",
+      status: "amber",
+      detail: "No compliance test directory found",
+    });
+  }
+
+  // Wiring + Data Integrity cards from doctor
+  const doctorReport = await runDoctor(config);
+  const wiringSection = doctorReport.sections.find((s) => s.name === "WIRING");
+  if (wiringSection) {
+    const orphanCount = wiringSection.checks.filter((c) => c.name.startsWith("orphan:")).length;
+    healthChecks.push({
+      label: "Wiring",
+      status: orphanCount === 0 ? "green" : orphanCount < 20 ? "amber" : "red",
+      detail: orphanCount === 0 ? "All exports wired" : `${orphanCount} orphan export(s)`,
+    });
+  }
+
+  const integritySection = doctorReport.sections.find((s) => s.name === "DATA INTEGRITY");
+  if (integritySection) {
+    const divergentChecks = integritySection.checks.filter((c) => c.status !== "ok");
+    healthChecks.push({
+      label: "Data Integrity",
+      status: doctorStatusToHealth(integritySection.status),
+      detail: divergentChecks.length === 0
+        ? "No path divergence detected"
+        : `${divergentChecks.length} divergent path(s)`,
+    });
+  }
+
   const budgetUsed = ruleStats.length;
   const budgetCap = config.rules?.globalBudget ?? 25;
 
@@ -184,7 +247,7 @@ function gatherMetrics(): ShowcaseMetrics {
 }
 
 export async function generateShowcase(): Promise<string> {
-  const metrics = gatherMetrics();
+  const metrics = await gatherMetrics();
   const html = renderShowcase(metrics);
   const outDir = stateDir();
   if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
@@ -203,7 +266,7 @@ export async function showcaseCommand(args: string[]): Promise<void> {
   }
 
   if (args.includes("--stdout")) {
-    const metrics = gatherMetrics();
+    const metrics = await gatherMetrics();
     const html = renderShowcase(metrics);
     process.stdout.write(html);
     return;
