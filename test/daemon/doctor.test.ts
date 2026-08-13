@@ -37,7 +37,7 @@ describe("doctor report structure", () => {
     expect(report).toHaveProperty("timestamp");
     expect(report).toHaveProperty("overall");
     expect(report).toHaveProperty("sections");
-    expect(report.sections.length).toBe(7);
+    expect(report.sections.length).toBe(8);
 
     const sectionNames = report.sections.map((s) => s.name);
     expect(sectionNames).toContain("CAPTURE");
@@ -47,6 +47,7 @@ describe("doctor report structure", () => {
     expect(sectionNames).toContain("SIGNALS");
     expect(sectionNames).toContain("CONFIG");
     expect(sectionNames).toContain("INTEGRITY");
+    expect(sectionNames).toContain("WIRING");
   });
 
   test("overall status is worst of all sections", async () => {

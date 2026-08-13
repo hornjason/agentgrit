@@ -435,6 +435,135 @@ function checkCrossReferences(config: AgentGritConfig): DoctorSection {
   };
 }
 
+// ── Wiring: Orphan export detection ──
+
+interface ExportEntry {
+  name: string;
+  file: string;
+  kind: "function" | "const" | "class";
+}
+
+function collectTsFiles(dir: string, files: string[] = []): string[] {
+  if (!existsSync(dir)) return files;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory() && entry.name !== "node_modules" && entry.name !== "dist") {
+      collectTsFiles(fullPath, files);
+    } else if (
+      entry.isFile() &&
+      entry.name.endsWith(".ts") &&
+      !entry.name.endsWith(".test.ts") &&
+      !entry.name.endsWith(".spec.ts")
+    ) {
+      files.push(fullPath);
+    }
+  }
+  return files;
+}
+
+function extractExports(filePath: string, content: string): ExportEntry[] {
+  const exports: ExportEntry[] = [];
+  for (const line of content.split("\n")) {
+    if (/export\s*\{[^}]*\}\s*from\s/.test(line)) continue;
+    if (/export\s+(?:type|interface)\s/.test(line)) continue;
+
+    const funcMatch = line.match(/export\s+(?:async\s+)?function\s+(\w+)/);
+    if (funcMatch) {
+      exports.push({ name: funcMatch[1], file: filePath, kind: "function" });
+      continue;
+    }
+
+    const constMatch = line.match(/export\s+const\s+(\w+)/);
+    if (constMatch) {
+      exports.push({ name: constMatch[1], file: filePath, kind: "const" });
+      continue;
+    }
+
+    const classMatch = line.match(/export\s+class\s+(\w+)/);
+    if (classMatch) {
+      exports.push({ name: classMatch[1], file: filePath, kind: "class" });
+    }
+  }
+  return exports;
+}
+
+function checkWiring(_config: AgentGritConfig): DoctorSection {
+  const checks: CheckResult[] = [];
+  const projectRoot = process.cwd();
+  const srcDir = join(projectRoot, "src");
+  const binDir = join(projectRoot, "bin");
+
+  if (!existsSync(srcDir)) {
+    checks.push({
+      name: "wiring-skip",
+      status: "ok",
+      message: "Wiring check skipped (no src/ directory in cwd)",
+    });
+    return { name: "WIRING", status: "ok", checks };
+  }
+
+  const srcFiles = collectTsFiles(srcDir);
+  const binFiles = collectTsFiles(binDir);
+  const allFiles = [...srcFiles, ...binFiles];
+
+  const fileContents = new Map<string, string>();
+  for (const file of allFiles) {
+    try {
+      fileContents.set(file, readFileSync(file, "utf-8"));
+    } catch {
+      // skip unreadable files
+    }
+  }
+
+  const allExports: ExportEntry[] = [];
+  for (const file of srcFiles) {
+    const content = fileContents.get(file);
+    if (content) allExports.push(...extractExports(file, content));
+  }
+
+  const orphans: ExportEntry[] = [];
+  for (const exp of allExports) {
+    const pattern = new RegExp(`\\b${exp.name}\\b`);
+    let referenced = false;
+    for (const [file, content] of fileContents) {
+      if (file === exp.file) continue;
+      if (pattern.test(content)) {
+        referenced = true;
+        break;
+      }
+    }
+    if (!referenced) orphans.push(exp);
+  }
+
+  if (orphans.length === 0) {
+    checks.push({
+      name: "orphan-exports",
+      status: "ok",
+      message: `All ${allExports.length} exports are wired`,
+    });
+  } else {
+    checks.push({
+      name: "orphan-summary",
+      status: "warning",
+      message: `${orphans.length} orphan export(s) found out of ${allExports.length} total`,
+    });
+    for (const orphan of orphans) {
+      const relPath = orphan.file.replace(projectRoot + "/", "");
+      checks.push({
+        name: `orphan:${orphan.name}`,
+        status: "warning",
+        message: `${orphan.name} (${orphan.kind}) in ${relPath} — exported but never imported`,
+      });
+    }
+  }
+
+  return {
+    name: "WIRING",
+    status: worstStatus(checks.map((c) => c.status)),
+    checks,
+  };
+}
+
 // ── Run Doctor ──
 
 export async function runDoctor(config: AgentGritConfig): Promise<DoctorReport> {
@@ -446,6 +575,7 @@ export async function runDoctor(config: AgentGritConfig): Promise<DoctorReport> 
     checkSignals(config),
     checkConfig(config),
     checkCrossReferences(config),
+    checkWiring(config),
   ];
 
   return {

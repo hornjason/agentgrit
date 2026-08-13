@@ -296,6 +296,6 @@ describe("doctor dedup", () => {
     const report = await runDoctor(config);
     expect(report).toHaveProperty("sections");
     expect(report).toHaveProperty("overall");
-    expect(report.sections.length).toBe(7);
+    expect(report.sections.length).toBe(8);
   });
 });
