@@ -1,6 +1,6 @@
 import { existsSync, statSync, readdirSync, readFileSync } from "fs";
-import { join } from "path";
-import { resolveSignalFile } from "../adapters/paths";
+import { join, resolve } from "path";
+import { resolveSignalFile, resolveSignalDir, resolveMemoryDir, getBaseDir } from "../adapters/paths";
 import type { AgentGritConfig } from "../adapters/types";
 import { checkBudget, checkLearnedBudget } from "../promote/budget";
 import { Tier } from "../adapters/types";
@@ -564,6 +564,107 @@ function checkWiring(_config: AgentGritConfig): DoctorSection {
   };
 }
 
+// ── Data Integrity: Dual-path divergence detection ──
+
+interface DirPair {
+  label: string;
+  defaultPath: string;
+  configuredPath: string;
+}
+
+function lineCount(filePath: string): number {
+  try {
+    const content = readFileSync(filePath, "utf-8");
+    return content.split("\n").length;
+  } catch {
+    return 0;
+  }
+}
+
+function checkDataIntegrity(_config: AgentGritConfig): DoctorSection {
+  const checks: CheckResult[] = [];
+
+  const defaultBase = join(getBaseDir(), "signals");
+  const configuredSignals = resolveSignalDir();
+  const defaultState = join(getBaseDir(), "state");
+  const configuredState = join(resolveSignalDir(), "..", "state");
+  const defaultMemory = join(getBaseDir(), "memory");
+  const configuredMemory = resolveMemoryDir();
+
+  const pairs: DirPair[] = [
+    { label: "signals", defaultPath: defaultBase, configuredPath: configuredSignals },
+    { label: "state", defaultPath: defaultState, configuredPath: configuredState },
+    { label: "memory", defaultPath: defaultMemory, configuredPath: configuredMemory },
+  ];
+
+  for (const pair of pairs) {
+    const defaultResolved = resolve(pair.defaultPath);
+    const configuredResolved = resolve(pair.configuredPath);
+
+    if (defaultResolved === configuredResolved) {
+      checks.push({
+        name: `${pair.label}-paths`,
+        status: "ok",
+        message: `${pair.label}: default and configured paths match — no divergence possible`,
+      });
+      continue;
+    }
+
+    if (!existsSync(defaultResolved) || !existsSync(configuredResolved)) {
+      checks.push({
+        name: `${pair.label}-paths`,
+        status: "ok",
+        message: `${pair.label}: only one path exists — no divergence`,
+      });
+      continue;
+    }
+
+    const defaultFiles = new Set(
+      readdirSync(defaultResolved).filter((f) => f.endsWith(".jsonl") || f.endsWith(".json")),
+    );
+    const configuredFiles = new Set(
+      readdirSync(configuredResolved).filter((f) => f.endsWith(".jsonl") || f.endsWith(".json")),
+    );
+
+    const overlapping = [...defaultFiles].filter((f) => configuredFiles.has(f));
+
+    if (overlapping.length === 0) {
+      checks.push({
+        name: `${pair.label}-paths`,
+        status: "ok",
+        message: `${pair.label}: paths differ but no overlapping files`,
+      });
+      continue;
+    }
+
+    for (const file of overlapping) {
+      const defaultFilePath = join(defaultResolved, file);
+      const configuredFilePath = join(configuredResolved, file);
+      const defaultStat = statSync(defaultFilePath);
+      const configuredStat = statSync(configuredFilePath);
+      const defaultLines = lineCount(defaultFilePath);
+      const configuredLines = lineCount(configuredFilePath);
+
+      const defaultNewer = defaultStat.mtimeMs > configuredStat.mtimeMs;
+      const stale = defaultNewer ? "configured" : "default";
+      const ageDiffMs = Math.abs(defaultStat.mtimeMs - configuredStat.mtimeMs);
+      const ageDiffHours = Math.floor(ageDiffMs / MS_PER_HOUR);
+
+      checks.push({
+        name: `diverge:${pair.label}/${file}`,
+        status: "warning",
+        message: `${file} exists at both paths — default: ${defaultLines} lines, configured: ${configuredLines} lines, ${stale} is ${ageDiffHours}h stale`,
+      });
+    }
+  }
+
+  return {
+    name: "DATA INTEGRITY",
+    status: worstStatus(checks.map((c) => c.status)),
+    checks,
+  };
+}
+
 // ── Run Doctor ──
 
 export async function runDoctor(config: AgentGritConfig): Promise<DoctorReport> {
@@ -575,6 +676,7 @@ export async function runDoctor(config: AgentGritConfig): Promise<DoctorReport> 
     checkSignals(config),
     checkConfig(config),
     checkCrossReferences(config),
+    checkDataIntegrity(config),
     checkWiring(config),
   ];
 
