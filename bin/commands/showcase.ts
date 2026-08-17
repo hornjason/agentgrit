@@ -299,17 +299,19 @@ export async function generateShowcase(): Promise<string> {
 }
 
 export async function showcaseCommand(args: string[]): Promise<void> {
-  console.log("\nagentgrit showcase\n");
-
   const base = getBaseDir();
-  if (!existsSync(base)) {
-    console.log("  agentgrit not initialized. Run 'agentgrit init' first.\n");
+
+  if (args.includes("--json")) {
+    if (!existsSync(base)) { process.stdout.write("{}"); return; }
+    const metrics = await gatherMetrics();
+    process.stdout.write(JSON.stringify(metrics));
     return;
   }
 
-  if (args.includes("--json")) {
-    const metrics = await gatherMetrics();
-    process.stdout.write(JSON.stringify(metrics));
+  console.log("\nagentgrit showcase\n");
+
+  if (!existsSync(base)) {
+    console.log("  agentgrit not initialized. Run 'agentgrit init' first.\n");
     return;
   }
 
