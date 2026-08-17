@@ -17,8 +17,8 @@ import { loadVectorCache, rankByVectorSimilarity } from "./embeddings";
 import { cosine } from "./embedder";
 import { loadPatterns, loadHybridPatterns } from "./generate-patterns";
 import type { DomainPattern } from "./generate-patterns";
-import { shouldEvict, loadEvictionAllowlist, appendEvictionLog, loadEvictedRegistry, addToEvictedRegistry } from "../promote/auto-eviction";
-import { loadRuleStats } from "../promote/rules";
+import { shouldEvict, loadEvictionAllowlist, appendEvictionLog, loadEvictedRegistry, addToEvictedRegistry, type EvictionTrigger } from "../promote/auto-eviction";
+import { loadRuleStats, type RuleStats } from "../promote/rules";
 
 // ── Default Domains ──
 
@@ -324,26 +324,31 @@ export async function getContextRules(
 
   const ruleStatsMap = loadRuleStats();
   const allowlist = loadEvictionAllowlist();
+  const newlyEvicted: Array<{ id: string; eviction: { trigger: EvictionTrigger; reason: string }; stats: RuleStats }> = [];
   const afterEviction = afterRegistryFilter.filter(([id]) => {
     const stats = ruleStatsMap.get(id);
     if (!stats) return true;
     const eviction = shouldEvict(stats, allowlist);
     if (eviction) {
-      addToEvictedRegistry({ ruleId: id, trigger: eviction.trigger, reason: eviction.reason });
-      appendEvictionLog({
-        ruleId: id,
-        trigger: eviction.trigger,
-        reason: eviction.reason,
-        avgRating: stats.avgCorrelatedRating,
-        injections: stats.injectionCount,
-        highActivations: stats.highRatingActivations,
-        lowActivations: stats.lowRatingActivations,
-        timestamp: new Date().toISOString(),
-      });
+      newlyEvicted.push({ id, eviction, stats });
       return false;
     }
     return true;
   });
+
+  for (const { id, eviction, stats } of newlyEvicted) {
+    addToEvictedRegistry({ ruleId: id, trigger: eviction.trigger, reason: eviction.reason });
+    appendEvictionLog({
+      ruleId: id,
+      trigger: eviction.trigger,
+      reason: eviction.reason,
+      avgRating: stats.avgCorrelatedRating,
+      injections: stats.injectionCount,
+      highActivations: stats.highRatingActivations,
+      lowActivations: stats.lowRatingActivations,
+      timestamp: new Date().toISOString(),
+    });
+  }
 
   // 5. Build rule objects
   const resultIds = new Set<string>();

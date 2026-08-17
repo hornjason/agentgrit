@@ -97,17 +97,7 @@ export interface EvictedRegistryEntry {
 }
 
 export function loadEvictedRegistry(dir?: string): Set<string> {
-  const filePath = join(dir ?? stateDir(), "evicted-rules.json");
-  if (!existsSync(filePath)) return new Set();
-  try {
-    const data = JSON.parse(readFileSync(filePath, "utf-8"));
-    if (data && Array.isArray(data.evicted)) {
-      return new Set(data.evicted.map((e: EvictedRegistryEntry) => e.ruleId));
-    }
-    return new Set();
-  } catch {
-    return new Set();
-  }
+  return new Set(loadEvictedRegistryEntries(dir).map(e => e.ruleId));
 }
 
 export function loadEvictedRegistryEntries(dir?: string): EvictedRegistryEntry[] {
@@ -143,9 +133,6 @@ export function addToEvictedRegistry(
 }
 
 export function appendEvictionLog(entry: EvictionLogEntry, dir?: string): void {
-  const registry = loadEvictedRegistry(dir);
-  if (registry.has(entry.ruleId)) return;
-
   const logPath = join(dir ?? stateDir(), "eviction-log.jsonl");
   const logDir = dirname(logPath);
   if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true });
