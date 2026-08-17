@@ -307,6 +307,12 @@ export async function showcaseCommand(args: string[]): Promise<void> {
     return;
   }
 
+  if (args.includes("--json")) {
+    const metrics = await gatherMetrics();
+    process.stdout.write(JSON.stringify(metrics));
+    return;
+  }
+
   if (args.includes("--stdout")) {
     const metrics = await gatherMetrics();
     const html = renderShowcase(metrics);
@@ -315,7 +321,11 @@ export async function showcaseCommand(args: string[]): Promise<void> {
   }
 
   const outPath = await generateShowcase();
+  const metricsPath = join(stateDir(), "showcase-metrics.json");
+  const metrics = await gatherMetrics();
+  writeFileSync(metricsPath, JSON.stringify(metrics, null, 2), "utf-8");
   console.log(`  Generated: ${outPath}`);
+  console.log(`  Metrics: ${metricsPath}`);
 
   if (args.includes("--open")) {
     const { exec } = await import("child_process");
