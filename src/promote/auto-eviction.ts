@@ -3,7 +3,7 @@ import { dirname, join } from "path";
 import { stateDir } from "../adapters/paths";
 import type { RuleStats } from "./rules";
 
-export type EvictionTrigger = "low-avg-high-volume" | "never-helped" | "net-negative-roi";
+export type EvictionTrigger = "low-avg-high-volume" | "never-helped" | "net-negative-roi" | "high-injection-low-value";
 
 export interface EvictionResult {
   trigger: EvictionTrigger;
@@ -29,6 +29,14 @@ export function shouldEvict(
 ): EvictionResult | null {
   if (stats.injectionCount < MIN_INJECTION_SAFETY) return null;
   if (allowlist?.has(stats.ruleId)) return null;
+
+  // Trigger 4: high injection count with low value (most specific — checked first)
+  if (stats.injectionCount >= 150 && stats.avgCorrelatedRating < 4.0) {
+    return {
+      trigger: "high-injection-low-value",
+      reason: `${stats.injectionCount} injections with avg ${stats.avgCorrelatedRating.toFixed(2)} < 4.0`,
+    };
+  }
 
   // Trigger 1: low avg + high volume
   if (stats.avgCorrelatedRating < 4.0 && stats.injectionCount > 50) {

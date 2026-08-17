@@ -39,6 +39,12 @@ interface RecallEvalData {
   meanMrr?: number;
 }
 
+interface PaiRecallScores {
+  mean_precision5?: number;
+  mean_recall15?: number;
+  mean_mrr?: number;
+}
+
 interface GraphData {
   nodeCount?: number;
   edgeCount?: number;
@@ -64,7 +70,7 @@ async function gatherMetrics(): Promise<ShowcaseMetrics> {
   const correctionCount = countLines(correctionsPath);
 
   const graph = readJson(join(state, "knowledge-graph.json")) as GraphData | null;
-  const nodeCount = graph?.nodeCount ?? 0;
+  const nodeCount = graph?.nodeCount ?? (graph?.nodes ? Object.keys(graph.nodes).length : 0);
   const edgeCount = graph?.edgeCount ?? 0;
 
   const domains = new Map<string, number>();
@@ -85,14 +91,32 @@ async function gatherMetrics(): Promise<ShowcaseMetrics> {
   const effective = activeStats.filter((s) => s.avgCorrelatedRating >= 5).length;
   const effectiveness = activeStats.length > 0 ? Math.round((effective / activeStats.length) * 100) : 0;
 
-  const totalInjections = activeStats.reduce((sum, s) => sum + s.injectionCount, 0);
-  const rulesPerSession = activeStats.length > 0 ? Math.round(totalInjections / activeStats.length) : 0;
+  let rulesPerSession = 0;
+  const sessionHistoryPath = join(process.env.HOME ?? "", ".agentgrit", "state", "session-context-history.jsonl");
+  if (existsSync(sessionHistoryPath)) {
+    try {
+      const lines = readFileSync(sessionHistoryPath, "utf-8").trim().split("\n").filter(Boolean);
+      const counts = lines.map((line) => {
+        const entry = JSON.parse(line);
+        return entry.rulesInjectedCount ?? (entry.ruleIds?.length ?? 0);
+      });
+      if (counts.length > 0) {
+        rulesPerSession = Math.round(counts.reduce((a: number, b: number) => a + b, 0) / counts.length * 10) / 10;
+      }
+    } catch {
+      // fall through
+    }
+  }
 
   const overallAvg = activeStats.length > 0
     ? activeStats.reduce((sum, s) => sum + s.avgCorrelatedRating, 0) / activeStats.length
     : 0;
 
-  const recallEval = readJson(join(state, "recall-eval.json")) as RecallEvalData | null;
+  const paiEvalPath = join(process.env.HOME ?? "", ".claude", "MEMORY", "LEARNING", "STATE", "recall-scores.json");
+  const paiEval = readJson(paiEvalPath) as PaiRecallScores | null;
+  const recallEval: RecallEvalData | null = paiEval
+    ? { meanPrecision5: paiEval.mean_precision5, meanRecall15: paiEval.mean_recall15, meanMrr: paiEval.mean_mrr }
+    : readJson(join(state, "recall-eval.json")) as RecallEvalData | null;
 
   const graphNodes = graph?.nodes as Record<string, { name?: string; description?: string; domains?: string[] }> | undefined;
   function resolveRuleName(ruleId: string): string {
@@ -207,20 +231,38 @@ async function gatherMetrics(): Promise<ShowcaseMetrics> {
     });
   }
 
-  const budgetUsed = ruleStats.length;
-  const budgetCap = config.rules?.globalBudget ?? 25;
+  const learnedBudgetCap = config.rules?.learnedBudget ?? 50;
+  let learnedCount = 0;
+  const learnedPath = join(process.env.HOME ?? "", ".claude", "CLAUDE-LEARNED.md");
+  if (existsSync(learnedPath)) {
+    try {
+      const content = readFileSync(learnedPath, "utf-8");
+      learnedCount = (content.match(/^- \*\*/gm) ?? []).length;
+    } catch {
+      // fall through
+    }
+  }
 
   let testCount = 0;
   const pkgPath = join(base, "..", "agentgrit", "package.json");
   const altPkgPath = join(process.cwd(), "package.json");
   const pkg = readJson(existsSync(pkgPath) ? pkgPath : altPkgPath) as { version?: string } | null;
 
-  try {
-    const specContent = readFileSync(join(base, "..", "agentgrit", "docs", "SYSTEM-SPEC.md"), "utf-8");
-    const testMatch = specContent.match(/(\d[\d,]+)\s+(?:tests?\s+)?pass/i);
-    if (testMatch) testCount = parseInt(testMatch[1].replace(/,/g, ""), 10);
-  } catch {
-    // fall through
+  const testCwd = existsSync(join(base, "..", "agentgrit")) ? join(base, "..", "agentgrit") : process.cwd();
+  const testDir2 = join(testCwd, "test");
+  if (existsSync(testDir2)) {
+    try {
+      const testResult = spawnSync("bun", ["test", testDir2], {
+        cwd: testCwd,
+        timeout: 300_000,
+        encoding: "utf-8",
+      });
+      const testOutput = (testResult.stdout ?? "") + (testResult.stderr ?? "");
+      const testPassMatch = testOutput.match(/(\d+)\s+pass/);
+      if (testPassMatch) testCount = parseInt(testPassMatch[1], 10);
+    } catch {
+      // fall through
+    }
   }
 
   return {
@@ -236,7 +278,7 @@ async function gatherMetrics(): Promise<ShowcaseMetrics> {
     recallAt15: recallEval?.meanRecall15 ?? 0,
     precisionAt5: recallEval?.meanPrecision5 ?? 0,
     mrr: recallEval?.meanMrr ?? 0,
-    budgetGlobal: `${budgetUsed}/${budgetCap}`,
+    budgetGlobal: `${learnedCount}/${learnedBudgetCap}`,
     domains: domainEntries,
     topPerformers,
     bottomPerformers,

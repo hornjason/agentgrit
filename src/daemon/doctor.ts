@@ -461,6 +461,19 @@ function collectTsFiles(dir: string, files: string[] = []): string[] {
   return files;
 }
 
+function collectAllTsFiles(dir: string, files: string[] = []): string[] {
+  if (!existsSync(dir)) return files;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory() && entry.name !== "node_modules" && entry.name !== "dist") {
+      collectAllTsFiles(fullPath, files);
+    } else if (entry.isFile() && entry.name.endsWith(".ts")) {
+      files.push(fullPath);
+    }
+  }
+  return files;
+}
+
 function extractExports(filePath: string, content: string): ExportEntry[] {
   const exports: ExportEntry[] = [];
   for (const line of content.split("\n")) {
@@ -502,9 +515,11 @@ function checkWiring(_config: AgentGritConfig): DoctorSection {
     return { name: "WIRING", status: "ok", checks };
   }
 
+  const testDir = join(projectRoot, "test");
   const srcFiles = collectTsFiles(srcDir);
   const binFiles = collectTsFiles(binDir);
-  const allFiles = [...srcFiles, ...binFiles];
+  const testFiles = collectAllTsFiles(testDir);
+  const allFiles = [...srcFiles, ...binFiles, ...testFiles];
 
   const fileContents = new Map<string, string>();
   for (const file of allFiles) {

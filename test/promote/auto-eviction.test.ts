@@ -29,8 +29,8 @@ afterEach(() => {
 });
 
 describe("shouldEvict — trigger 1: low avg + high volume", () => {
-  test("evicts rule with avg < 4.0 and injections > 50", () => {
-    const stats = makeStats({ avgCorrelatedRating: 3.0, injectionCount: 241 });
+  test("evicts rule with avg < 4.0 and injections 51-149", () => {
+    const stats = makeStats({ avgCorrelatedRating: 3.0, injectionCount: 100 });
     const result = shouldEvict(stats);
     expect(result).not.toBeNull();
     expect(result!.trigger).toBe("low-avg-high-volume");
@@ -179,7 +179,7 @@ describe("shouldEvict — allowlist", () => {
 });
 
 describe("shouldEvict — trigger priority", () => {
-  test("trigger 1 takes priority when both 1 and 3 match", () => {
+  test("trigger 1 takes priority over trigger 3 when injections 51-149", () => {
     const stats = makeStats({
       avgCorrelatedRating: 2.0,
       injectionCount: 100,
@@ -189,6 +189,66 @@ describe("shouldEvict — trigger priority", () => {
     const result = shouldEvict(stats);
     expect(result).not.toBeNull();
     expect(result!.trigger).toBe("low-avg-high-volume");
+  });
+
+  test("trigger 4 takes priority over trigger 1 when injections >= 150", () => {
+    const stats = makeStats({
+      avgCorrelatedRating: 2.0,
+      injectionCount: 200,
+      lowRatingActivations: 40,
+      highRatingActivations: 10,
+    });
+    const result = shouldEvict(stats);
+    expect(result).not.toBeNull();
+    expect(result!.trigger).toBe("high-injection-low-value");
+  });
+});
+
+describe("shouldEvict — trigger 4: high-injection-low-value", () => {
+  test("evicts rule with injections >= 150 and avg < 4.0", () => {
+    const stats = makeStats({
+      avgCorrelatedRating: 2.8,
+      injectionCount: 200,
+      highRatingActivations: 50,
+      lowRatingActivations: 10,
+    });
+    const result = shouldEvict(stats);
+    expect(result).not.toBeNull();
+    expect(result!.trigger).toBe("high-injection-low-value");
+  });
+
+  test("fires at exact threshold boundary (150 injections, 3.9 avg)", () => {
+    const stats = makeStats({
+      avgCorrelatedRating: 3.9,
+      injectionCount: 150,
+      highRatingActivations: 50,
+      lowRatingActivations: 10,
+    });
+    const result = shouldEvict(stats);
+    expect(result).not.toBeNull();
+    expect(result!.trigger).toBe("high-injection-low-value");
+  });
+
+  test("does not fire when avg >= 4.0 even with 200 injections", () => {
+    const stats = makeStats({
+      avgCorrelatedRating: 4.0,
+      injectionCount: 200,
+      highRatingActivations: 50,
+      lowRatingActivations: 10,
+    });
+    const result = shouldEvict(stats);
+    expect(result).toBeNull();
+  });
+
+  test("does not fire when injections < 150 and avg >= 4.0", () => {
+    const stats = makeStats({
+      avgCorrelatedRating: 4.5,
+      injectionCount: 149,
+      highRatingActivations: 50,
+      lowRatingActivations: 10,
+    });
+    const result = shouldEvict(stats);
+    expect(result).toBeNull();
   });
 });
 
