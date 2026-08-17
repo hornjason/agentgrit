@@ -17,7 +17,7 @@ import { loadVectorCache, rankByVectorSimilarity } from "./embeddings";
 import { cosine } from "./embedder";
 import { loadPatterns, loadHybridPatterns } from "./generate-patterns";
 import type { DomainPattern } from "./generate-patterns";
-import { shouldEvict, loadEvictionAllowlist, appendEvictionLog } from "../promote/auto-eviction";
+import { shouldEvict, loadEvictionAllowlist, appendEvictionLog, loadEvictedRegistry, addToEvictedRegistry } from "../promote/auto-eviction";
 import { loadRuleStats } from "../promote/rules";
 
 // ── Default Domains ──
@@ -319,13 +319,17 @@ export async function getContextRules(
   });
 
   // 4. Auto-eviction filter — exclude low-value rules from injection
+  const evictedRegistry = loadEvictedRegistry();
+  const afterRegistryFilter = filtered.filter(([id]) => !evictedRegistry.has(id));
+
   const ruleStatsMap = loadRuleStats();
   const allowlist = loadEvictionAllowlist();
-  const afterEviction = filtered.filter(([id]) => {
+  const afterEviction = afterRegistryFilter.filter(([id]) => {
     const stats = ruleStatsMap.get(id);
     if (!stats) return true;
     const eviction = shouldEvict(stats, allowlist);
     if (eviction) {
+      addToEvictedRegistry({ ruleId: id, trigger: eviction.trigger, reason: eviction.reason });
       appendEvictionLog({
         ruleId: id,
         trigger: eviction.trigger,

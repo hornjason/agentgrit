@@ -89,7 +89,63 @@ export function addToEvictionAllowlist(ruleId: string, path?: string): void {
   writeFileSync(filePath, JSON.stringify([...existing], null, 2), "utf-8");
 }
 
+export interface EvictedRegistryEntry {
+  ruleId: string;
+  trigger: EvictionTrigger;
+  reason: string;
+  evictedAt: string;
+}
+
+export function loadEvictedRegistry(dir?: string): Set<string> {
+  const filePath = join(dir ?? stateDir(), "evicted-rules.json");
+  if (!existsSync(filePath)) return new Set();
+  try {
+    const data = JSON.parse(readFileSync(filePath, "utf-8"));
+    if (data && Array.isArray(data.evicted)) {
+      return new Set(data.evicted.map((e: EvictedRegistryEntry) => e.ruleId));
+    }
+    return new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+export function loadEvictedRegistryEntries(dir?: string): EvictedRegistryEntry[] {
+  const filePath = join(dir ?? stateDir(), "evicted-rules.json");
+  if (!existsSync(filePath)) return [];
+  try {
+    const data = JSON.parse(readFileSync(filePath, "utf-8"));
+    return Array.isArray(data?.evicted) ? data.evicted : [];
+  } catch {
+    return [];
+  }
+}
+
+export function addToEvictedRegistry(
+  entry: { ruleId: string; trigger: EvictionTrigger; reason: string },
+  dir?: string,
+): void {
+  const baseDir = dir ?? stateDir();
+  const filePath = join(baseDir, "evicted-rules.json");
+  if (!existsSync(baseDir)) mkdirSync(baseDir, { recursive: true });
+
+  const existing = loadEvictedRegistryEntries(baseDir);
+  if (existing.some(e => e.ruleId === entry.ruleId)) return;
+
+  existing.push({
+    ruleId: entry.ruleId,
+    trigger: entry.trigger,
+    reason: entry.reason,
+    evictedAt: new Date().toISOString(),
+  });
+
+  writeFileSync(filePath, JSON.stringify({ evicted: existing }, null, 2), "utf-8");
+}
+
 export function appendEvictionLog(entry: EvictionLogEntry, dir?: string): void {
+  const registry = loadEvictedRegistry(dir);
+  if (registry.has(entry.ruleId)) return;
+
   const logPath = join(dir ?? stateDir(), "eviction-log.jsonl");
   const logDir = dirname(logPath);
   if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true });
