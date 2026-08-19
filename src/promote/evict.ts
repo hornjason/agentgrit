@@ -3,6 +3,7 @@ import { dirname, join } from "path";
 import { loadConfig, statePath } from "../adapters/paths";
 import { loadRuleStats, type RuleStats } from "./rules";
 import { removeRule, normalizeRuleId } from "./bridge";
+import { addToEvictedRegistry, type EvictionTrigger } from "./auto-eviction";
 
 const _cfg = loadConfig();
 const EVICTION_FILE = "eviction-candidates.json";
@@ -566,6 +567,16 @@ function appendDemotedRule(ruleId: string, ruleText: string, learnedPath: string
   writeFileSync(learnedPath, newContent);
 }
 
+function mapReasonToTrigger(reason: string): EvictionTrigger {
+  if (reason.startsWith("stale") || reason.startsWith("untracked") || reason.startsWith("critical-stale")) {
+    return "never-helped";
+  }
+  if (reason.startsWith("noise")) {
+    return "high-injection-low-value";
+  }
+  return "low-avg-high-volume";
+}
+
 export async function evictRules(
   candidates: EvictionCandidate[],
   claudeLearnedPath: string,
@@ -573,6 +584,7 @@ export async function evictRules(
     ruleDomainsPath?: string;
     dryRun?: boolean;
     claudeMdPath?: string;
+    stateDir?: string;
   },
 ): Promise<EvictionResult> {
   const result: EvictionResult = { evicted: [], skipped: [], errors: [] };
@@ -599,6 +611,10 @@ export async function evictRules(
           await removeRule(candidate.ruleId, claudeMdPath);
           // Append to CLAUDE-LEARNED.md with demotion comment
           appendDemotedRule(candidate.ruleId, criticalRuleText, claudeLearnedPath);
+          addToEvictedRegistry(
+            { ruleId: candidate.ruleId, trigger: mapReasonToTrigger(candidate.reason), reason: candidate.reason },
+            options?.stateDir,
+          );
           result.evicted.push(candidate.ruleId);
           continue;
         } catch (err) {
@@ -617,6 +633,10 @@ export async function evictRules(
       // Rule might not exist in CLAUDE-LEARNED.md by exact ID match
     }
 
+    addToEvictedRegistry(
+      { ruleId: candidate.ruleId, trigger: mapReasonToTrigger(candidate.reason), reason: candidate.reason },
+      options?.stateDir,
+    );
     result.evicted.push(candidate.ruleId);
   }
 

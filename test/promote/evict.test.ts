@@ -12,6 +12,7 @@ import {
 } from "../../src/promote/evict";
 import { normalizeRuleId } from "../../src/promote/bridge";
 import { persistRuleStats, type RuleStats } from "../../src/promote/rules";
+import { loadEvictedRegistryEntries } from "../../src/promote/auto-eviction";
 
 const TMP_DIR = join(import.meta.dir, ".tmp-evict-test");
 const STATE_DIR = join(TMP_DIR, "state");
@@ -1002,5 +1003,81 @@ describe("evictRules with claudeMdPath — Critical Rules demotion", () => {
 
     const content = readFileSync(CLAUDE_LEARNED, "utf-8");
     expect(content).not.toContain("evict-me");
+  });
+});
+
+describe("evictRules writes to evicted registry", () => {
+  test("daemon eviction records rule in evicted-rules.json", async () => {
+    writeFileSync(CLAUDE_LEARNED, makeClaudeLearned(["daemon-evict-me", "keep-me"]));
+
+    const candidates: EvictionCandidate[] = [
+      {
+        ruleId: "daemon-evict-me",
+        avgCorrelatedRating: 2.0,
+        sessionCount: 10,
+        reason: "avgCorrelatedRating 2.00 < 3.0 across 10 sessions",
+      },
+    ];
+
+    const result = await evictRules(candidates, CLAUDE_LEARNED, {
+      ruleDomainsPath: RULE_DOMAINS,
+      stateDir: STATE_DIR,
+    });
+    expect(result.evicted).toContain("daemon-evict-me");
+
+    const entries = loadEvictedRegistryEntries(STATE_DIR);
+    const found = entries.find(e => e.ruleId === "daemon-evict-me");
+    expect(found).toBeDefined();
+    expect(found!.trigger).toBe("low-avg-high-volume");
+    expect(found!.reason).toContain("avgCorrelatedRating");
+    expect(found!.evictedAt).toBeDefined();
+  });
+
+  test("demotion path records rule in evicted-rules.json", async () => {
+    writeFileSync(CLAUDE_MD, makeClaudeMd(["demote-registry-test"]));
+    writeFileSync(CLAUDE_LEARNED, makeClaudeLearned(["existing"]));
+
+    const candidates: EvictionCandidate[] = [
+      {
+        ruleId: "demote-registry-test",
+        avgCorrelatedRating: 1.5,
+        sessionCount: 8,
+        reason: "critical-low-correlation: avgCorrelatedRating 1.50 < 3.0",
+      },
+    ];
+
+    const result = await evictRules(candidates, CLAUDE_LEARNED, {
+      claudeMdPath: CLAUDE_MD,
+      ruleDomainsPath: RULE_DOMAINS,
+      stateDir: STATE_DIR,
+    });
+    expect(result.evicted).toContain("demote-registry-test");
+
+    const entries = loadEvictedRegistryEntries(STATE_DIR);
+    const found = entries.find(e => e.ruleId === "demote-registry-test");
+    expect(found).toBeDefined();
+    expect(found!.trigger).toBe("low-avg-high-volume");
+  });
+
+  test("dry run does NOT write to evicted registry", async () => {
+    writeFileSync(CLAUDE_LEARNED, makeClaudeLearned(["dry-run-rule"]));
+
+    const candidates: EvictionCandidate[] = [
+      {
+        ruleId: "dry-run-rule",
+        avgCorrelatedRating: 2.0,
+        sessionCount: 10,
+        reason: "low correlation",
+      },
+    ];
+
+    await evictRules(candidates, CLAUDE_LEARNED, {
+      ruleDomainsPath: RULE_DOMAINS,
+      stateDir: STATE_DIR,
+      dryRun: true,
+    });
+
+    const entries = loadEvictedRegistryEntries(STATE_DIR);
+    expect(entries.find(e => e.ruleId === "dry-run-rule")).toBeUndefined();
   });
 });

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, appendFileSync, writeFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, appendFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from "fs";
 import { dirname, join } from "path";
 import { stateDir } from "../adapters/paths";
 import type { RuleStats } from "./rules";
@@ -129,11 +129,23 @@ export function addToEvictedRegistry(
     evictedAt: new Date().toISOString(),
   });
 
-  writeFileSync(filePath, JSON.stringify({ evicted: existing }, null, 2), "utf-8");
+  const content = JSON.stringify({ evicted: existing }, null, 2);
+  const tmpPath = filePath + ".tmp." + process.pid;
+  try {
+    writeFileSync(tmpPath, content, "utf-8");
+    renameSync(tmpPath, filePath);
+  } catch (err) {
+    try { unlinkSync(tmpPath); } catch { /* cleanup best-effort */ }
+    throw err;
+  }
 }
 
 export function appendEvictionLog(entry: EvictionLogEntry, dir?: string): void {
-  const logPath = join(dir ?? stateDir(), "eviction-log.jsonl");
+  const baseDir = dir ?? stateDir();
+  const registry = loadEvictedRegistry(baseDir);
+  if (registry.has(entry.ruleId)) return;
+
+  const logPath = join(baseDir, "eviction-log.jsonl");
   const logDir = dirname(logPath);
   if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true });
   appendFileSync(logPath, JSON.stringify(entry) + "\n", "utf-8");
