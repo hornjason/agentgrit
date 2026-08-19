@@ -18,7 +18,7 @@ import { cosine } from "./embedder";
 import { loadPatterns, loadHybridPatterns } from "./generate-patterns";
 import type { DomainPattern } from "./generate-patterns";
 import { shouldEvict, loadEvictionAllowlist, appendEvictionLog, loadEvictedRegistry, addToEvictedRegistry, type EvictionTrigger } from "../promote/auto-eviction";
-import { getFilteredRuleIds } from "../promote/lifecycle";
+import { getFilteredRuleIds, transitionRule } from "../promote/lifecycle";
 import { loadRuleStats, type RuleStats } from "../promote/rules";
 
 // ── Default Domains ──
@@ -322,8 +322,12 @@ export async function getContextRules(
   // 4. Auto-eviction filter — exclude low-value rules from injection
   let suppressedIds: Set<string>;
   try {
-    const lifecycleIds = getFilteredRuleIds(["evicted", "graduated"]);
-    suppressedIds = lifecycleIds.size > 0 ? lifecycleIds : loadEvictedRegistry();
+    const lifecyclePath = join(stateDir(), "rule-lifecycle.json");
+    if (existsSync(lifecyclePath)) {
+      suppressedIds = getFilteredRuleIds(["evicted", "graduated"]);
+    } else {
+      suppressedIds = loadEvictedRegistry();
+    }
   } catch {
     suppressedIds = loadEvictedRegistry();
   }
@@ -345,6 +349,7 @@ export async function getContextRules(
 
   for (const { id, eviction, stats } of newlyEvicted) {
     addToEvictedRegistry({ ruleId: id, trigger: eviction.trigger, reason: eviction.reason });
+    transitionRule(id, "evicted", eviction.reason, "context-refresh-inline");
     appendEvictionLog({
       ruleId: id,
       trigger: eviction.trigger,
@@ -479,7 +484,7 @@ export function filterLearnedRules(rules: string[], queryText: string, topK: num
 import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "fs";
 import { execSync } from "child_process";
 import { dirname, join } from "path";
-import { statePath } from "../adapters/paths";
+import { stateDir, statePath } from "../adapters/paths";
 
 const SESSION_CONTEXT_FILE = "session-context.json";
 const SESSION_HISTORY_FILE = "session-context-history.jsonl";

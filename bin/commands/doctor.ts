@@ -100,6 +100,33 @@ export function runDoctor(): DoctorReport {
     }
   }
 
+  // Eviction registry check
+  const evictedPath = join(base, "state", "evicted-rules.json");
+  if (!existsSync(evictedPath)) {
+    checks.push({ name: "eviction-registry", status: "warn", message: "evicted-rules.json missing — eviction not enforced", suggestion: "Run 'agentgrit context refresh' to create" });
+  } else {
+    try {
+      const evicted = JSON.parse(readFileSync(evictedPath, "utf-8"));
+      const count = Array.isArray(evicted.evicted) ? evicted.evicted.length : 0;
+      checks.push({ name: "eviction-registry", status: "pass", message: `${count} rules in eviction registry` });
+    } catch {
+      checks.push({ name: "eviction-registry", status: "fail", message: "evicted-rules.json corrupted", suggestion: "Run 'agentgrit context refresh' to rebuild" });
+    }
+  }
+
+  // Context freshness check
+  const contextPath = join(base, "state", "session-context.json");
+  if (existsSync(contextPath)) {
+    const ctxStat = statSync(contextPath);
+    const ctxAgeMs = Date.now() - ctxStat.mtime.getTime();
+    const ctxAgeDays = ctxAgeMs / (1000 * 60 * 60 * 24);
+    if (ctxAgeDays > 3) {
+      checks.push({ name: "context-freshness", status: "warn", message: `session-context.json is ${Math.floor(ctxAgeDays)} days old`, suggestion: "Context refresh may not be running" });
+    } else {
+      checks.push({ name: "context-freshness", status: "pass", message: `session-context.json updated ${Math.floor(ctxAgeDays * 24)} hours ago` });
+    }
+  }
+
   return {
     checks,
     passed: checks.filter((c) => c.status === "pass").length,

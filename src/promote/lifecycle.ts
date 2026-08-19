@@ -24,7 +24,17 @@ export function loadLifecycle(dir?: string): RuleLifecycle {
   if (!existsSync(filePath)) return { version: 1, rules: {} };
   try {
     const data = JSON.parse(readFileSync(filePath, "utf-8"));
-    return data as RuleLifecycle;
+    const validStates = new Set<string>(["active", "graduated", "evicted"]);
+    const rules: Record<string, RuleLifecycleEntry> = {};
+    for (const [ruleId, entry] of Object.entries(data.rules ?? {})) {
+      const e = entry as RuleLifecycleEntry;
+      if (validStates.has(e.state)) {
+        rules[ruleId] = e;
+      } else {
+        console.error(`[lifecycle] Invalid state "${e.state}" for rule ${ruleId} — skipping`);
+      }
+    }
+    return { version: 1, rules };
   } catch {
     return { version: 1, rules: {} };
   }

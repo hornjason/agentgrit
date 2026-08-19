@@ -682,6 +682,69 @@ function checkDataIntegrity(_config: AgentGritConfig): DoctorSection {
 
 // ── Run Doctor ──
 
+function checkEvictionAndContext(config: AgentGritConfig): DoctorSection {
+  const checks: CheckResult[] = [];
+  const stateBase = join(config.signalDir, "..", "state");
+
+  const evictedPath = join(stateBase, "evicted-rules.json");
+  if (!existsSync(evictedPath)) {
+    checks.push({
+      name: "eviction-registry",
+      status: "warning",
+      message: "evicted-rules.json missing — eviction not enforced",
+    });
+  } else {
+    try {
+      const evicted = JSON.parse(readFileSync(evictedPath, "utf-8"));
+      const count = Array.isArray(evicted.evicted) ? evicted.evicted.length : 0;
+      checks.push({
+        name: "eviction-registry",
+        status: "ok",
+        message: `${count} rules in eviction registry`,
+      });
+    } catch {
+      checks.push({
+        name: "eviction-registry",
+        status: "error",
+        message: "evicted-rules.json corrupted",
+      });
+    }
+  }
+
+  const contextPath = join(stateBase, "session-context.json");
+  if (!existsSync(contextPath)) {
+    checks.push({
+      name: "context-freshness",
+      status: "warning",
+      message: "session-context.json missing — context refresh may not be running",
+    });
+  } else {
+    const ctxInfo = fileAge(contextPath);
+    const ctxAgeDays = ctxInfo.ageMs / MS_PER_DAY;
+    if (ctxAgeDays > 3) {
+      checks.push({
+        name: "context-freshness",
+        status: "warning",
+        message: `session-context.json is ${Math.floor(ctxAgeDays)} days old`,
+        lastActivity: ctxInfo.lastModified,
+      });
+    } else {
+      checks.push({
+        name: "context-freshness",
+        status: "ok",
+        message: `session-context.json updated ${Math.floor(ctxAgeDays * 24)} hours ago`,
+        lastActivity: ctxInfo.lastModified,
+      });
+    }
+  }
+
+  return {
+    name: "HEALTH",
+    status: worstStatus(checks.map((c) => c.status)),
+    checks,
+  };
+}
+
 export async function runDoctor(config: AgentGritConfig): Promise<DoctorReport> {
   const sections: DoctorSection[] = [
     checkCapture(config),
@@ -693,6 +756,7 @@ export async function runDoctor(config: AgentGritConfig): Promise<DoctorReport> 
     checkCrossReferences(config),
     checkDataIntegrity(config),
     checkWiring(config),
+    checkEvictionAndContext(config),
   ];
 
   return {

@@ -38,6 +38,39 @@ describe("loadLifecycle", () => {
     expect(result.version).toBe(1);
     expect(result.rules["test-rule"].state).toBe("evicted");
   });
+
+  test("skips entries with invalid state", async () => {
+    const { loadLifecycle } = await import("../../src/promote/lifecycle");
+    const data = {
+      version: 1,
+      rules: {
+        "valid-rule": {
+          state: "evicted",
+          transitionedAt: "2026-08-19T00:00:00.000Z",
+          reason: "low correlation",
+          addedBy: "eviction-daemon",
+        },
+        "corrupt-rule": {
+          state: "INVALID_STATE",
+          transitionedAt: "2026-08-19T00:00:00.000Z",
+          reason: "corrupted",
+          addedBy: "unknown",
+        },
+        "another-valid": {
+          state: "graduated",
+          transitionedAt: "2026-08-19T00:00:00.000Z",
+          reason: "promoted",
+          addedBy: "manual",
+        },
+      },
+    };
+    writeFileSync(join(TEMP_DIR, "rule-lifecycle.json"), JSON.stringify(data), "utf-8");
+    const result = loadLifecycle(TEMP_DIR);
+    expect(Object.keys(result.rules)).toHaveLength(2);
+    expect(result.rules["valid-rule"]).toBeDefined();
+    expect(result.rules["another-valid"]).toBeDefined();
+    expect(result.rules["corrupt-rule"]).toBeUndefined();
+  });
 });
 
 describe("transitionRule", () => {
