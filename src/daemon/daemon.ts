@@ -769,8 +769,8 @@ export async function runWeeklyReview(
     const { stateDir } = await import("../adapters/paths");
     const { join } = await import("path");
 
-    const rulesDir = join(config.signalDir, "..", "rules");
-    await buildGraph(rulesDir, stateDir());
+    const { resolveMemoryDir } = await import("../adapters/paths");
+    await buildGraph(resolveMemoryDir(), stateDir());
     result.graphRebuilt = true;
   } catch (err) {
     result.errors.push(`graph: ${err instanceof Error ? err.message : String(err)}`);
