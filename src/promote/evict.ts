@@ -4,6 +4,7 @@ import { loadConfig, statePath } from "../adapters/paths";
 import { loadRuleStats, type RuleStats } from "./rules";
 import { removeRule, normalizeRuleId } from "./bridge";
 import { addToEvictedRegistry, type EvictionTrigger } from "./auto-eviction";
+import { transitionRule } from "./lifecycle";
 
 const _cfg = loadConfig();
 const EVICTION_FILE = "eviction-candidates.json";
@@ -615,6 +616,7 @@ export async function evictRules(
             { ruleId: candidate.ruleId, trigger: mapReasonToTrigger(candidate.reason), reason: candidate.reason },
             options?.stateDir,
           );
+          transitionRule(candidate.ruleId, "evicted", candidate.reason, "eviction-daemon", options?.stateDir);
           result.evicted.push(candidate.ruleId);
           continue;
         } catch (err) {
@@ -637,6 +639,7 @@ export async function evictRules(
       { ruleId: candidate.ruleId, trigger: mapReasonToTrigger(candidate.reason), reason: candidate.reason },
       options?.stateDir,
     );
+    transitionRule(candidate.ruleId, "evicted", candidate.reason, "eviction-daemon", options?.stateDir);
     result.evicted.push(candidate.ruleId);
   }
 

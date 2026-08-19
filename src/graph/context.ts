@@ -18,6 +18,7 @@ import { cosine } from "./embedder";
 import { loadPatterns, loadHybridPatterns } from "./generate-patterns";
 import type { DomainPattern } from "./generate-patterns";
 import { shouldEvict, loadEvictionAllowlist, appendEvictionLog, loadEvictedRegistry, addToEvictedRegistry, type EvictionTrigger } from "../promote/auto-eviction";
+import { getFilteredRuleIds } from "../promote/lifecycle";
 import { loadRuleStats, type RuleStats } from "../promote/rules";
 
 // ── Default Domains ──
@@ -319,8 +320,14 @@ export async function getContextRules(
   });
 
   // 4. Auto-eviction filter — exclude low-value rules from injection
-  const evictedRegistry = loadEvictedRegistry();
-  const afterRegistryFilter = filtered.filter(([id]) => !evictedRegistry.has(id));
+  let suppressedIds: Set<string>;
+  try {
+    const lifecycleIds = getFilteredRuleIds(["evicted", "graduated"]);
+    suppressedIds = lifecycleIds.size > 0 ? lifecycleIds : loadEvictedRegistry();
+  } catch {
+    suppressedIds = loadEvictedRegistry();
+  }
+  const afterRegistryFilter = filtered.filter(([id]) => !suppressedIds.has(id));
 
   const ruleStatsMap = loadRuleStats();
   const allowlist = loadEvictionAllowlist();
