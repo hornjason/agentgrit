@@ -1006,8 +1006,8 @@ describe("evictRules with claudeMdPath — Critical Rules demotion", () => {
   });
 });
 
-describe("evictRules writes to evicted registry", () => {
-  test("daemon eviction records rule in evicted-rules.json", async () => {
+describe("evictRules writes to lifecycle", () => {
+  test("daemon eviction records rule in rule-lifecycle.json", async () => {
     writeFileSync(CLAUDE_LEARNED, makeClaudeLearned(["daemon-evict-me", "keep-me"]));
 
     const candidates: EvictionCandidate[] = [
@@ -1025,15 +1025,14 @@ describe("evictRules writes to evicted registry", () => {
     });
     expect(result.evicted).toContain("daemon-evict-me");
 
-    const entries = loadEvictedRegistryEntries(STATE_DIR);
-    const found = entries.find(e => e.ruleId === "daemon-evict-me");
-    expect(found).toBeDefined();
-    expect(found!.trigger).toBe("low-avg-high-volume");
-    expect(found!.reason).toContain("avgCorrelatedRating");
-    expect(found!.evictedAt).toBeDefined();
+    const { loadLifecycle } = await import("../../src/promote/lifecycle");
+    const lifecycle = loadLifecycle(STATE_DIR);
+    expect(lifecycle.rules["daemon-evict-me"]).toBeDefined();
+    expect(lifecycle.rules["daemon-evict-me"].state).toBe("evicted");
+    expect(lifecycle.rules["daemon-evict-me"].reason).toContain("avgCorrelatedRating");
   });
 
-  test("demotion path records rule in evicted-rules.json", async () => {
+  test("demotion path records rule in rule-lifecycle.json", async () => {
     writeFileSync(CLAUDE_MD, makeClaudeMd(["demote-registry-test"]));
     writeFileSync(CLAUDE_LEARNED, makeClaudeLearned(["existing"]));
 
@@ -1053,10 +1052,10 @@ describe("evictRules writes to evicted registry", () => {
     });
     expect(result.evicted).toContain("demote-registry-test");
 
-    const entries = loadEvictedRegistryEntries(STATE_DIR);
-    const found = entries.find(e => e.ruleId === "demote-registry-test");
-    expect(found).toBeDefined();
-    expect(found!.trigger).toBe("low-avg-high-volume");
+    const { loadLifecycle } = await import("../../src/promote/lifecycle");
+    const lifecycle = loadLifecycle(STATE_DIR);
+    expect(lifecycle.rules["demote-registry-test"]).toBeDefined();
+    expect(lifecycle.rules["demote-registry-test"].state).toBe("evicted");
   });
 
   test("dry run does NOT write to evicted registry", async () => {

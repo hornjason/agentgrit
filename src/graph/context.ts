@@ -17,7 +17,7 @@ import { loadVectorCache, rankByVectorSimilarity } from "./embeddings";
 import { cosine } from "./embedder";
 import { loadPatterns, loadHybridPatterns } from "./generate-patterns";
 import type { DomainPattern } from "./generate-patterns";
-import { shouldEvict, loadEvictionAllowlist, appendEvictionLog, loadEvictedRegistry, addToEvictedRegistry, type EvictionTrigger } from "../promote/auto-eviction";
+import { shouldEvict, loadEvictionAllowlist, appendEvictionLog, type EvictionTrigger } from "../promote/auto-eviction";
 import { getFilteredRuleIds, transitionRule } from "../promote/lifecycle";
 import { loadRuleStats, type RuleStats } from "../promote/rules";
 
@@ -320,17 +320,7 @@ export async function getContextRules(
   });
 
   // 4. Auto-eviction filter — exclude low-value rules from injection
-  let suppressedIds: Set<string>;
-  try {
-    const lifecyclePath = join(stateDir(), "rule-lifecycle.json");
-    if (existsSync(lifecyclePath)) {
-      suppressedIds = getFilteredRuleIds(["evicted", "graduated"]);
-    } else {
-      suppressedIds = loadEvictedRegistry();
-    }
-  } catch {
-    suppressedIds = loadEvictedRegistry();
-  }
+  const suppressedIds = getFilteredRuleIds(["evicted", "graduated"]);
   const afterRegistryFilter = filtered.filter(([id]) => !suppressedIds.has(id));
 
   const ruleStatsMap = loadRuleStats();
@@ -348,7 +338,6 @@ export async function getContextRules(
   });
 
   for (const { id, eviction, stats } of newlyEvicted) {
-    addToEvictedRegistry({ ruleId: id, trigger: eviction.trigger, reason: eviction.reason });
     transitionRule(id, "evicted", eviction.reason, "context-refresh-inline");
     appendEvictionLog({
       ruleId: id,

@@ -3,7 +3,7 @@ import { dirname, join } from "path";
 import { loadConfig, statePath } from "../adapters/paths";
 import { loadRuleStats, type RuleStats } from "./rules";
 import { removeRule, normalizeRuleId } from "./bridge";
-import { addToEvictedRegistry, type EvictionTrigger } from "./auto-eviction";
+import { type EvictionTrigger } from "./auto-eviction";
 import { transitionRule } from "./lifecycle";
 
 const _cfg = loadConfig();
@@ -612,10 +612,6 @@ export async function evictRules(
           await removeRule(candidate.ruleId, claudeMdPath);
           // Append to CLAUDE-LEARNED.md with demotion comment
           appendDemotedRule(candidate.ruleId, criticalRuleText, claudeLearnedPath);
-          addToEvictedRegistry(
-            { ruleId: candidate.ruleId, trigger: mapReasonToTrigger(candidate.reason), reason: candidate.reason },
-            options?.stateDir,
-          );
           transitionRule(candidate.ruleId, "evicted", candidate.reason, "eviction-daemon", options?.stateDir);
           result.evicted.push(candidate.ruleId);
           continue;
@@ -635,10 +631,6 @@ export async function evictRules(
       // Rule might not exist in CLAUDE-LEARNED.md by exact ID match
     }
 
-    addToEvictedRegistry(
-      { ruleId: candidate.ruleId, trigger: mapReasonToTrigger(candidate.reason), reason: candidate.reason },
-      options?.stateDir,
-    );
     transitionRule(candidate.ruleId, "evicted", candidate.reason, "eviction-daemon", options?.stateDir);
     result.evicted.push(candidate.ruleId);
   }

@@ -111,6 +111,7 @@ export function loadEvictedRegistryEntries(dir?: string): EvictedRegistryEntry[]
   }
 }
 
+/** @deprecated Use transitionRule() from lifecycle.ts instead. Writes to evicted-rules.json will be removed. */
 export function addToEvictedRegistry(
   entry: { ruleId: string; trigger: EvictionTrigger; reason: string },
   dir?: string,
