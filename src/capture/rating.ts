@@ -131,6 +131,7 @@ export interface ObjectiveScoreInput {
   firstPassGates: number;
   uninterruptedRuns: number;
   shortFrustrated: number;
+  totalTurns: number;
 }
 
 export interface ObjectiveScoreResult {
@@ -503,7 +504,7 @@ export function scoreSessionObjective(
   const uCap = t?.uninterruptedCap ?? 1.5;
   const frustWeight = t?.frustrationWeight ?? -0.3;
 
-  const correctionPenalty = input.corrections * corrWeight;
+  const correctionPenalty = Math.max((input.corrections / Math.max(input.totalTurns, 1)) * corrWeight * 10, -3.0);
   const repromptPenalty = Math.max(input.reprompts * repWeight, -1.5);
   const iterationPenalty = input.iterations * iterWeight;
   const firstPassBonusVal = input.firstPassGates * fpBonus;
@@ -728,6 +729,7 @@ export async function captureSessionSentiment(
     firstPassGates: opts?.firstPassGates ?? 0,
     uninterruptedRuns,
     shortFrustrated,
+    totalTurns: turns.length,
   });
 
   const signal: SentimentSignal = {

@@ -216,6 +216,26 @@ describe("saveLifecycle", () => {
     expect(raw.version).toBe(1);
     expect(raw.rules["r1"].state).toBe("active");
   });
+
+  test("uses lockfile during write", async () => {
+    const { saveLifecycle } = await import("../../src/promote/lifecycle");
+    const lifecycle = { version: 1 as const, rules: { "r1": { state: "active" as const, transitionedAt: "2026-01-01T00:00:00Z", reason: "test", addedBy: "manual" } } };
+    saveLifecycle(lifecycle, TEMP_DIR);
+    expect(existsSync(join(TEMP_DIR, "rule-lifecycle.json.lock"))).toBe(false);
+    expect(existsSync(join(TEMP_DIR, "rule-lifecycle.json"))).toBe(true);
+  });
+});
+
+describe("loadLifecycle — tmp cleanup", () => {
+  test("cleans up orphaned .tmp files on load", async () => {
+    const { loadLifecycle } = await import("../../src/promote/lifecycle");
+    writeFileSync(join(TEMP_DIR, "rule-lifecycle.json.tmp.12345"), "stale", "utf-8");
+    writeFileSync(join(TEMP_DIR, "rule-lifecycle.json.tmp.67890"), "stale", "utf-8");
+    expect(existsSync(join(TEMP_DIR, "rule-lifecycle.json.tmp.12345"))).toBe(true);
+    loadLifecycle(TEMP_DIR);
+    expect(existsSync(join(TEMP_DIR, "rule-lifecycle.json.tmp.12345"))).toBe(false);
+    expect(existsSync(join(TEMP_DIR, "rule-lifecycle.json.tmp.67890"))).toBe(false);
+  });
 });
 
 describe("undersampled state", () => {

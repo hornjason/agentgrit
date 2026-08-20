@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, renameSync, unlinkSync } from "fs";
-import { join } from "path";
+import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, renameSync, unlinkSync, readdirSync, openSync, closeSync } from "fs";
+import { join, basename, dirname } from "path";
 import { stateDir } from "../adapters/paths";
 import { loadEvictedRegistryEntries } from "./auto-eviction";
 import { loadRuleStats } from "./rules";
@@ -20,9 +20,51 @@ export interface RuleLifecycle {
 }
 
 const LIFECYCLE_FILE = "rule-lifecycle.json";
+const LOCK_STALE_MS = 30_000;
+
+function withLock<T>(lockPath: string, fn: () => T): T {
+  let fd: number | undefined;
+  try {
+    fd = openSync(lockPath, "wx");
+  } catch {
+    if (existsSync(lockPath)) {
+      try {
+        const stat = Bun.file(lockPath);
+        const age = Date.now() - stat.lastModified;
+        if (age > LOCK_STALE_MS) unlinkSync(lockPath);
+      } catch { /* race — another process cleaned it */ }
+    }
+    try {
+      fd = openSync(lockPath, "wx");
+    } catch {
+      fd = undefined;
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    if (fd !== undefined) {
+      try { closeSync(fd); } catch { /* best-effort */ }
+      try { unlinkSync(lockPath); } catch { /* best-effort */ }
+    }
+  }
+}
+
+function cleanupTmpFiles(dir: string, prefix: string): void {
+  try {
+    const entries = readdirSync(dir);
+    for (const entry of entries) {
+      if (entry.startsWith(prefix + ".tmp.")) {
+        try { unlinkSync(join(dir, entry)); } catch { /* best-effort */ }
+      }
+    }
+  } catch { /* dir might not exist */ }
+}
 
 export function loadLifecycle(dir?: string): RuleLifecycle {
-  const filePath = join(dir ?? stateDir(), LIFECYCLE_FILE);
+  const baseDir = dir ?? stateDir();
+  const filePath = join(baseDir, LIFECYCLE_FILE);
+  cleanupTmpFiles(baseDir, LIFECYCLE_FILE);
   if (!existsSync(filePath)) return { version: 1, rules: {} };
   try {
     const data = JSON.parse(readFileSync(filePath, "utf-8"));
@@ -46,15 +88,18 @@ export function saveLifecycle(lifecycle: RuleLifecycle, dir?: string): void {
   const baseDir = dir ?? stateDir();
   if (!existsSync(baseDir)) mkdirSync(baseDir, { recursive: true });
   const filePath = join(baseDir, LIFECYCLE_FILE);
-  const content = JSON.stringify(lifecycle, null, 2);
-  const tmpPath = filePath + ".tmp." + process.pid;
-  try {
-    writeFileSync(tmpPath, content, "utf-8");
-    renameSync(tmpPath, filePath);
-  } catch (err) {
-    try { unlinkSync(tmpPath); } catch { /* cleanup best-effort */ }
-    throw err;
-  }
+  const lockPath = filePath + ".lock";
+  withLock(lockPath, () => {
+    const content = JSON.stringify(lifecycle, null, 2);
+    const tmpPath = filePath + ".tmp." + process.pid;
+    try {
+      writeFileSync(tmpPath, content, "utf-8");
+      renameSync(tmpPath, filePath);
+    } catch (err) {
+      try { unlinkSync(tmpPath); } catch { /* cleanup best-effort */ }
+      throw err;
+    }
+  });
 }
 
 export interface TransitionLogEntry {

@@ -2,6 +2,7 @@ import { existsSync, readFileSync, appendFileSync, writeFileSync, mkdirSync, ren
 import { dirname, join } from "path";
 import { stateDir } from "../adapters/paths";
 import type { RuleStats } from "./rules";
+import { getFilteredRuleIds } from "./lifecycle";
 
 export type EvictionTrigger = "low-avg-high-volume" | "never-helped" | "net-negative-roi" | "high-injection-low-value";
 
@@ -143,8 +144,8 @@ export function addToEvictedRegistry(
 
 export function appendEvictionLog(entry: EvictionLogEntry, dir?: string): void {
   const baseDir = dir ?? stateDir();
-  const registry = loadEvictedRegistry(baseDir);
-  if (registry.has(entry.ruleId)) return;
+  const evictedIds = getFilteredRuleIds(['evicted'], baseDir);
+  if (evictedIds.has(entry.ruleId)) return;
 
   const logPath = join(baseDir, "eviction-log.jsonl");
   const logDir = dirname(logPath);
