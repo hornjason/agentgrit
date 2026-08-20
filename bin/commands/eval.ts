@@ -16,6 +16,7 @@ import { writeFileSync, mkdirSync } from "fs";
 import { readGraph } from "../../src/graph/builder";
 import { buildIndexFromDir } from "../../src/graph/bm25";
 import { getContextRules, detectDomains } from "../../src/graph/context";
+import { hybridRetrieve } from "../../src/graph/retrieval";
 import { evaluatePrecision, type PrecisionEvalResult } from "../../src/evaluate/precision";
 import type { RetrievalStrategy } from "../../src/graph/context";
 import { formatAuditReport, parseAuditFile, buildGoldSetFromAudit, type AuditSession } from "../../src/evaluate/gold-audit";
@@ -191,6 +192,10 @@ async function generateGoldSet(base: string): Promise<Record<string, GoldSession
     if (trace.id && trace.input) signalMap.set(trace.id, trace.input);
   }
 
+  const graph = readGraph();
+  const memoryDir = resolveMemoryDir();
+  const bm25Index = buildIndexFromDir(memoryDir);
+
   console.log(`  Generating gold set from ${sessionIds.length} sessions and ${Object.keys(nodes).length} graph nodes...`);
   if (signalMap.size > 0) console.log(`  Signal trace descriptions available: ${signalMap.size}`);
 
@@ -219,8 +224,9 @@ async function generateGoldSet(base: string): Promise<Record<string, GoldSession
       continue;
     }
 
-    const domains = inferDomains(description);
-    const relevantRules = domainFallback(domains, nodes, ruleFreq, 15);
+    const domains = detectDomains(description);
+    const retrieved = hybridRetrieve(description, domains, graph, bm25Index, 15);
+    const relevantRules = retrieved.map(r => r.id);
 
     for (const r of relevantRules) ruleFreq.set(r, (ruleFreq.get(r) ?? 0) + 1);
 
@@ -250,8 +256,9 @@ async function generateGoldSet(base: string): Promise<Record<string, GoldSession
       const description = trace.input;
       if (isUuidDescription(description)) continue;
 
-      const domains = inferDomains(description);
-      const relevantRules = domainFallback(domains, nodes, ruleFreq, 15);
+      const domains = detectDomains(description);
+      const retrieved = hybridRetrieve(description, domains, graph, bm25Index, 15);
+      const relevantRules = retrieved.map(r => r.id);
       for (const r of relevantRules) ruleFreq.set(r, (ruleFreq.get(r) ?? 0) + 1);
 
       labeled[sessionId] = {
