@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { autoLabel, buildRuleList, buildSyntheticPrompts, coDomainSiblings, domainFallback, generateSynthetic, inferDomains, pickDistractors, selectTargets, type GoldSet } from "../../src/evaluate/gold";
+import { autoLabel, buildRuleList, buildSyntheticPrompts, coDomainSiblings, domainFallback, generateSynthetic, inferDomains, isUuidDescription, pickDistractors, selectTargets, type GoldSet } from "../../src/evaluate/gold";
 import type { GraphNode } from "../../src/adapters/types";
 
 function makeNode(id: string, domains: string[], severity = 5): GraphNode {
@@ -55,6 +55,41 @@ describe("autoLabel", () => {
     const sessions = [{ sessionId: "s1", timestamp: "2026-01-01T00:00:00Z", description: "checking verify assertion", transcript: "verification workflow" }];
     const { gold } = await autoLabel(sessions, nodes, { labeled: {}, totalLabeled: 0, updated: "" }, { maxRulesPerSession: 25, classifier: async () => [] });
     expect(gold.labeled["s1"]).toBeDefined(); expect(gold.labeled["s1"].relevantRules.length).toBeGreaterThan(0);
+  });
+});
+
+describe("isUuidDescription", () => {
+  test("detects standard UUID session IDs", () => {
+    expect(isUuidDescription("7119e94f-7536-4e9e-aadd-5cad0f8626a2")).toBe(true);
+    expect(isUuidDescription("217706e4-13f7-42d2-b07c-5a1951ef15ec")).toBe(true);
+  });
+  test("rejects real task descriptions", () => {
+    expect(isUuidDescription("Implement BKL-INTEL-03 intelligence doc content validation")).toBe(false);
+    expect(isUuidDescription("Fix the recall evaluator gold set generation")).toBe(false);
+  });
+  test("rejects empty and short strings", () => {
+    expect(isUuidDescription("")).toBe(false);
+    expect(isUuidDescription("hello")).toBe(false);
+  });
+  test("detects UUID even with trailing content", () => {
+    expect(isUuidDescription("7119e94f-7536-4e9e-aadd-5cad0f8626a2-extra")).toBe(true);
+  });
+});
+
+describe("fallback description from signal traces", () => {
+  test("signal trace map provides description when transcript missing", () => {
+    const signalMap = new Map<string, string>();
+    signalMap.set("session-abc", "Implement feature X for customer Y");
+    const description = signalMap.get("session-abc") ?? "session-abc";
+    expect(description).toBe("Implement feature X for customer Y");
+    expect(isUuidDescription(description)).toBe(false);
+  });
+  test("falls through to session ID when signal trace also missing", () => {
+    const signalMap = new Map<string, string>();
+    const sessionId = "7119e94f-7536-4e9e-aadd-5cad0f8626a2";
+    const description = signalMap.get(sessionId) ?? sessionId;
+    expect(description).toBe(sessionId);
+    expect(isUuidDescription(description)).toBe(true);
   });
 });
 

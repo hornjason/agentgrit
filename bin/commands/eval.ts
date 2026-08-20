@@ -8,7 +8,7 @@ import type { JudgeConfig, Trace } from "../../src/evaluate/judge";
 import { scoresToJsonl } from "../../src/evaluate/judge";
 import { evaluateRecall, aggregateRecallScores, evaluateSessionRecall } from "../../src/evaluate/recall";
 import type { RecallResult, SessionRecallScore } from "../../src/evaluate/recall";
-import { inferDomains, domainFallback } from "../../src/evaluate/gold";
+import { inferDomains, domainFallback, isUuidDescription } from "../../src/evaluate/gold";
 import type { GoldSet, GoldSession } from "../../src/evaluate/gold";
 import { trackRuleEffectiveness } from "../../src/evaluate/effectiveness";
 import type { RubricConfig, Score, Rule, GraphNode } from "../../src/adapters/types";
@@ -185,10 +185,22 @@ async function generateGoldSet(base: string): Promise<Record<string, GoldSession
     return null;
   }
 
+  const signalTraces = loadTracesFromSignals(signalDir);
+  const signalMap = new Map<string, string>();
+  for (const trace of signalTraces) {
+    if (trace.id && trace.input) signalMap.set(trace.id, trace.input);
+  }
+
+  const graph = readGraph();
+  const memoryDir = resolveMemoryDir();
+  const bm25Index = buildIndexFromDir(memoryDir);
+
   console.log(`  Generating gold set from ${sessionIds.length} sessions and ${Object.keys(nodes).length} graph nodes...`);
+  if (signalMap.size > 0) console.log(`  Signal trace descriptions available: ${signalMap.size}`);
 
   const labeled: Record<string, GoldSession> = {};
   const ruleFreq = new Map<string, number>();
+  let sessionsSkipped = 0;
 
   for (const sessionId of sessionIds) {
     let description = sessionId;
@@ -201,8 +213,19 @@ async function generateGoldSet(base: string): Promise<Record<string, GoldSession
       }
     }
 
-    const domains = inferDomains(description);
-    const relevantRules = domainFallback(domains, nodes, ruleFreq, 15);
+    if (isUuidDescription(description)) {
+      const signalDescription = signalMap.get(sessionId);
+      if (signalDescription) description = signalDescription;
+    }
+
+    if (isUuidDescription(description)) {
+      sessionsSkipped++;
+      continue;
+    }
+
+    const domains = detectDomains(description);
+    const retrieved = await getContextRules(graph, bm25Index, domains, 15, undefined, description);
+    const relevantRules = retrieved.map(r => r.id);
 
     for (const r of relevantRules) ruleFreq.set(r, (ruleFreq.get(r) ?? 0) + 1);
 
@@ -213,6 +236,38 @@ async function generateGoldSet(base: string): Promise<Record<string, GoldSession
       domains,
       autoLabeled: true,
     };
+  }
+
+  if (sessionsSkipped > 0) console.log(`  Skipped ${sessionsSkipped} sessions with UUID-only descriptions.`);
+
+  if (Object.keys(labeled).length === 0 && transcriptDir && existsSync(transcriptDir)) {
+    const transcriptSessions = readdirSync(transcriptDir)
+      .filter((f) => f.endsWith(".jsonl"))
+      .slice(-30)
+      .map((f) => basename(f, ".jsonl"));
+
+    console.log(`  Supplementing with ${transcriptSessions.length} transcript-based sessions...`);
+
+    for (const sessionId of transcriptSessions) {
+      const transcriptPath = join(transcriptDir, `${sessionId}.jsonl`);
+      const trace = await loadTraceFromTranscript(transcriptPath);
+      if (!trace) continue;
+      const description = trace.input;
+      if (isUuidDescription(description)) continue;
+
+      const domains = detectDomains(description);
+      const retrieved = await getContextRules(graph, bm25Index, domains, 15, undefined, description);
+      const relevantRules = retrieved.map(r => r.id);
+      for (const r of relevantRules) ruleFreq.set(r, (ruleFreq.get(r) ?? 0) + 1);
+
+      labeled[sessionId] = {
+        sessionId,
+        description,
+        relevantRules,
+        domains,
+        autoLabeled: true,
+      };
+    }
   }
 
   const goldSet: GoldSet = {
