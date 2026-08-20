@@ -191,10 +191,6 @@ async function generateGoldSet(base: string): Promise<Record<string, GoldSession
     if (trace.id && trace.input) signalMap.set(trace.id, trace.input);
   }
 
-  const graph = readGraph();
-  const memoryDir = resolveMemoryDir();
-  const bm25Index = buildIndexFromDir(memoryDir);
-
   console.log(`  Generating gold set from ${sessionIds.length} sessions and ${Object.keys(nodes).length} graph nodes...`);
   if (signalMap.size > 0) console.log(`  Signal trace descriptions available: ${signalMap.size}`);
 
@@ -223,9 +219,8 @@ async function generateGoldSet(base: string): Promise<Record<string, GoldSession
       continue;
     }
 
-    const domains = detectDomains(description);
-    const retrieved = await getContextRules(graph, bm25Index, domains, 15, undefined, description);
-    const relevantRules = retrieved.map(r => r.id);
+    const domains = inferDomains(description);
+    const relevantRules = domainFallback(domains, nodes, ruleFreq, 15);
 
     for (const r of relevantRules) ruleFreq.set(r, (ruleFreq.get(r) ?? 0) + 1);
 
@@ -255,9 +250,8 @@ async function generateGoldSet(base: string): Promise<Record<string, GoldSession
       const description = trace.input;
       if (isUuidDescription(description)) continue;
 
-      const domains = detectDomains(description);
-      const retrieved = await getContextRules(graph, bm25Index, domains, 15, undefined, description);
-      const relevantRules = retrieved.map(r => r.id);
+      const domains = inferDomains(description);
+      const relevantRules = domainFallback(domains, nodes, ruleFreq, 15);
       for (const r of relevantRules) ruleFreq.set(r, (ruleFreq.get(r) ?? 0) + 1);
 
       labeled[sessionId] = {
