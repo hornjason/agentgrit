@@ -24,6 +24,14 @@ export interface GoldSet {
   updated: string;
 }
 
+// ── UUID Detection ──
+
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-/;
+
+export function isUuidDescription(description: string): boolean {
+  return uuidPattern.test(description);
+}
+
 // ── Auto-Labeling ──
 
 let _goldPatterns: Array<{ pattern: RegExp; domain: string }> | null = null;
