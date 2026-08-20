@@ -515,6 +515,7 @@ describe("scoreSessionObjective", () => {
     firstPassGates: 0,
     uninterruptedRuns: 0,
     shortFrustrated: 0,
+    totalTurns: 20,
   };
 
   test("returns base score 5.0 with no signals", () => {
@@ -524,16 +525,16 @@ describe("scoreSessionObjective", () => {
     expect(result.breakdown.base).toBe(5);
   });
 
-  test("corrections reduce score with no cap", () => {
+  test("corrections reduce score with ratio-based penalty", () => {
     const result = scoreSessionObjective({ ...BASE_INPUT, corrections: 4 });
-    expect(result.score).toBe(3);
-    expect(result.breakdown.correctionPenalty).toBe(-2);
+    expect(result.breakdown.correctionPenalty).toBe(-1);
+    expect(result.score).toBe(4);
   });
 
-  test("many corrections drive score below base significantly (no cap)", () => {
-    const result = scoreSessionObjective({ ...BASE_INPUT, corrections: 10 });
-    expect(result.score).toBe(1);
-    expect(result.breakdown.correctionPenalty).toBe(-5);
+  test("correction penalty caps at -3.0", () => {
+    const result = scoreSessionObjective({ ...BASE_INPUT, corrections: 20 });
+    expect(result.breakdown.correctionPenalty).toBe(-3);
+    expect(result.score).toBe(2);
   });
 
   test("reprompts reduce score with -1.5 cap", () => {
@@ -567,7 +568,7 @@ describe("scoreSessionObjective", () => {
   });
 
   test("clamps to minimum 1", () => {
-    const result = scoreSessionObjective({ ...BASE_INPUT, corrections: 20 });
+    const result = scoreSessionObjective({ ...BASE_INPUT, corrections: 20, reprompts: 10, iterations: 10, shortFrustrated: 10 });
     expect(result.score).toBe(1);
   });
 
@@ -594,8 +595,8 @@ describe("scoreSessionObjective", () => {
     };
     const result = scoreSessionObjective({ ...BASE_INPUT, corrections: 2 }, config);
     expect(result.breakdown.base).toBe(7);
-    expect(result.breakdown.correctionPenalty).toBe(-2);
-    expect(result.score).toBe(5);
+    expect(result.breakdown.correctionPenalty).toBe(-1);
+    expect(result.score).toBe(6);
   });
 });
 

@@ -1,7 +1,8 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
-import { shouldEvict, loadEvictionAllowlist, type EvictionTrigger } from "../../src/promote/auto-eviction";
+import { shouldEvict, loadEvictionAllowlist, appendEvictionLog, type EvictionTrigger, type EvictionLogEntry } from "../../src/promote/auto-eviction";
+import { transitionRule } from "../../src/promote/lifecycle";
 import type { RuleStats } from "../../src/promote/rules";
 
 const TEMP_DIR = join(import.meta.dir, ".tmp-auto-eviction");
@@ -271,5 +272,45 @@ describe("shouldEvict — edge cases from garbage test", () => {
       avgCorrelatedRating: 5.0,
     });
     expect(shouldEvict(stats)).toBeNull();
+  });
+});
+
+describe("appendEvictionLog — lifecycle dedup", () => {
+  test("skips logging when rule already evicted in lifecycle registry", () => {
+    transitionRule("already-evicted", "evicted", "low correlation", "daemon", TEMP_DIR);
+
+    const entry: EvictionLogEntry = {
+      ruleId: "already-evicted",
+      trigger: "never-helped",
+      reason: "0 high activations",
+      avgRating: 3.0,
+      injections: 10,
+      highActivations: 0,
+      lowActivations: 5,
+      timestamp: new Date().toISOString(),
+    };
+    appendEvictionLog(entry, TEMP_DIR);
+
+    const logPath = join(TEMP_DIR, "eviction-log.jsonl");
+    expect(existsSync(logPath)).toBe(false);
+  });
+
+  test("logs when rule not in lifecycle registry", () => {
+    const entry: EvictionLogEntry = {
+      ruleId: "new-rule",
+      trigger: "never-helped",
+      reason: "0 high activations",
+      avgRating: 3.0,
+      injections: 10,
+      highActivations: 0,
+      lowActivations: 5,
+      timestamp: new Date().toISOString(),
+    };
+    appendEvictionLog(entry, TEMP_DIR);
+
+    const logPath = join(TEMP_DIR, "eviction-log.jsonl");
+    expect(existsSync(logPath)).toBe(true);
+    const lines = readFileSync(logPath, "utf-8").trim().split("\n");
+    expect(lines).toHaveLength(1);
   });
 });
