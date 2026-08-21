@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { trackRule, getEvictionCandidates, correlateRules, computeDecayedAverage } from "../../src/promote/rules";
+import { trackRule, getEvictionCandidates, correlateRules, computeDecayedAverage, computeDifferentialLift, bootstrapDifferentialStats } from "../../src/promote/rules";
 import { Tier, SCHEMA_VERSION, type Rule } from "../../src/adapters/types";
 
 function makeRule(id: string, overrides: Partial<Rule> = {}): Rule {
@@ -190,5 +190,135 @@ describe("correlateRules", () => {
     const stats = correlateRules(rules);
     expect(stats[0].injectionCount).toBe(0);
     expect(stats[0].sessionRatings).toEqual([]);
+  });
+
+  test("computes differentialLift when globalAvg is provided", () => {
+    const rules = [
+      makeRule("r1", {
+        sessionRatings: [8, 9, 7],
+        avgCorrelatedRating: 8.0,
+      }),
+      makeRule("r2", {
+        sessionRatings: [3, 2, 4],
+        avgCorrelatedRating: 3.0,
+      }),
+    ];
+    const stats = correlateRules(rules, 5.0);
+    expect(stats[0].differentialLift).toBeCloseTo(3.0, 1);
+    expect(stats[1].differentialLift).toBeCloseTo(-2.0, 1);
+  });
+
+  test("differentialLift is undefined when globalAvg is not provided", () => {
+    const rules = [makeRule("r1", { sessionRatings: [8, 9] })];
+    const stats = correlateRules(rules);
+    expect(stats[0].differentialLift).toBeUndefined();
+  });
+});
+
+describe("computeDifferentialLift", () => {
+  test("returns positive lift when rule avg exceeds global avg", () => {
+    const lift = computeDifferentialLift([8, 9, 10], 5.0);
+    expect(lift).toBeGreaterThan(0);
+  });
+
+  test("returns negative lift when rule avg is below global avg", () => {
+    const lift = computeDifferentialLift([2, 3, 1], 5.0);
+    expect(lift).toBeLessThan(0);
+  });
+
+  test("returns 0 when rule avg equals global avg", () => {
+    const lift = computeDifferentialLift([5, 5, 5], 5.0);
+    expect(lift).toBeCloseTo(0, 5);
+  });
+
+  test("returns 0 for empty ratings", () => {
+    const lift = computeDifferentialLift([], 5.0);
+    expect(lift).toBe(0);
+  });
+
+  test("rounds to 3 decimal places", () => {
+    const lift = computeDifferentialLift([7], 5.0);
+    const decimalPlaces = lift.toString().split(".")[1]?.length ?? 0;
+    expect(decimalPlaces).toBeLessThanOrEqual(3);
+  });
+});
+
+describe("bootstrapDifferentialStats", () => {
+  const { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } = require("fs");
+  const { join } = require("path");
+  const tmpDir = join(process.env.HOME!, ".agentgrit", "test-bootstrap-" + Date.now());
+
+  function setup(ruleStats: any[], ratings: any[]) {
+    mkdirSync(tmpDir, { recursive: true });
+    writeFileSync(join(tmpDir, "rule-stats.json"), JSON.stringify(ruleStats));
+    writeFileSync(
+      join(tmpDir, "ratings.jsonl"),
+      ratings.map((r: any) => JSON.stringify(r)).join("\n") + "\n",
+    );
+  }
+
+  function cleanup() {
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  }
+
+  test("computes differentialLift for all rules", () => {
+    const ruleStats = [
+      { ruleId: "r1", sessionRatings: [8, 9, 7], injectionCount: 3, avgCorrelatedRating: 8, highRatingActivations: 3, lowRatingActivations: 0, lastSeen: "" },
+      { ruleId: "r2", sessionRatings: [2, 3, 4], injectionCount: 3, avgCorrelatedRating: 3, highRatingActivations: 0, lowRatingActivations: 3, lastSeen: "" },
+    ];
+    const ratings = [
+      { timestamp: "2026-01-01", rating: 5 },
+      { timestamp: "2026-01-02", rating: 6 },
+      { timestamp: "2026-01-03", rating: 4 },
+    ];
+    setup(ruleStats, ratings);
+    const result = bootstrapDifferentialStats(
+      join(tmpDir, "rule-stats.json"),
+      join(tmpDir, "ratings.jsonl"),
+      tmpDir,
+    );
+    expect(result.rulesProcessed).toBe(2);
+    expect(result.globalAvg).toBeCloseTo(5.0, 1);
+
+    const updated = JSON.parse(readFileSync(join(tmpDir, "rule-stats.json"), "utf-8"));
+    expect(updated[0].differentialLift).toBeGreaterThan(0);
+    expect(updated[1].differentialLift).toBeLessThan(0);
+    cleanup();
+  });
+
+  test("returns early when files are missing", () => {
+    const result = bootstrapDifferentialStats(
+      "/nonexistent/rule-stats.json",
+      "/nonexistent/ratings.jsonl",
+    );
+    expect(result.rulesProcessed).toBe(0);
+    expect(result.globalAvg).toBe(0);
+  });
+
+  test("produces distinct lift values across rules with different ratings", () => {
+    const ruleStats = Array.from({ length: 10 }, (_, i) => ({
+      ruleId: `r${i}`,
+      sessionRatings: [i + 1, i + 2],
+      injectionCount: 2,
+      avgCorrelatedRating: (i + 1 + i + 2) / 2,
+      highRatingActivations: 0,
+      lowRatingActivations: 0,
+      lastSeen: "",
+    }));
+    const ratings = Array.from({ length: 20 }, (_, i) => ({
+      timestamp: `2026-01-${String(i + 1).padStart(2, "0")}`,
+      rating: (i % 10) + 1,
+    }));
+    setup(ruleStats, ratings);
+    const result = bootstrapDifferentialStats(
+      join(tmpDir, "rule-stats.json"),
+      join(tmpDir, "ratings.jsonl"),
+      tmpDir,
+    );
+    const updated = JSON.parse(readFileSync(join(tmpDir, "rule-stats.json"), "utf-8"));
+    const uniqueLifts = new Set(updated.map((r: any) => r.differentialLift?.toFixed(3)));
+    expect(uniqueLifts.size).toBeGreaterThanOrEqual(5);
+    expect(result.rulesProcessed).toBe(10);
+    cleanup();
   });
 });

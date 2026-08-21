@@ -20,6 +20,7 @@ export interface RuleStats {
   noisePenalty?: number;
   rawAvgRating?: number;
   decayedRating?: number;
+  differentialLift?: number;
 }
 
 export function computeDecayedAverage(ratings: number[], halfLife: number = DEFAULT_DECAY_HALF_LIFE): number {
@@ -101,7 +102,13 @@ export function trackAttributedRules(
   );
 }
 
-export function correlateRules(rules: Rule[]): RuleStats[] {
+export function computeDifferentialLift(sessionRatings: number[], globalAvg: number): number {
+  if (sessionRatings.length === 0) return 0;
+  const ruleAvg = sessionRatings.reduce((sum, r) => sum + r, 0) / sessionRatings.length;
+  return Math.round((ruleAvg - globalAvg) * 1000) / 1000;
+}
+
+export function correlateRules(rules: Rule[], globalAvg?: number): RuleStats[] {
   return rules.map((r) => ({
     ruleId: r.id,
     injectionCount: r.injectionCount ?? 0,
@@ -112,6 +119,9 @@ export function correlateRules(rules: Rule[]): RuleStats[] {
     lastSeen: r.lastSeen ?? "",
     ...(r.rawAvgRating !== undefined && { rawAvgRating: r.rawAvgRating }),
     ...(r.decayedRating !== undefined && { decayedRating: r.decayedRating }),
+    ...(globalAvg !== undefined && (r.sessionRatings ?? []).length > 0 && {
+      differentialLift: computeDifferentialLift(r.sessionRatings ?? [], globalAvg),
+    }),
   }));
 }
 
@@ -141,6 +151,53 @@ export interface BootstrapResult {
   rulesTracked: number;
   sessionsProcessed: number;
   ratingsMatched: number;
+}
+
+export interface BootstrapDifferentialResult {
+  rulesProcessed: number;
+  globalAvg: number;
+}
+
+export function bootstrapDifferentialStats(
+  ruleStatsPath: string,
+  ratingsPath: string,
+  outputDir?: string,
+): BootstrapDifferentialResult {
+  const result: BootstrapDifferentialResult = { rulesProcessed: 0, globalAvg: 0 };
+  if (!existsSync(ruleStatsPath) || !existsSync(ratingsPath)) return result;
+
+  const stats: RuleStats[] = JSON.parse(readFileSync(ruleStatsPath, "utf-8"));
+
+  const ratingsRaw = readFileSync(ratingsPath, "utf-8").split("\n").filter(Boolean);
+  let ratingSum = 0;
+  let ratingCount = 0;
+  for (const line of ratingsRaw) {
+    try {
+      const entry = JSON.parse(line);
+      if (typeof entry.rating === "number") {
+        ratingSum += entry.rating;
+        ratingCount++;
+      }
+    } catch {}
+  }
+  if (ratingCount === 0) return result;
+
+  const globalAvg = ratingSum / ratingCount;
+  result.globalAvg = Math.round(globalAvg * 1000) / 1000;
+
+  for (const stat of stats) {
+    if (stat.sessionRatings && stat.sessionRatings.length > 0) {
+      stat.differentialLift = computeDifferentialLift(stat.sessionRatings, globalAvg);
+      result.rulesProcessed++;
+    }
+  }
+
+  const outPath = outputDir ? join(outputDir, "rule-stats.json") : ruleStatsPath;
+  const parent = dirname(outPath);
+  if (!existsSync(parent)) mkdirSync(parent, { recursive: true });
+  writeFileSync(outPath, JSON.stringify(stats, null, 2), "utf-8");
+
+  return result;
 }
 
 export function bootstrapRuleStats(
