@@ -523,13 +523,16 @@ export function writeSessionContext(
 
   writeFileSync(filePath, JSON.stringify(context, null, 2), "utf-8");
 
-  const historyPath = statePath(SESSION_HISTORY_FILE);
-  appendFileSync(historyPath, JSON.stringify(context) + "\n", "utf-8");
+  // Only append to history when ruleIds are populated — empty entries are useless for attribution
+  if (context.ruleIds.length > 0) {
+    const historyPath = statePath(SESSION_HISTORY_FILE);
+    appendFileSync(historyPath, JSON.stringify(context) + "\n", "utf-8");
 
-  const historyContent = readFileSync(historyPath, "utf-8");
-  const lines = historyContent.trimEnd().split("\n");
-  if (lines.length > 1000) {
-    writeFileSync(historyPath, lines.slice(-1000).join("\n") + "\n", "utf-8");
+    const historyContent = readFileSync(historyPath, "utf-8");
+    const lines = historyContent.trimEnd().split("\n");
+    if (lines.length > 1000) {
+      writeFileSync(historyPath, lines.slice(-1000).join("\n") + "\n", "utf-8");
+    }
   }
 }
 
