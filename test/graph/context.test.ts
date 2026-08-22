@@ -718,6 +718,149 @@ describe("filterLearnedRules", () => {
   });
 });
 
+// ── Differential Lift Ranking Tests ──
+
+describe("getContextRules differential lift", () => {
+  test("rule with positive lift ranks higher than equal-BM25 rule with negative lift", async () => {
+    const graph = makeGraph([
+      makeNode("positive_lift_rule", ["deployment"], "Deploy with positive lift"),
+      makeNode("negative_lift_rule", ["deployment"], "Deploy with negative lift"),
+    ]);
+
+    // negative_lift_rule has MORE BM25-relevant content so it naturally ranks higher
+    const f1 = join(TMP_DIR, "positive_lift_rule.md");
+    const f2 = join(TMP_DIR, "negative_lift_rule.md");
+    writeFileSync(f1, "deployment containers", "utf-8");
+    writeFileSync(f2, "deployment containers production make rebuild deployment deployment", "utf-8");
+    const index = buildIndex([f1, f2]);
+
+    const statsDir = join(TMP_DIR, "state");
+    mkdirSync(statsDir, { recursive: true });
+    const stats = [
+      {
+        ruleId: "positive_lift_rule",
+        injectionCount: 3,
+        avgCorrelatedRating: 8.0,
+        sessionRatings: [8, 9, 7],
+        highRatingActivations: 3,
+        lowRatingActivations: 0,
+        lastSeen: new Date().toISOString(),
+        differentialLift: 3.85,
+      },
+      {
+        ruleId: "negative_lift_rule",
+        injectionCount: 3,
+        avgCorrelatedRating: 5.5,
+        sessionRatings: [5, 6, 5],
+        highRatingActivations: 1,
+        lowRatingActivations: 0,
+        lastSeen: new Date().toISOString(),
+        differentialLift: -2.15,
+      },
+    ];
+    writeFileSync(join(statsDir, "rule-stats.json"), JSON.stringify(stats, null, 2), "utf-8");
+
+    const origEnv = process.env.AGENTGRIT_DIR;
+    process.env.AGENTGRIT_DIR = TMP_DIR;
+    try {
+      const rules = await getContextRules(graph, index, ["deployment"], 10);
+      const ids = rules.map(r => r.id);
+      const posIdx = ids.indexOf("positive_lift_rule");
+      const negIdx = ids.indexOf("negative_lift_rule");
+      expect(posIdx).not.toBe(-1);
+      expect(negIdx).not.toBe(-1);
+      // With lift wiring, positive_lift (+3.85) should overcome the BM25 disadvantage
+      expect(posIdx).toBeLessThan(negIdx);
+    } finally {
+      if (origEnv !== undefined) process.env.AGENTGRIT_DIR = origEnv;
+      else delete process.env.AGENTGRIT_DIR;
+    }
+  });
+
+  test("rule without lift data gets neutral ranking (no boost, no penalty)", async () => {
+    const graph = makeGraph([
+      makeNode("has_lift_rule", ["deployment"], "Deploy with lift data"),
+      makeNode("no_lift_rule", ["deployment"], "Deploy without lift data"),
+    ]);
+
+    const f1 = join(TMP_DIR, "has_lift_rule.md");
+    const f2 = join(TMP_DIR, "no_lift_rule.md");
+    writeFileSync(f1, "deployment containers production make rebuild", "utf-8");
+    writeFileSync(f2, "deployment containers production make rebuild", "utf-8");
+    const index = buildIndex([f1, f2]);
+
+    const statsDir = join(TMP_DIR, "state");
+    mkdirSync(statsDir, { recursive: true });
+    const stats = [
+      {
+        ruleId: "has_lift_rule",
+        injectionCount: 10,
+        avgCorrelatedRating: 7.0,
+        sessionRatings: [7, 7, 7],
+        highRatingActivations: 3,
+        lowRatingActivations: 0,
+        lastSeen: new Date().toISOString(),
+        differentialLift: 0.0,
+      },
+      // no_lift_rule has NO entry in rule-stats — should get neutral factor (1.0)
+    ];
+    writeFileSync(join(statsDir, "rule-stats.json"), JSON.stringify(stats, null, 2), "utf-8");
+
+    const origEnv = process.env.AGENTGRIT_DIR;
+    process.env.AGENTGRIT_DIR = TMP_DIR;
+    try {
+      const rules = await getContextRules(graph, index, ["deployment"], 10);
+      expect(rules.length).toBe(2);
+      const ids = rules.map(r => r.id);
+      expect(ids).toContain("has_lift_rule");
+      expect(ids).toContain("no_lift_rule");
+    } finally {
+      if (origEnv !== undefined) process.env.AGENTGRIT_DIR = origEnv;
+      else delete process.env.AGENTGRIT_DIR;
+    }
+  });
+
+  test("positive lift boosts rule above same-BM25-score peer without lift", async () => {
+    const graph = makeGraph([
+      makeNode("boosted_rule", ["deployment"], "Deploy boosted by lift"),
+      makeNode("neutral_rule", ["deployment"], "Deploy neutral no stats"),
+    ]);
+
+    const f1 = join(TMP_DIR, "boosted_rule.md");
+    const f2 = join(TMP_DIR, "neutral_rule.md");
+    writeFileSync(f1, "deployment containers production make rebuild", "utf-8");
+    writeFileSync(f2, "deployment containers production make rebuild", "utf-8");
+    const index = buildIndex([f1, f2]);
+
+    const statsDir = join(TMP_DIR, "state");
+    mkdirSync(statsDir, { recursive: true });
+    const stats = [
+      {
+        ruleId: "boosted_rule",
+        injectionCount: 10,
+        avgCorrelatedRating: 8.5,
+        sessionRatings: [8, 9, 8, 9],
+        highRatingActivations: 4,
+        lowRatingActivations: 0,
+        lastSeen: new Date().toISOString(),
+        differentialLift: 5.0,
+      },
+    ];
+    writeFileSync(join(statsDir, "rule-stats.json"), JSON.stringify(stats, null, 2), "utf-8");
+
+    const origEnv = process.env.AGENTGRIT_DIR;
+    process.env.AGENTGRIT_DIR = TMP_DIR;
+    try {
+      const rules = await getContextRules(graph, index, ["deployment"], 10);
+      const ids = rules.map(r => r.id);
+      expect(ids[0]).toBe("boosted_rule");
+    } finally {
+      if (origEnv !== undefined) process.env.AGENTGRIT_DIR = origEnv;
+      else delete process.env.AGENTGRIT_DIR;
+    }
+  });
+});
+
 // ── Performance Summary Tests ──
 
 describe("computePerformanceSummary", () => {
