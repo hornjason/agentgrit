@@ -504,7 +504,8 @@ export function scoreSessionObjective(
   const uCap = t?.uninterruptedCap ?? 1.5;
   const frustWeight = t?.frustrationWeight ?? -0.3;
 
-  const correctionPenalty = Math.max((input.corrections / Math.max(input.totalTurns, 1)) * corrWeight * 10, -3.0);
+  const totalTurns = input.totalTurns ?? 1;
+  const correctionPenalty = Math.max((input.corrections / Math.max(totalTurns, 1)) * corrWeight * 10, -3.0);
   const repromptPenalty = Math.max(input.reprompts * repWeight, -1.5);
   const iterationPenalty = input.iterations * iterWeight;
   const firstPassBonusVal = input.firstPassGates * fpBonus;
