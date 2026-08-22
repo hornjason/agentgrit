@@ -272,7 +272,7 @@ export async function getContextRules(
     }));
   }
 
-  // 2. Apply node-type weighting
+  // 2. Apply node-type weighting + differential lift
   const NODE_TYPE_WEIGHT: Record<string, number> = {
     feedback: 1.0,
     steering: 1.0,
@@ -285,8 +285,16 @@ export async function getContextRules(
     return NODE_TYPE_WEIGHT[prefix] ?? 1.0;
   }
 
+  const ruleStatsMap = loadRuleStats();
+
+  function liftFactor(id: string): number {
+    const stats = ruleStatsMap.get(id);
+    if (!stats?.differentialLift) return 1.0;
+    return 1.0 + (stats.differentialLift / 10);
+  }
+
   const scored = candidates
-    .map(c => [c.id, c.rrfScore * nodeTypeWeight(c.id)] as [string, number])
+    .map(c => [c.id, c.rrfScore * nodeTypeWeight(c.id) * liftFactor(c.id)] as [string, number])
     .sort((a, b) => b[1] - a[1]);
 
   // 2b. Per-domain diversity cap — prevent any single domain from taking all slots
@@ -323,7 +331,6 @@ export async function getContextRules(
   const suppressedIds = getFilteredRuleIds(["evicted", "graduated"]);
   const afterRegistryFilter = filtered.filter(([id]) => !suppressedIds.has(id));
 
-  const ruleStatsMap = loadRuleStats();
   const allowlist = loadEvictionAllowlist();
   const newlyEvicted: Array<{ id: string; eviction: { trigger: EvictionTrigger; reason: string }; stats: RuleStats }> = [];
   const afterEviction = afterRegistryFilter.filter(([id]) => {
