@@ -215,6 +215,23 @@ export function classifyUndersampledRules(dir?: string): string[] {
   return classified;
 }
 
+export function classifyActiveRules(dir?: string): string[] {
+  const baseDir = dir ?? stateDir();
+  const statsMap = loadRuleStats(baseDir);
+  const lifecycle = loadLifecycle(baseDir);
+  const classified: string[] = [];
+
+  for (const [ruleId, stats] of statsMap) {
+    if (stats.injectionCount < 10) continue;
+    const existing = lifecycle.rules[ruleId];
+    if (existing && (existing.state === "graduated" || existing.state === "evicted" || existing.state === "active")) continue;
+    transitionRule(ruleId, "active", `${stats.injectionCount} injections ≥ 10 threshold`, "active-classifier", baseDir);
+    classified.push(ruleId);
+  }
+
+  return classified;
+}
+
 export function migrateFromEvictedRegistry(dir?: string): void {
   const baseDir = dir ?? stateDir();
   const lifecycle = loadLifecycle(baseDir);
@@ -233,4 +250,5 @@ export function migrateFromEvictedRegistry(dir?: string): void {
   saveLifecycle(lifecycle, baseDir);
   detectGraduatedRules(baseDir);
   classifyUndersampledRules(baseDir);
+  classifyActiveRules(baseDir);
 }
