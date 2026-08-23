@@ -4,7 +4,7 @@ import { stateDir } from "../adapters/paths";
 import type { RuleStats } from "./rules";
 import { getFilteredRuleIds } from "./lifecycle";
 
-export type EvictionTrigger = "low-avg-high-volume" | "never-helped" | "net-negative-roi" | "high-injection-low-value";
+export type EvictionTrigger = "low-avg-high-volume" | "never-helped" | "net-negative-roi" | "high-injection-low-value" | "frequency-cap" | "negative-lift";
 
 export interface EvictionResult {
   trigger: EvictionTrigger;
@@ -27,6 +27,7 @@ const MIN_INJECTION_SAFETY = 5;
 export function shouldEvict(
   stats: RuleStats,
   allowlist?: Set<string>,
+  totalSessions?: number,
 ): EvictionResult | null {
   if (stats.injectionCount < MIN_INJECTION_SAFETY) return null;
   if (allowlist?.has(stats.ruleId)) return null;
@@ -36,6 +37,33 @@ export function shouldEvict(
     return {
       trigger: "high-injection-low-value",
       reason: `${stats.injectionCount} injections with avg ${stats.avgCorrelatedRating.toFixed(2)} < 4.0`,
+    };
+  }
+
+  // Trigger 5: frequency cap — fires too often without helping
+  // Guard: never evict rules with positive differential lift
+  if (
+    totalSessions &&
+    totalSessions > 0 &&
+    stats.injectionCount / totalSessions > 0.6 &&
+    (stats.differentialLift === undefined || stats.differentialLift <= 0)
+  ) {
+    const pct = ((stats.injectionCount / totalSessions) * 100).toFixed(0);
+    return {
+      trigger: "frequency-cap",
+      reason: `${pct}% session frequency (${stats.injectionCount}/${totalSessions}) with differential lift ${stats.differentialLift?.toFixed(2) ?? "unknown"} <= 0`,
+    };
+  }
+
+  // Trigger 6: negative differential lift — actively hurts session quality
+  if (
+    stats.differentialLift !== undefined &&
+    stats.differentialLift < -0.5 &&
+    stats.injectionCount >= 10
+  ) {
+    return {
+      trigger: "negative-lift",
+      reason: `differential lift ${stats.differentialLift.toFixed(2)} < -0.5 with ${stats.injectionCount} injections`,
     };
   }
 

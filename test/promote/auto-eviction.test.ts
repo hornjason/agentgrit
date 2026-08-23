@@ -275,6 +275,136 @@ describe("shouldEvict — edge cases from garbage test", () => {
   });
 });
 
+describe("shouldEvict — trigger 5: frequency-cap", () => {
+  test("evicts rule appearing in >60% of sessions with lift <= 0", () => {
+    const stats = makeStats({
+      ruleId: "always-on-useless",
+      injectionCount: 70,
+      avgCorrelatedRating: 5.0,
+      differentialLift: 0.0,
+    });
+    const result = shouldEvict(stats, undefined, 100);
+    expect(result).not.toBeNull();
+    expect(result!.trigger).toBe("frequency-cap");
+  });
+
+  test("evicts rule at exact 61% boundary with negative lift", () => {
+    const stats = makeStats({
+      ruleId: "boundary-case",
+      injectionCount: 61,
+      avgCorrelatedRating: 5.0,
+      differentialLift: -0.1,
+    });
+    const result = shouldEvict(stats, undefined, 100);
+    expect(result).not.toBeNull();
+    expect(result!.trigger).toBe("frequency-cap");
+  });
+
+  test("does NOT evict rule with positive differential lift", () => {
+    const stats = makeStats({
+      ruleId: "feedback_verify_before_answering",
+      injectionCount: 240,
+      avgCorrelatedRating: 5.75,
+      differentialLift: 0.60,
+    });
+    const result = shouldEvict(stats, undefined, 300);
+    expect(result).toBeNull();
+  });
+
+  test("does NOT evict rule at exactly 60% (boundary not exceeded)", () => {
+    const stats = makeStats({
+      ruleId: "boundary-exact",
+      injectionCount: 60,
+      avgCorrelatedRating: 5.0,
+      differentialLift: 0.0,
+    });
+    const result = shouldEvict(stats, undefined, 100);
+    expect(result).toBeNull();
+  });
+
+  test("does NOT fire frequency-cap when totalSessions is 0 (avoids division by zero)", () => {
+    const stats = makeStats({
+      ruleId: "zero-sessions",
+      injectionCount: 100,
+      differentialLift: 0.0,
+    });
+    const result = shouldEvict(stats, undefined, 0);
+    if (result) {
+      expect(result.trigger).not.toBe("frequency-cap");
+    }
+  });
+
+  test("does NOT fire when totalSessions is not provided", () => {
+    const stats = makeStats({
+      ruleId: "no-sessions",
+      injectionCount: 100,
+      differentialLift: -1.0,
+    });
+    const result = shouldEvict(stats);
+    // Without totalSessions, frequency-cap cannot fire
+    expect(result?.trigger).not.toBe("frequency-cap");
+  });
+});
+
+describe("shouldEvict — trigger 6: negative-lift", () => {
+  test("evicts rule with differentialLift < -0.5 and injections >= 10", () => {
+    const stats = makeStats({
+      ruleId: "harmful-rule",
+      injectionCount: 25,
+      avgCorrelatedRating: 5.0,
+      differentialLift: -0.8,
+    });
+    const result = shouldEvict(stats);
+    expect(result).not.toBeNull();
+    expect(result!.trigger).toBe("negative-lift");
+  });
+
+  test("does NOT evict when lift is exactly -0.5 (boundary)", () => {
+    const stats = makeStats({
+      ruleId: "borderline",
+      injectionCount: 15,
+      avgCorrelatedRating: 5.0,
+      differentialLift: -0.5,
+    });
+    const result = shouldEvict(stats);
+    expect(result).toBeNull();
+  });
+
+  test("does NOT evict when injections < 10", () => {
+    const stats = makeStats({
+      ruleId: "low-sample",
+      injectionCount: 9,
+      avgCorrelatedRating: 5.0,
+      differentialLift: -1.0,
+    });
+    const result = shouldEvict(stats);
+    expect(result).toBeNull();
+  });
+
+  test("does NOT evict when differentialLift is undefined", () => {
+    const stats = makeStats({
+      ruleId: "no-lift-data",
+      injectionCount: 50,
+      avgCorrelatedRating: 5.0,
+    });
+    // differentialLift is undefined by default in makeStats
+    delete (stats as any).differentialLift;
+    const result = shouldEvict(stats);
+    expect(result).toBeNull();
+  });
+
+  test("does NOT evict when lift is positive", () => {
+    const stats = makeStats({
+      ruleId: "helpful-rule",
+      injectionCount: 50,
+      avgCorrelatedRating: 5.0,
+      differentialLift: 0.3,
+    });
+    const result = shouldEvict(stats);
+    expect(result).toBeNull();
+  });
+});
+
 describe("appendEvictionLog — lifecycle dedup", () => {
   test("skips logging when rule already evicted in lifecycle registry", () => {
     transitionRule("already-evicted", "evicted", "low correlation", "daemon", TEMP_DIR);

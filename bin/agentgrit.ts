@@ -9,6 +9,7 @@ import { dashboardCommand } from "./commands/dashboard";
 import { daemonCommand } from "./commands/daemon";
 import { doctorCommand } from "./commands/doctor";
 import { evalCommand } from "./commands/eval";
+import { evictCommand } from "./commands/evict";
 import { exportCommand } from "./commands/export";
 import { graphCommand } from "./commands/graph";
 import { healthCommand } from "./commands/health";
@@ -36,6 +37,7 @@ const HANDLERS: Record<string, (args: string[]) => Promise<void>> = {
   daemon: daemonCommand,
   doctor: doctorCommand,
   eval: evalCommand,
+  evict: evictCommand,
   export: exportCommand,
   graph: graphCommand,
   health: healthCommand,
@@ -62,6 +64,7 @@ const DESCRIPTIONS: Record<string, string> = {
   daemon: "Run, start, stop daemon cycle",
   doctor: "Health check — verify every link in the chain",
   eval: "Evaluate traces, sessions, or recall",
+  evict: "Dry-run or apply auto-eviction on rule stats",
   export: "Export graph + rules + rubrics",
   graph: "Build, query, or inspect knowledge graph",
   health: "Context health — rules, budget, lifecycle, doctor",
