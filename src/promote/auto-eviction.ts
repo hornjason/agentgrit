@@ -31,6 +31,7 @@ export function shouldEvict(
 ): EvictionResult | null {
   if (stats.injectionCount < MIN_INJECTION_SAFETY) return null;
   if (allowlist?.has(stats.ruleId)) return null;
+  if (stats.differentialLift !== undefined && stats.differentialLift > 0) return null;
 
   // Trigger 4: high injection count with low value (most specific — checked first)
   if (stats.injectionCount >= 150 && stats.avgCorrelatedRating < 4.0) {
