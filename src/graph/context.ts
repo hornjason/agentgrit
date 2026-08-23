@@ -500,6 +500,41 @@ export interface SessionContext {
   filePathsTouched?: string[];
 }
 
+export function purgeSessionHistoryNoise(baseDir?: string): number {
+  const dir = baseDir ? join(baseDir, "state") : stateDir();
+  const historyPath = join(dir, SESSION_HISTORY_FILE);
+  if (!existsSync(historyPath)) return 0;
+
+  const content = readFileSync(historyPath, "utf-8");
+  const lines = content.trimEnd().split("\n").filter(Boolean);
+  const kept: string[] = [];
+  let purged = 0;
+
+  for (const line of lines) {
+    try {
+      const entry = JSON.parse(line);
+      if (
+        entry.rulesInjectedCount === 1 &&
+        Array.isArray(entry.domains) &&
+        entry.domains.length === 2 &&
+        entry.domains[0] === "process" &&
+        entry.domains[1] === "scope"
+      ) {
+        purged++;
+        continue;
+      }
+    } catch {
+      // keep malformed lines
+    }
+    kept.push(line);
+  }
+
+  if (purged > 0) {
+    writeFileSync(historyPath, kept.join("\n") + (kept.length > 0 ? "\n" : ""), "utf-8");
+  }
+  return purged;
+}
+
 export function writeSessionContext(
   rules: Rule[],
   domains: string[],
@@ -507,6 +542,8 @@ export function writeSessionContext(
   totalContextLines: number = 0,
   extra?: { toolCallPatterns?: string[]; filePathsTouched?: string[] },
 ): void {
+  if (process.env.NODE_ENV === "test" && !process.env.AGENTGRIT_DIR) return;
+
   const filePath = statePath(SESSION_CONTEXT_FILE);
   const dir = dirname(filePath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -983,6 +1020,68 @@ export function formatGraphContext(
     const score = rule.correlationScore?.toFixed(2) ?? "0.00";
     lines.push(`- **${rule.id}** [${tag}] (score: ${score})`);
     lines.push(`  ${rule.text}`);
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
+interface ParsedRule {
+  id: string;
+  header: string;
+  text: string;
+}
+
+function parseRulesFromMarkdown(md: string): ParsedRule[] {
+  const rules: ParsedRule[] = [];
+  const lines = md.split("\n");
+
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(/^- \*\*([^*]+)\*\*/);
+    if (match) {
+      const id = match[1];
+      const header = lines[i];
+      const textLine = i + 1 < lines.length ? lines[i + 1] : "";
+      rules.push({ id, header, text: textLine });
+    }
+  }
+  return rules;
+}
+
+export function mergeGraphContextMarkdown(
+  existing: string,
+  incoming: string,
+  budgetCap: number = 15,
+): string {
+  const existingRules = parseRulesFromMarkdown(existing);
+  const incomingRules = parseRulesFromMarkdown(incoming);
+
+  const merged = new Map<string, ParsedRule>();
+
+  for (const rule of existingRules) {
+    merged.set(rule.id, rule);
+  }
+  for (const rule of incomingRules) {
+    merged.set(rule.id, rule);
+  }
+
+  const allRules = [...merged.values()].slice(0, budgetCap);
+
+  const domainMatch = incoming.match(/# Graph Context — (.+)/);
+  const domains = domainMatch ? domainMatch[1] : "unknown";
+  const timestamp = new Date().toISOString();
+
+  const lines: string[] = [
+    `# Graph Context — ${domains}`,
+    `*Generated: ${timestamp} | ${allRules.length} context rules from [${domains}]*`,
+    "",
+    "## Context Rules (correlation-ranked)",
+    "",
+  ];
+
+  for (const rule of allRules) {
+    lines.push(rule.header);
+    lines.push(rule.text);
     lines.push("");
   }
 
