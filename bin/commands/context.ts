@@ -200,7 +200,7 @@ async function doRefresh(args: string[]): Promise<void> {
   const merged = mergeGraphContextMarkdown(existing, markdown, 15);
   writeFileSync(GRAPH_CONTEXT_PATH, merged, "utf-8");
 
-  const totalContextLines = markdown.split("\n").length;
+  const totalContextLines = merged.split("\n").length;
   writeSessionContext(rules, domains, domainSource, totalContextLines);
 
   console.log(`  Domains: [${domains.join(", ")}]`);
