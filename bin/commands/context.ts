@@ -15,6 +15,7 @@ import {
   detectDomainsFromGitStatus,
   computeSmartDefaults,
   formatGraphContext,
+  mergeGraphContextMarkdown,
   type RetrievalStrategy,
 } from "../../src/graph/context";
 import { loadVectorCache } from "../../src/graph/embeddings";
@@ -194,7 +195,10 @@ async function doRefresh(args: string[]): Promise<void> {
 
   const dir = dirname(GRAPH_CONTEXT_PATH);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(GRAPH_CONTEXT_PATH, markdown, "utf-8");
+
+  const existing = existsSync(GRAPH_CONTEXT_PATH) ? readFileSync(GRAPH_CONTEXT_PATH, "utf-8") : "";
+  const merged = mergeGraphContextMarkdown(existing, markdown, 15);
+  writeFileSync(GRAPH_CONTEXT_PATH, merged, "utf-8");
 
   const totalContextLines = markdown.split("\n").length;
   writeSessionContext(rules, domains, domainSource, totalContextLines);
