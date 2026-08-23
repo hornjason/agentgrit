@@ -332,11 +332,15 @@ export async function getContextRules(
   const afterRegistryFilter = filtered.filter(([id]) => !suppressedIds.has(id));
 
   const allowlist = loadEvictionAllowlist();
+  const historyPath = statePath(SESSION_HISTORY_FILE);
+  const totalSessions = existsSync(historyPath)
+    ? readFileSync(historyPath, "utf-8").split("\n").filter(l => l.trim()).length
+    : 0;
   const newlyEvicted: Array<{ id: string; eviction: { trigger: EvictionTrigger; reason: string }; stats: RuleStats }> = [];
   const afterEviction = afterRegistryFilter.filter(([id]) => {
     const stats = ruleStatsMap.get(id);
     if (!stats) return true;
-    const eviction = shouldEvict(stats, allowlist);
+    const eviction = shouldEvict(stats, allowlist, totalSessions);
     if (eviction) {
       newlyEvicted.push({ id, eviction, stats });
       return false;

@@ -41,17 +41,18 @@ export function shouldEvict(
   }
 
   // Trigger 5: frequency cap — fires too often without helping
-  // Guard: never evict rules with positive differential lift
+  // Guard: skip when lift is undefined (not enough data) or positive
   if (
     totalSessions &&
     totalSessions > 0 &&
     stats.injectionCount / totalSessions > 0.6 &&
-    (stats.differentialLift === undefined || stats.differentialLift <= 0)
+    stats.differentialLift !== undefined &&
+    stats.differentialLift <= 0
   ) {
     const pct = ((stats.injectionCount / totalSessions) * 100).toFixed(0);
     return {
       trigger: "frequency-cap",
-      reason: `${pct}% session frequency (${stats.injectionCount}/${totalSessions}) with differential lift ${stats.differentialLift?.toFixed(2) ?? "unknown"} <= 0`,
+      reason: `${pct}% session frequency (${stats.injectionCount}/${totalSessions}) with differential lift ${stats.differentialLift.toFixed(2)} <= 0`,
     };
   }
 
