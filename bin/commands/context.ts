@@ -18,6 +18,7 @@ import {
   mergeGraphContextMarkdown,
   type RetrievalStrategy,
 } from "../../src/graph/context";
+import { filterContradictions } from "../../src/graph/contradictions";
 import { loadVectorCache } from "../../src/graph/embeddings";
 import { diagnoseBM25, tokenize } from "../../src/graph/bm25";
 import { RRF_WEIGHTS, type RRFWeights } from "../../src/graph/retrieval";
@@ -198,7 +199,8 @@ async function doRefresh(args: string[]): Promise<void> {
 
   const existing = existsSync(GRAPH_CONTEXT_PATH) ? readFileSync(GRAPH_CONTEXT_PATH, "utf-8") : "";
   const merged = mergeGraphContextMarkdown(existing, markdown, 15);
-  writeFileSync(GRAPH_CONTEXT_PATH, merged, "utf-8");
+  const filtered = filterContradictions(merged);
+  writeFileSync(GRAPH_CONTEXT_PATH, filtered, "utf-8");
 
   const totalContextLines = merged.split("\n").length;
   writeSessionContext(rules, domains, domainSource, totalContextLines);
