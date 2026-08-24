@@ -737,7 +737,7 @@ export async function runDaemonCycle(
     const { writeFileSync } = await import("fs");
     const { join } = await import("path");
     const { stateDir: getState } = await import("../adapters/paths");
-    const agRoot = join(import.meta.dir, "..", "..");
+    const agRoot = join(process.env.HOME ?? "", "agentgrit");
     const testResult = spawnSync("bun", ["test", "test/"], {
       cwd: agRoot,
       timeout: 600_000,
