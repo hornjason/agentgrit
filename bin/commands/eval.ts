@@ -399,6 +399,7 @@ export async function evalCommand(args: string[]): Promise<void> {
     console.log("    agentgrit eval gold audit [--limit N] [--output PATH]");
     console.log("    agentgrit eval gold apply --file PATH");
     console.log("    agentgrit eval scoring-baseline");
+    console.log("    agentgrit eval scoring-compare");
     console.log("");
     console.log("  Evaluates traces, sessions, recall, precision, or rule effectiveness.");
     console.log("  Traces loads from algorithm-reflections.jsonl or session transcripts.");
@@ -408,7 +409,8 @@ export async function evalCommand(args: string[]): Promise<void> {
     console.log("  precision runs 10 diverse tasks and measures precision@5 and precision@10.");
     console.log("    --strategy    Retrieval strategy: current (default) or embeddings");
     console.log("    --compare     Run A/B comparison of current vs embeddings side-by-side");
-    console.log("  effectiveness compares correction frequency before/after rule promotion.\n");
+    console.log("  effectiveness compares correction frequency before/after rule promotion.");
+    console.log("  scoring-compare shows keyword vs outcome lift per rule, highlighting divergences.\n");
     return;
   }
 
@@ -942,8 +944,48 @@ export async function evalCommand(args: string[]): Promise<void> {
       console.log(`  ${"MEAN".padEnd(40)} ${avgKeyword.toFixed(1).padEnd(9)}${avgOutcome.toFixed(1).padEnd(9)}${deltaStr}`);
     }
     console.log("");
+  } else if (sub === "scoring-compare") {
+    console.log("  Mode: scoring-compare — keyword vs outcome lift per rule\n");
+
+    const { compareLiftMethods } = await import("../../src/scoring/lift-comparison");
+    const results = compareLiftMethods();
+
+    if (results.length === 0) {
+      console.log("  No rules with stats found. Run some sessions first.\n");
+      return;
+    }
+
+    const maxId = 40;
+    console.log("  " + "Rule".padEnd(maxId) + " KW Lift  Out Lift Delta    Agreement");
+    console.log("  " + "-".repeat(maxId + 45));
+
+    let agreeCount = 0;
+    let divergeCount = 0;
+    let insufficientCount = 0;
+
+    for (const r of results) {
+      const label = r.ruleId.length > maxId - 2
+        ? r.ruleId.slice(0, maxId - 5) + "..."
+        : r.ruleId.padEnd(maxId);
+      const kw = (r.keywordLift >= 0 ? "+" : "") + r.keywordLift.toFixed(3);
+      const out = (r.outcomeLift >= 0 ? "+" : "") + r.outcomeLift.toFixed(3);
+      const delta = (r.delta >= 0 ? "+" : "") + r.delta.toFixed(3);
+      const marker = r.agreement === "diverge" ? " <<<" : "";
+      console.log(`  ${label} ${kw.padEnd(8)} ${out.padEnd(8)} ${delta.padEnd(8)} ${r.agreement}${marker}`);
+
+      if (r.agreement === "agree") agreeCount++;
+      else if (r.agreement === "diverge") divergeCount++;
+      else insufficientCount++;
+    }
+
+    console.log("  " + "-".repeat(maxId + 45));
+    console.log(`\n  Summary: ${agreeCount} agree, ${divergeCount} diverge, ${insufficientCount} insufficient data`);
+    if (divergeCount > 0) {
+      console.log(`  >>> ${divergeCount} rules where keyword and outcome scoring DISAGREE — investigate these`);
+    }
+    console.log("");
   } else {
     console.log(`  Unknown eval target: ${sub}`);
-    console.log(`  Valid targets: traces, session, recall, effectiveness, precision, gold, scoring-baseline\n`);
+    console.log(`  Valid targets: traces, session, recall, effectiveness, precision, gold, scoring-baseline, scoring-compare\n`);
   }
 }
