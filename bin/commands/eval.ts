@@ -398,6 +398,7 @@ export async function evalCommand(args: string[]): Promise<void> {
     console.log("    agentgrit eval precision [--strategy current|embeddings] [--compare]");
     console.log("    agentgrit eval gold audit [--limit N] [--output PATH]");
     console.log("    agentgrit eval gold apply --file PATH");
+    console.log("    agentgrit eval scoring-baseline");
     console.log("");
     console.log("  Evaluates traces, sessions, recall, precision, or rule effectiveness.");
     console.log("  Traces loads from algorithm-reflections.jsonl or session transcripts.");
@@ -867,8 +868,82 @@ export async function evalCommand(args: string[]): Promise<void> {
       console.log(`  Unknown gold subcommand: ${goldSub}`);
       console.log(`  Valid subcommands: audit, apply\n`);
     }
+  } else if (sub === "scoring-baseline") {
+    console.log("  Mode: scoring-baseline — keyword vs outcome score comparison\n");
+
+    const { scoreSession } = await import("../../src/capture/rating");
+    const { computeOutcomeScore, readOutcomes } = await import("../../src/capture/outcomes");
+    const transcriptDir = resolveTranscriptDir();
+
+    if (!transcriptDir || !existsSync(transcriptDir)) {
+      console.log("  No transcript directory found. Set transcriptDir in config.json.\n");
+      return;
+    }
+
+    const files = readdirSync(transcriptDir)
+      .filter((f) => f.endsWith(".jsonl"))
+      .slice(-20);
+
+    if (files.length === 0) {
+      console.log("  No session transcripts found.\n");
+      return;
+    }
+
+    console.log(`  Sessions: ${files.length}\n`);
+    console.log("  " + "Session".padEnd(40) + " Keyword  Outcome  Delta");
+    console.log("  " + "-".repeat(70));
+
+    let totalKeyword = 0;
+    let totalOutcome = 0;
+    let count = 0;
+
+    for (const file of files) {
+      const sessionId = basename(file, ".jsonl");
+      const filePath = join(transcriptDir, file);
+
+      // Extract turns for keyword scorer
+      const turns: import("../../src/capture/rating").Turn[] = [];
+      const content = readFileSync(filePath, "utf-8");
+      for (const line of content.split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const entry = JSON.parse(line);
+          if (entry.type === "human" || entry.type === "user") {
+            const text = extractTextContent(entry.message?.content ?? entry.content ?? "");
+            if (text) turns.push({ role: "user", text, charCount: text.length });
+          } else if (entry.type === "assistant") {
+            const text = extractTextContent(entry.message?.content ?? entry.content ?? "");
+            if (text) turns.push({ role: "assistant", text, charCount: text.length });
+          }
+        } catch { /* skip */ }
+      }
+
+      const keywordResult = scoreSession(turns);
+      const outcomes = readOutcomes(sessionId);
+      const outcomeScore = computeOutcomeScore(outcomes);
+
+      const delta = outcomeScore - keywordResult.score;
+      const label = sessionId.length > 38 ? sessionId.slice(0, 35) + "..." : sessionId.padEnd(40);
+      const deltaStr = delta >= 0 ? `+${delta.toFixed(1)}` : delta.toFixed(1);
+
+      console.log(`  ${label} ${keywordResult.score.toFixed(1).padEnd(9)}${outcomeScore.toFixed(1).padEnd(9)}${deltaStr}`);
+
+      totalKeyword += keywordResult.score;
+      totalOutcome += outcomeScore;
+      count++;
+    }
+
+    if (count > 0) {
+      console.log("  " + "-".repeat(70));
+      const avgKeyword = totalKeyword / count;
+      const avgOutcome = totalOutcome / count;
+      const avgDelta = avgOutcome - avgKeyword;
+      const deltaStr = avgDelta >= 0 ? `+${avgDelta.toFixed(1)}` : avgDelta.toFixed(1);
+      console.log(`  ${"MEAN".padEnd(40)} ${avgKeyword.toFixed(1).padEnd(9)}${avgOutcome.toFixed(1).padEnd(9)}${deltaStr}`);
+    }
+    console.log("");
   } else {
     console.log(`  Unknown eval target: ${sub}`);
-    console.log(`  Valid targets: traces, session, recall, effectiveness, precision, gold\n`);
+    console.log(`  Valid targets: traces, session, recall, effectiveness, precision, gold, scoring-baseline\n`);
   }
 }

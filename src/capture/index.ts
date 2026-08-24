@@ -27,6 +27,12 @@ export { captureSkillInvocation, classifyOutcome } from "./skills";
 export { captureSkillSequence, buildCoOccurrencePairs, analyzeSkillSequence } from "./skills";
 export type { SkillOutcome, SkillSequenceEntry, SkillSequenceResult } from "./skills";
 
+export { computeOutcomeScore, captureOutcome, readOutcomes, detectMiniBoundary } from "./outcomes";
+export type { OutcomeEvent, OutcomeType } from "./outcomes";
+
+export { captureRuleSnapshot, getActiveRulesAtTurn } from "./rule-snapshots";
+export type { RuleSnapshot } from "./rule-snapshots";
+
 export { extractDebrief } from "./debrief";
 export type { RuleCandidate, DebriefResult, ApprovalSignal } from "./debrief";
 
