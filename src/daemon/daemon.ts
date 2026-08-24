@@ -731,6 +731,31 @@ export async function runDaemonCycle(
     result.errors.push(`correlation: ${err instanceof Error ? err.message : String(err)}`);
   }
 
+  // 8. Test cache — run tests and cache results for dashboard
+  try {
+    const { spawnSync } = await import("child_process");
+    const { writeFileSync } = await import("fs");
+    const { join } = await import("path");
+    const { stateDir: getState } = await import("../adapters/paths");
+    const agRoot = join(import.meta.dir, "..", "..");
+    const testResult = spawnSync("bun", ["test", "test/"], {
+      cwd: agRoot,
+      timeout: 600_000,
+      encoding: "utf-8",
+    });
+    const output = (testResult.stdout ?? "") + (testResult.stderr ?? "");
+    let pass = 0, fail = 0;
+    for (const m of output.matchAll(/(\d+)\s+pass/g)) pass += parseInt(m[1], 10);
+    for (const m of output.matchAll(/(\d+)\s+fail/g)) fail += parseInt(m[1], 10);
+    writeFileSync(
+      join(getState(), "test-results.json"),
+      JSON.stringify({ pass, fail, timestamp: new Date().toISOString() }, null, 2),
+      "utf-8",
+    );
+  } catch (err) {
+    result.errors.push(`test-cache: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   return result;
 }
 
