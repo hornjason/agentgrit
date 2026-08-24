@@ -197,6 +197,48 @@ export function detectGraduatedRules(dir?: string): string[] {
   return matched;
 }
 
+export function findGraduationCandidates(dir?: string): Array<{ ruleId: string; lift: number; injections: number; avg: number }> {
+  const baseDir = dir ?? stateDir();
+  const statsMap = loadRuleStats(baseDir);
+  const lifecycle = loadLifecycle(baseDir);
+  const candidates: Array<{ ruleId: string; lift: number; injections: number; avg: number }> = [];
+
+  for (const [ruleId, stats] of statsMap) {
+    const existing = lifecycle.rules[ruleId];
+    if (existing?.state === "graduated" || existing?.state === "evicted") continue;
+    if (stats.injectionCount < 30) continue;
+    if ((stats.differentialLift ?? 0) < 0.8) continue;
+    if (stats.avgCorrelatedRating < 6.0) continue;
+    candidates.push({
+      ruleId,
+      lift: stats.differentialLift ?? 0,
+      injections: stats.injectionCount,
+      avg: stats.avgCorrelatedRating,
+    });
+  }
+
+  return candidates.sort((a, b) => b.lift - a.lift);
+}
+
+export function autoGraduateRules(dir?: string): string[] {
+  const baseDir = dir ?? stateDir();
+  const candidates = findGraduationCandidates(baseDir);
+  const graduated: string[] = [];
+
+  for (const c of candidates) {
+    transitionRule(
+      c.ruleId,
+      "graduated",
+      `Auto-graduated: lift +${c.lift.toFixed(2)}, ${c.injections} injections, avg ${c.avg.toFixed(1)}`,
+      "auto-graduation",
+      baseDir,
+    );
+    graduated.push(c.ruleId);
+  }
+
+  return graduated;
+}
+
 export function classifyUndersampledRules(dir?: string): string[] {
   const baseDir = dir ?? stateDir();
   const statsMap = loadRuleStats(baseDir);
@@ -251,4 +293,5 @@ export function migrateFromEvictedRegistry(dir?: string): void {
   detectGraduatedRules(baseDir);
   classifyUndersampledRules(baseDir);
   classifyActiveRules(baseDir);
+  autoGraduateRules(baseDir);
 }
