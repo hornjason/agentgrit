@@ -6,6 +6,7 @@ import { baselineCommand } from "./commands/baseline";
 import { captureCommand } from "./commands/capture";
 import { contextCommand } from "./commands/context";
 import { dashboardCommand } from "./commands/dashboard";
+import { dashboardExportCommand } from "./commands/dashboard-export";
 import { daemonCommand } from "./commands/daemon";
 import { doctorCommand } from "./commands/doctor";
 import { evalCommand } from "./commands/eval";
@@ -35,6 +36,7 @@ const HANDLERS: Record<string, (args: string[]) => Promise<void>> = {
   capture: captureCommand,
   context: contextCommand,
   dashboard: dashboardCommand,
+  "dashboard-export": dashboardExportCommand,
   daemon: daemonCommand,
   doctor: doctorCommand,
   eval: evalCommand,
@@ -63,6 +65,7 @@ const DESCRIPTIONS: Record<string, string> = {
   capture: "Capture signals from Claude Code hooks",
   context: "Refresh session context from task text",
   dashboard: "Migration pipeline health dashboard (HTML)",
+  "dashboard-export": "Export dashboard data as JSON for control plane",
   daemon: "Run, start, stop daemon cycle",
   doctor: "Health check — verify every link in the chain",
   eval: "Evaluate traces, sessions, or recall",

@@ -756,6 +756,19 @@ export async function runDaemonCycle(
     result.errors.push(`test-cache: ${err instanceof Error ? err.message : String(err)}`);
   }
 
+  // Dashboard export — write comprehensive JSON for control plane
+  try {
+    const { generateDashboardResults } = await import("../../bin/commands/dashboard-export");
+    const dashResults = generateDashboardResults();
+    writeFileSync(
+      join(getState(), "dashboard-results.json"),
+      JSON.stringify(dashResults, null, 2),
+      "utf-8",
+    );
+  } catch (err) {
+    result.errors.push(`dashboard-export: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   return result;
 }
 
