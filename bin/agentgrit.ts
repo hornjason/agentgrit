@@ -23,6 +23,7 @@ import { rulesCommand } from "./commands/rules";
 import { signalsCommand } from "./commands/signals";
 import { statusCommand } from "./commands/status";
 import { showcaseCommand } from "./commands/showcase";
+import { testCommand } from "./commands/test";
 import { undoCommand } from "./commands/undo";
 import { upgradeCommand } from "./commands/upgrade";
 
@@ -50,6 +51,7 @@ const HANDLERS: Record<string, (args: string[]) => Promise<void>> = {
   rules: rulesCommand,
   showcase: showcaseCommand,
   signals: signalsCommand,
+  test: testCommand,
   status: statusCommand,
   undo: undoCommand,
   upgrade: upgradeCommand,
@@ -77,6 +79,7 @@ const DESCRIPTIONS: Record<string, string> = {
   rules: "List, rebalance, or compact rules",
   showcase: "Generate living system dashboard (HTML)",
   signals: "Signal file sizes and rotation",
+  test: "Run tests and cache results for dashboard",
   status: "Signal counts, score trends, rule budget",
   undo: "Undo recent rule promotions",
   upgrade: "Switch adoption speed (quick/standard/full)",
