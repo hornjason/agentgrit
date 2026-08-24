@@ -14,6 +14,7 @@ export async function testCommand(args: string[]): Promise<void> {
     cwd: agRoot,
     timeout: 600_000,
     encoding: "utf-8",
+    maxBuffer: 10 * 1024 * 1024,
   });
 
   const output = (result.stdout ?? "") + (result.stderr ?? "");
