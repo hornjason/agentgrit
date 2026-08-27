@@ -14,6 +14,12 @@ export const quick: AgentGritConfig = {
     interval: "0",
     weeklyDay: "sunday",
   },
+  learningCaps: {
+    templateCap: 8,
+    gateStagingCap: 5,
+    questionnaireCap: 10,
+    claudeMdStagingCap: 3,
+  },
 };
 
 // Standard — one API key, LLM judge + graph, human-gated promotion
@@ -33,6 +39,12 @@ export const standard: AgentGritConfig = {
   daemon: {
     interval: "30m",
     weeklyDay: "sunday",
+  },
+  learningCaps: {
+    templateCap: 8,
+    gateStagingCap: 5,
+    questionnaireCap: 10,
+    claudeMdStagingCap: 3,
   },
 };
 
@@ -58,6 +70,12 @@ export const full: AgentGritConfig = {
   daemon: {
     interval: "30m",
     weeklyDay: "sunday",
+  },
+  learningCaps: {
+    templateCap: 8,
+    gateStagingCap: 5,
+    questionnaireCap: 10,
+    claudeMdStagingCap: 3,
   },
 };
 

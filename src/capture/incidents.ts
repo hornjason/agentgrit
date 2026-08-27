@@ -18,6 +18,10 @@ export interface IncidentRecord {
   error_snippet: string;
   error_type: string;
   command_preview: string;
+  /** Set when incident originates from learning routing (confidence < 0.7) */
+  learning_type?: string;
+  /** Confidence score from learning signal that triggered this incident */
+  confidence?: number;
 }
 
 export interface IncidentDetectResult {

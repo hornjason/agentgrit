@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { Tier } from "../adapters/types";
+import type { LearningCaps } from "../adapters/types";
 import { loadConfig } from "../adapters/paths";
 import { loadRuleStats } from "./rules";
 import { removeFromRuleDomains } from "./evict";
@@ -143,4 +144,56 @@ export function pruneLearnedRules(
   removeFromRuleDomains(prunedIds, options?.ruleDomainsPath);
 
   return { pruned: prunedIds, kept: total - excess, total };
+}
+
+// ── Learning Capacity (#210) ──
+
+export const DEFAULT_LEARNING_CAPS: LearningCaps = {
+  templateCap: 8,
+  gateStagingCap: 5,
+  questionnaireCap: 10,
+  claudeMdStagingCap: 3,
+};
+
+const DESTINATION_TO_CAP_KEY: Record<string, keyof LearningCaps> = {
+  template: "templateCap",
+  gate: "gateStagingCap",
+  questionnaire: "questionnaireCap",
+  "claude-md": "claudeMdStagingCap",
+};
+
+export interface CapacityResult {
+  overCap: boolean;
+  current: number;
+  max: number;
+}
+
+/**
+ * Check capacity for a learning destination.
+ * @param destination - target destination (template, gate, questionnaire, claude-md, feedback-memory)
+ * @param current - current item count at destination
+ * @param maxOverride - optional explicit cap (overrides defaults)
+ */
+export function checkCapacity(
+  destination: string,
+  current: number,
+  maxOverride?: number,
+): CapacityResult {
+  let max: number;
+  if (maxOverride !== undefined) {
+    max = maxOverride;
+  } else {
+    const capKey = DESTINATION_TO_CAP_KEY[destination];
+    if (!capKey) {
+      // Unknown destination (e.g. feedback-memory) — no cap
+      return { overCap: false, current, max: Infinity };
+    }
+    max = DEFAULT_LEARNING_CAPS[capKey];
+  }
+
+  return {
+    overCap: current >= max,
+    current,
+    max,
+  };
 }

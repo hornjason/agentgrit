@@ -240,6 +240,15 @@ export interface EmbeddingProvider {
   embed(texts: string[]): Promise<number[][]>;
 }
 
+// ── Learning Capacity ──
+
+export interface LearningCaps {
+  templateCap: number;
+  gateStagingCap: number;
+  questionnaireCap: number;
+  claudeMdStagingCap: number;
+}
+
 // ── Config ──
 
 export interface AgentGritConfig {
@@ -299,6 +308,7 @@ export interface AgentGritConfig {
     graph?: number;
     vector?: number;
   };
+  learningCaps?: LearningCaps;
 }
 
 // ── Adapter interfaces ──
