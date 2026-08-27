@@ -185,6 +185,16 @@ export interface RubricConfig {
   judgeModel: string;
 }
 
+// ── Learning Artifact Stats (Phase 3 — #211) ──
+
+export interface LearningArtifactStats {
+  artifactId: string;
+  firingCount: number;
+  lastFired: string;
+  createdAt: string;
+  destination: string;
+}
+
 // ── Promotion ──
 
 export interface PromotionRecord {

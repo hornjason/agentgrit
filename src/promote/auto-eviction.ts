@@ -3,6 +3,7 @@ import { dirname, join } from "path";
 import { stateDir } from "../adapters/paths";
 import type { RuleStats } from "./rules";
 import { getFilteredRuleIds } from "./lifecycle";
+import type { LearningArtifactStats } from "../adapters/types";
 
 export type EvictionTrigger = "low-avg-high-volume" | "never-helped" | "net-negative-roi" | "high-injection-low-value" | "frequency-cap" | "negative-lift";
 
@@ -194,4 +195,136 @@ export function readEvictionLog(dir?: string): EvictionLogEntry[] {
   } catch {
     return [];
   }
+}
+
+// ── Learning Artifact Eviction (Phase 3 — #211) ──
+
+const STATS_FILE = "learning-artifact-stats.jsonl";
+
+/**
+ * Configuration for learning artifact lifecycle management.
+ * Initial defaults are conservative pending instrumentation data from shadow mode.
+ */
+export interface LearningEvictionConfig {
+  /** Days with firingCount=0 before an artifact becomes an eviction candidate. Initial default: 90 */
+  evictionDays: number;
+  /** Minimum firing count within the promotion window to qualify for promotion. Initial default: 10 */
+  promotionFiringThreshold: number;
+  /** Window (days) over which lastFired must fall for promotion eligibility. Initial default: 30 */
+  promotionWindowDays: number;
+  /** When true, returns candidates but does NOT delete/promote — logs only. Default: true (initial defaults pending instrumentation data) */
+  loggingOnly: boolean;
+}
+
+export interface LearningEvictionResult {
+  candidates: LearningArtifactStats[];
+  loggingOnly: boolean;
+}
+
+export interface LearningPromotionResult {
+  candidates: LearningArtifactStats[];
+  loggingOnly: boolean;
+}
+
+/**
+ * Load all artifact stats from the JSONL file.
+ */
+export function loadArtifactStats(dataDir: string): LearningArtifactStats[] {
+  const filePath = join(dataDir, STATS_FILE);
+  if (!existsSync(filePath)) return [];
+  try {
+    return readFileSync(filePath, "utf-8")
+      .split("\n")
+      .filter((l) => l.trim())
+      .map((l) => JSON.parse(l) as LearningArtifactStats);
+  } catch {
+    return [];
+  }
+}
+
+function writeArtifactStats(dataDir: string, stats: LearningArtifactStats[]): void {
+  const filePath = join(dataDir, STATS_FILE);
+  if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
+  const content = stats.map((s) => JSON.stringify(s)).join("\n") + (stats.length > 0 ? "\n" : "");
+  const tmpPath = filePath + ".tmp." + process.pid;
+  try {
+    writeFileSync(tmpPath, content, "utf-8");
+    renameSync(tmpPath, filePath);
+  } catch (err) {
+    try { unlinkSync(tmpPath); } catch { /* cleanup best-effort */ }
+    throw err;
+  }
+}
+
+/**
+ * Record that a learning artifact fired. Increments firingCount, updates lastFired.
+ * Creates the artifact entry on first firing.
+ */
+export function recordArtifactFiring(artifactId: string, dataDir: string, destination: string): void {
+  const existing = loadArtifactStats(dataDir);
+  const idx = existing.findIndex((s) => s.artifactId === artifactId);
+  const now = new Date().toISOString();
+
+  if (idx >= 0) {
+    existing[idx].firingCount++;
+    existing[idx].lastFired = now;
+  } else {
+    existing.push({
+      artifactId,
+      firingCount: 1,
+      lastFired: now,
+      createdAt: now,
+      destination,
+    });
+  }
+
+  writeArtifactStats(dataDir, existing);
+}
+
+/**
+ * Returns eviction candidates: artifacts with firingCount=0 for longer than config.evictionDays.
+ * Default is logging-only — returns candidates but does not delete.
+ */
+export function shouldEvictLearning(
+  stats: LearningArtifactStats[],
+  config: LearningEvictionConfig,
+): LearningEvictionResult {
+  const now = Date.now();
+  const thresholdMs = config.evictionDays * 24 * 60 * 60 * 1000;
+
+  const candidates = stats.filter((s) => {
+    if (s.firingCount > 0) return false;
+    // Use lastFired (which equals createdAt for never-fired artifacts) as the reference point
+    const referenceTime = new Date(s.lastFired).getTime();
+    return (now - referenceTime) >= thresholdMs;
+  });
+
+  return {
+    candidates,
+    loggingOnly: config.loggingOnly,
+  };
+}
+
+/**
+ * Returns promotion candidates: artifacts with firingCount >= threshold and lastFired within the promotion window.
+ * Default is logging-only — returns candidates but does not promote.
+ */
+export function shouldPromoteLearning(
+  stats: LearningArtifactStats[],
+  config: LearningEvictionConfig,
+): LearningPromotionResult {
+  const now = Date.now();
+  const windowMs = config.promotionWindowDays * 24 * 60 * 60 * 1000;
+
+  const candidates = stats.filter((s) => {
+    if (s.firingCount < config.promotionFiringThreshold) return false;
+    // lastFired must be within the promotion window
+    const lastFiredTime = new Date(s.lastFired).getTime();
+    return (now - lastFiredTime) <= windowMs;
+  });
+
+  return {
+    candidates,
+    loggingOnly: config.loggingOnly,
+  };
 }
