@@ -185,6 +185,43 @@ export interface RubricConfig {
   judgeModel: string;
 }
 
+// ── Learning Routing ──
+
+export type LearningType =
+  | "mechanical-fix"
+  | "process-rule"
+  | "domain-knowledge"
+  | "judgment";
+
+export type ArtifactType = "template" | "gate" | "both";
+
+export type TrustTier = "low" | "high";
+
+export type LearningAction =
+  | "direct-write"
+  | "queue-for-promotion"
+  | "incident-log"
+  | "shadow-log";
+
+export interface RoutedLearning {
+  type: LearningType;
+  artifactType?: ArtifactType;
+  content: string;
+  evidence: string;
+  sourceIssue: number;
+  sourcePass: number;
+  confidence: number;
+  timestamp: string;
+  learnStepId: string;
+}
+
+export interface LearningRouteResult {
+  destination: string;
+  trustTier: TrustTier;
+  action: LearningAction;
+  rationale: string;
+}
+
 // ── Promotion ──
 
 export interface PromotionRecord {
