@@ -3,6 +3,7 @@ doc-type: adr
 status: active
 owner: jason
 updated: 2026-07-07
+created: 2026-10-05
 ---
 
 # ADR-001: Correlation-Driven Rule Injection

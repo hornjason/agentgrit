@@ -1,0 +1,60 @@
+# Managed by rungate — do not edit. Customize via .claude/rungate.json ci section.
+name: Gates
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "latest"
+      - run: bun install
+      - name: Conformity + spec drift
+        run: bun test test/scaffold-conformity.test.ts
+      - name: Secret scan
+        run: |
+          # CI has nothing staged, so the old --cached scan examined zero files
+          # on every run — a green check that verified nothing.
+          # git grep handles paths with spaces natively, skips binaries with -I,
+          # and surfaces real errors instead of hiding them behind 2>/dev/null,
+          # so this cannot fail open the way the xargs pipeline could.
+          # git grep exits 1 when nothing matches, which is the pass case.
+          # Two tiers matching the pre-commit hook, so local and CI cannot
+          # disagree about what counts as a secret.
+          if git grep -I -lE '(AKIA[A-Z0-9]{16}|sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36})' -- .; then
+            echo "::error::Potential secrets detected in tracked files"
+            exit 1
+          fi
+          # Capture first so a git failure fails CLOSED. Piping git straight
+          # into the filters would turn an error into empty input, which reads
+          # as "clean" — passing exactly when the scan could not run.
+          # git grep exits 1 for "no match", which is not an error.
+          # NOTE: do NOT append "|| true" to the assignment below. It makes the
+          # assignment itself succeed, so $? is always 0 and the error branch
+          # becomes dead code — the scan would fail open on a git error.
+          set +e
+          tier2=$(git grep -I -hoE '(password|passwd|api[_-]?key|secret)[[:space:]]*[:=][[:space:]]*[A-Za-z0-9/+=_.-]{12,}' -- .)
+          rc=$?
+          set -e
+          # git grep: 0 = match, 1 = no match, >1 = real error.
+          if [ "$rc" -gt 1 ]; then
+            echo "::error::git grep failed (exit $rc) — refusing to report a clean scan"
+            exit 1
+          fi
+          # Exclusion applies to the extracted VALUE, not the whole line.
+          # Matching anywhere on the line let a trailing "# placeholder"
+          # launder a real secret past the check.
+          if printf '%s\n' "$tier2" | grep -qvE '^$|[:=][[:space:]]*(process\.env|os\.environ|Deno\.env|getenv|REDACTED|CHANGEME|placeholder)'; then
+            echo "::error::Potential credential assignment in tracked files"
+            exit 1
+          fi
+          echo "Secret scan clean"

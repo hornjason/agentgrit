@@ -1,0 +1,33 @@
+{
+  "$schema": "rungate",
+  "harnessVersion": "0.2.2",
+  "scaffoldedAt": "2026-10-05T21:13:26.336Z",
+  "project": "@agentgrit/core",
+  "repo": "hornjason/agentgrit",
+  "issueRepo": "hornjason/agentgrit",
+  "dev": {
+    "start": "bun run dev",
+    "apiBase": null,
+    "uiBase": null,
+    "testCmd": "bun test",
+    "typeCheck": "bunx tsc --noEmit"
+  },
+  "prod": {
+    "apiBase": null
+  },
+  "pages": {},
+  "consumers": [],
+  "envVars": [],
+  "ci": {
+    "runner": "ubuntu-latest",
+    "bunVersion": "latest",
+    "branches": [
+      "main"
+    ]
+  },
+  "contextDocs": {},
+  "test": {
+    "command": "bun test",
+    "timeout": 300000
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "rules": {},
+  "defaults": {
+    "consecutiveFailThreshold": 3,
+    "tierPromotionThreshold": 5
+  },
+  "organize": {
+    "fileTypes": [
+      ".md"
+    ],
+    "artifactClassification": {},
+    "externalSources": []
+  }
+}

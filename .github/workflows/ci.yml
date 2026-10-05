@@ -1,27 +1,22 @@
+# Managed by rungate — do not edit. Customize via .claude/rungate.json ci section.
 name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches:
+      - main
   pull_request:
-    branches: ["**"]
+    branches:
+      - main
 
 jobs:
   test:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Run tests
-        run: bun test
-
-      - name: Type check
-        run: bunx tsc --noEmit
+          bun-version: "latest"
+      - run: bun install
+      - run: bun test
+      - run: bunx tsc --noEmit

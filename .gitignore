@@ -8,3 +8,13 @@ test/**/.tmp-*
 .agentgrit/
 .metadata_never_index
 shadow-routing.jsonl
+
+# Added by rungate scaffold
+.env
+.env.*
+!.env.example
+.rungate/
+*.pem
+*.key
+credentials.json/
+service-account/
