@@ -3,12 +3,12 @@ import { join } from "path";
 import type { Rule } from "../../src/adapters/types";
 import { Tier } from "../../src/adapters/types";
 import { writeRuleFile, appendToLearnedMd } from "../../src/promote/sync";
+import { statePath, rulesDir, ruleDomainsFile, learnedRulesFile } from "../../src/adapters/paths";
 
-const HOME = process.env.HOME ?? "";
-const PROMOTIONS_PATH = join(HOME, ".agentgrit/state/promotions.jsonl");
-const RULES_DIR = join(HOME, ".claude/MEMORY/LEARNING/RULES");
-const RULE_DOMAINS_PATH = join(HOME, ".claude/MEMORY/LEARNING/STATE/rule-domains.json");
-const CLAUDE_LEARNED_PATH = join(HOME, ".claude/CLAUDE-LEARNED.md");
+const PROMOTIONS_PATH = statePath("promotions.jsonl");
+const RULES_DIR = rulesDir();
+const RULE_DOMAINS_PATH = ruleDomainsFile();
+const CLAUDE_LEARNED_PATH = learnedRulesFile();
 
 interface PromotionEntry {
   id: string;

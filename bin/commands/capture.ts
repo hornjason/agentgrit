@@ -357,13 +357,12 @@ async function captureSentimentCommand(infer: InferenceFn = inference): Promise<
 
 async function captureHarvestCommand(): Promise<void> {
   const { harvest } = await import("../../src/capture/harvester");
-  const { resolveSignalDir } = await import("../../src/adapters/paths");
+  const { resolveSignalDir, hostDir, hostTranscriptsDir } =
+    await import("../../src/adapters/paths");
   const { join } = await import("path");
-  const { homedir } = await import("os");
 
-  const claudeDir = join(homedir(), ".claude");
-  const cwdSlug = claudeDir.replace(/[\/\.]/g, "-");
-  const projectsDir = join(claudeDir, "projects", cwdSlug);
+  const cwdSlug = hostDir().replace(/[\/\.]/g, "-");
+  const projectsDir = join(hostTranscriptsDir(), cwdSlug);
   const learningDir = join(resolveSignalDir(), "..", "learning");
 
   const result = harvest(projectsDir, learningDir, { recent: 10 });

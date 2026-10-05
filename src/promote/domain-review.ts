@@ -4,7 +4,7 @@ import { homedir, tmpdir } from "os";
 import { mkdtempSync, rmSync } from "fs";
 import type { Graph, GraphNode, DocEntry, VocabEntry } from "../graph/types";
 import { buildGraph, defaultRuleDomainsPath, loadRuleDomains, keywordClassify, DOMAINS } from "../graph/builder";
-import { resolveMemoryDir } from "../adapters/paths";
+import { resolveMemoryDir, learnedRulesFile } from "../adapters/paths";
 import { tokenize, searchIndex } from "../graph/bm25";
 
 export interface DomainReviewResult {
@@ -204,7 +204,7 @@ export async function runDomainReview(rulesDir?: string, ruleDomainsPath?: strin
     const graph = await buildGraph(memDir, tempDir, join(tempDir, "nonexistent.json"));
 
     let learnedRulesText: Map<string, string> | undefined;
-    const learnedPath = join(homedir(), ".claude", "CLAUDE-LEARNED.md");
+    const learnedPath = learnedRulesFile();
     if (existsSync(learnedPath)) {
       learnedRulesText = parseLearnedRules(readFileSync(learnedPath, "utf-8"));
     }

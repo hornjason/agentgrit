@@ -1,7 +1,9 @@
 import { existsSync, statSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import { getBaseDir } from "../../src/adapters/paths";
+import {
+  getBaseDir, statePath, ratingsFile, graphContextFile, patternsFile, legacySignalDir,
+} from "../../src/adapters/paths";
 
 // --- Exported helpers (tested directly) ---
 
@@ -35,14 +37,18 @@ function expandHome(p: string): string {
   return p.replace(/^~(?=\/|$)/, homedir());
 }
 
-const PIPELINE_FILES: PipelineFile[] = [
-  { name: "ratings.jsonl", path: "~/.claude/MEMORY/LEARNING/SIGNALS/ratings.jsonl", purpose: "Raw session ratings", yellowDays: 3, redDays: 7 },
-  { name: "rule-stats.json", path: "~/.agentgrit/state/rule-stats.json", purpose: "Per-rule correlation stats", yellowDays: 3, redDays: 7 },
-  { name: "session-context.json", path: "~/.agentgrit/state/session-context.json", purpose: "Active rules + domains", yellowDays: 1, redDays: 3 },
-  { name: "eviction-candidates.json", path: "~/.agentgrit/state/eviction-candidates.json", purpose: "Stale rule candidates", yellowDays: 7, redDays: 14 },
-  { name: "GRAPH-CONTEXT.md", path: "~/.claude/MEMORY/STATE/GRAPH-CONTEXT.md", purpose: "Injected rules", yellowDays: 1, redDays: 3 },
-  { name: "patterns.json", path: "~/.claude/MEMORY/LEARNING/STATE/patterns.json", purpose: "Detected failure patterns", yellowDays: 7, redDays: 14 },
-];
+// Resolved per call so the dashboard reflects the active config, not the
+// layout that happened to be in place when the module loaded.
+function pipelineFiles(): PipelineFile[] {
+  return [
+    { name: "ratings.jsonl", path: ratingsFile(), purpose: "Raw session ratings", yellowDays: 3, redDays: 7 },
+    { name: "rule-stats.json", path: statePath("rule-stats.json"), purpose: "Per-rule correlation stats", yellowDays: 3, redDays: 7 },
+    { name: "session-context.json", path: statePath("session-context.json"), purpose: "Active rules + domains", yellowDays: 1, redDays: 3 },
+    { name: "eviction-candidates.json", path: statePath("eviction-candidates.json"), purpose: "Stale rule candidates", yellowDays: 7, redDays: 14 },
+    { name: "GRAPH-CONTEXT.md", path: graphContextFile(), purpose: "Injected rules", yellowDays: 1, redDays: 3 },
+    { name: "patterns.json", path: patternsFile(), purpose: "Detected failure patterns", yellowDays: 7, redDays: 14 },
+  ];
+}
 
 // --- Data collection ---
 
@@ -132,10 +138,11 @@ interface KeyMetrics {
 }
 
 function collectKeyMetrics(): KeyMetrics {
-  const paiRatings = expandHome("~/.claude/MEMORY/LEARNING/SIGNALS/ratings.jsonl");
-  const agRatings = expandHome("~/.agentgrit/signals/ratings.jsonl");
-  const ruleStatsPath = expandHome("~/.agentgrit/state/rule-stats.json");
-  const baselinePath = expandHome("~/.claude/MEMORY/WORK/166-migration-gate/baseline.json");
+  const legacy = legacySignalDir();
+  const paiRatings = legacy ? join(legacy, "ratings.jsonl") : "";
+  const agRatings = ratingsFile();
+  const ruleStatsPath = statePath("rule-stats.json");
+  const baselinePath = statePath("migration-baseline.json");
 
   const countLines = (p: string): number => {
     if (!existsSync(p)) return 0;
@@ -375,7 +382,7 @@ interface DashboardOptions {
 }
 
 export async function generateDashboardHtml(opts?: DashboardOptions): Promise<string> {
-  const files = PIPELINE_FILES.map(collectFileInfo);
+  const files = pipelineFiles().map(collectFileInfo);
   const issues = await fetchGhIssues();
   const metrics = collectKeyMetrics();
   const html = renderHtml(files, issues, metrics);

@@ -325,7 +325,8 @@ export async function runDaemonCycle(
           schemaVersion: SCHEMA_VERSION,
         };
 
-        const claudeMdPath = join(process.env.HOME ?? "", ".claude", "CLAUDE.md");
+        const { hostRulesFile } = await import("../adapters/paths");
+        const claudeMdPath = hostRulesFile();
         if (routeResult.tier === Tier.Global && existsSync(claudeMdPath)) {
           await promoteRule(rule, claudeMdPath);
         }
@@ -355,7 +356,8 @@ export async function runDaemonCycle(
         updateRuleDomains(rule, rdPath);
 
         // Sync 3: append to CLAUDE-LEARNED.md for session injection
-        const learnedPath = join(process.env.HOME ?? "", ".claude", "CLAUDE-LEARNED.md");
+        const { learnedRulesFile } = await import("../adapters/paths");
+        const learnedPath = learnedRulesFile();
         if (existsSync(learnedPath)) {
           appendToLearnedMd(rule, learnedPath);
         }
@@ -387,10 +389,11 @@ export async function runDaemonCycle(
     const { existsSync, readdirSync } = await import("fs");
 
     const state = stateDir();
-    const home = process.env.HOME ?? "";
+    const { hostRulesFile, learnedRulesFile, hostTranscriptsDir } =
+      await import("../adapters/paths");
 
-    // Prune ~/.claude/CLAUDE.md (global + project tiers)
-    const claudeMdPath = join(home, ".claude", "CLAUDE.md");
+    // Prune the host rules file (global + project tiers)
+    const claudeMdPath = hostRulesFile();
     if (existsSync(claudeMdPath)) {
       for (const tier of [Tier.Global, Tier.Project]) {
         const pruneResult = await pruneTobudget(claudeMdPath, tier, {
@@ -400,8 +403,8 @@ export async function runDaemonCycle(
       }
     }
 
-    // Prune ~/.claude/CLAUDE-LEARNED.md (learned rules budget)
-    const learnedPath = join(home, ".claude", "CLAUDE-LEARNED.md");
+    // Prune the generated rules file (learned rules budget)
+    const learnedPath = learnedRulesFile();
     if (existsSync(learnedPath)) {
       const learnedBudget = config.rules.learnedBudget ?? 50;
       const pruneResult = await pruneTobudget(learnedPath, Tier.Global, {
@@ -411,8 +414,8 @@ export async function runDaemonCycle(
       result.pruned += pruneResult.removed.length;
     }
 
-    // Discover and prune project CLAUDE.md files
-    const projectsDir = join(home, ".claude", "projects");
+    // Discover and prune project rules files
+    const projectsDir = hostTranscriptsDir();
     if (existsSync(projectsDir)) {
       const projectDirs = readdirSync(projectsDir, { withFileTypes: true })
         .filter((d: import("fs").Dirent) => d.isDirectory());
@@ -627,8 +630,10 @@ export async function runDaemonCycle(
     // Expire old PENDING-RULES.md entries
     try {
       const { existsSync: exists } = await import("fs");
-      const pendingPath = join(process.env.HOME ?? "", ".claude", "MEMORY", "LEARNING", "PENDING-RULES.md");
-      const archivePath = join(process.env.HOME ?? "", ".claude", "MEMORY", "LEARNING", "PENDING-RULES-ARCHIVE.md");
+      const { pendingRulesFile, pendingRulesArchiveFile } =
+        await import("../adapters/paths");
+      const pendingPath = pendingRulesFile();
+      const archivePath = pendingRulesArchiveFile();
       if (exists(pendingPath)) {
         expirePendingRules(pendingPath, archivePath, config.rules.pendingExpiryDays ?? 30);
       }
@@ -839,8 +844,8 @@ export async function runWeeklyReview(
     result.evictionCandidates = candidates;
 
     // Duplicate detection
-    const home = process.env.HOME ?? "";
-    const learnedPath = join(home, ".claude", "CLAUDE-LEARNED.md");
+    const { hostRulesFile, learnedRulesFile } = await import("../adapters/paths");
+    const learnedPath = learnedRulesFile();
     if (exists(learnedPath)) {
       const learnedContent = readFile(learnedPath, "utf-8");
       const ruleLines = learnedContent.split("\n").filter((l: string) => l.startsWith("- **"));
@@ -868,7 +873,7 @@ export async function runWeeklyReview(
     }
 
     if (allToEvict.length > 0 && exists(learnedPath) && config.rules.autoEvict) {
-      const claudeMdPath = join(home, ".claude", "CLAUDE.md");
+      const claudeMdPath = hostRulesFile();
       result.evictionResult = await evictRules(allToEvict, learnedPath, {
         claudeMdPath: exists(claudeMdPath) ? claudeMdPath : undefined,
       });

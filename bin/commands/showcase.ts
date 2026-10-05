@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { spawnSync } from "child_process";
-import { getBaseDir, stateDir, loadConfig, resolveSignalFile } from "../../src/adapters/paths";
+import { getBaseDir, stateDir, loadConfig, resolveSignalFile, recallScoresFile, learnedRulesFile } from "../../src/adapters/paths";
 import { renderShowcase } from "../../src/showcase/template";
 import { runDoctor } from "../../src/daemon/doctor";
 import type { ShowcaseMetrics, DomainEntry, RulePerformer, HealthCheck } from "../../src/showcase/template";
@@ -112,7 +112,7 @@ async function gatherMetrics(): Promise<ShowcaseMetrics> {
     ? activeStats.reduce((sum, s) => sum + s.avgCorrelatedRating, 0) / activeStats.length
     : 0;
 
-  const paiEvalPath = join(process.env.HOME ?? "", ".claude", "MEMORY", "LEARNING", "STATE", "recall-scores.json");
+  const paiEvalPath = recallScoresFile();
   const paiEval = readJson(paiEvalPath) as PaiRecallScores | null;
   const recallEval: RecallEvalData | null = paiEval
     ? { meanPrecision5: paiEval.mean_precision5, meanRecall15: paiEval.mean_recall15, meanMrr: paiEval.mean_mrr }
@@ -233,7 +233,7 @@ async function gatherMetrics(): Promise<ShowcaseMetrics> {
 
   const learnedBudgetCap = config.rules?.learnedBudget ?? 50;
   let learnedCount = 0;
-  const learnedPath = join(process.env.HOME ?? "", ".claude", "CLAUDE-LEARNED.md");
+  const learnedPath = learnedRulesFile();
   if (existsSync(learnedPath)) {
     try {
       const content = readFileSync(learnedPath, "utf-8");

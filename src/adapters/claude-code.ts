@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
 import { basename, join, resolve } from "path";
 import { Tier } from "./types";
+import { hostRulesFile } from "./paths";
 
 export interface HookRegistration {
   type: string;
@@ -40,7 +41,7 @@ export function readClaudeMd(path: string): string | null {
 
 export function detectTier(filePath: string): Tier {
   const resolved = resolve(filePath);
-  const globalPath = join(homedir(), ".claude", "CLAUDE.md");
+  const globalPath = hostRulesFile();
 
   if (resolved === globalPath) return Tier.Global;
   return Tier.Project;
@@ -65,7 +66,7 @@ export function findClaudeMdPath(workingDir?: string): string {
   const projectPath = join(cwd, "CLAUDE.md");
   if (existsSync(projectPath)) return projectPath;
 
-  const globalPath = join(homedir(), ".claude", "CLAUDE.md");
+  const globalPath = hostRulesFile();
   if (existsSync(globalPath)) return globalPath;
 
   return globalPath;

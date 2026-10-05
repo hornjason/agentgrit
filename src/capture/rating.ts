@@ -15,7 +15,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { appendSignal } from "../adapters/jsonl";
 import { inference, type InferenceOptions, type InferenceResult } from "../adapters/inference";
-import { signalPath, resolveSignalDir, loadConfig } from "../adapters/paths";
+import { signalPath, resolveSignalDir, loadConfig, toolAuditFile } from "../adapters/paths";
 import { readSessionContext } from "../graph/context";
 import type { RatingSignal, SentimentSignal, AgentGritConfig } from "../adapters/types";
 import { SCHEMA_VERSION } from "../adapters/types";
@@ -26,10 +26,6 @@ const RATINGS_FILE = "ratings.jsonl";
 const RESPONSE_CACHE_FILE = "last-response.txt";
 const MAX_RESPONSE_PREVIEW = 500;
 const MAX_CACHE_SIZE = 2000;
-const DEFAULT_TOOL_AUDIT_PATH = join(
-  process.env.HOME || "~",
-  ".claude/MEMORY/LEARNING/SIGNALS/tool-audit.jsonl",
-);
 
 interface ToolAuditEntry {
   ts: string;
@@ -39,7 +35,8 @@ interface ToolAuditEntry {
 
 export function readToolAuditForSession(
   sessionTimestamp: string,
-  auditPath: string = DEFAULT_TOOL_AUDIT_PATH,
+  // Default params evaluate per call, so this honours a config change at runtime.
+  auditPath: string = toolAuditFile(),
 ): { toolNames: string[]; filePaths: string[] } {
   if (!existsSync(auditPath)) return { toolNames: [], filePaths: [] };
 

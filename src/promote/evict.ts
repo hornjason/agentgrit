@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
-import { loadConfig, statePath } from "../adapters/paths";
+import { loadConfig, statePath, ruleDomainsFile } from "../adapters/paths";
 import { loadRuleStats, type RuleStats } from "./rules";
 import { removeRule, normalizeRuleId } from "./bridge";
 import { type EvictionTrigger } from "./auto-eviction";
@@ -190,7 +190,7 @@ export function findEvictionCandidates(options?: {
   const minSessions = options?.minSessions ?? MIN_SESSIONS;
   const statsMap = loadRuleStats(options?.stateDir);
   const ruleDomains = loadRuleDomains(
-    options?.ruleDomainsPath ?? join(process.env.HOME ?? "", ".claude", "MEMORY", "LEARNING", "STATE", "rule-domains.json"),
+    options?.ruleDomainsPath ?? ruleDomainsFile(),
   );
 
   const candidates: EvictionCandidate[] = [];
@@ -652,7 +652,7 @@ export function removeFromRuleDomains(
   ruleDomainsPath?: string,
 ): void {
   if (ruleIds.length === 0) return;
-  const rdPath = ruleDomainsPath ?? join(process.env.HOME ?? "", ".claude", "MEMORY", "LEARNING", "STATE", "rule-domains.json");
+  const rdPath = ruleDomainsPath ?? ruleDomainsFile();
   const ruleDomains = loadRuleDomains(rdPath);
   if (!ruleDomains) return;
 

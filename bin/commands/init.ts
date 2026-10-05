@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, copyFileSync, writeFileSync, readFileSync } from
 import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
-import { getBaseDir, signalsDir, stateDir, rubricsDir } from "../../src/adapters/paths";
+import { getBaseDir, signalsDir, stateDir, rubricsDir, hostSettingsFile, hostRegistryFile, hostTranscriptsDir } from "../../src/adapters/paths";
 import type { AgentGritConfig } from "../../src/adapters/types";
 import { quick, standard, full } from "../../agentgrit.config";
 import {
@@ -113,7 +113,7 @@ async function claudeCodeInit(args: string[]): Promise<void> {
   const settingsIdx = args.indexOf("--settings");
   const settingsPath = settingsIdx !== -1 && args[settingsIdx + 1]
     ? resolve(args[settingsIdx + 1])
-    : join(homedir(), ".claude", "settings.json");
+    : hostSettingsFile();
 
   console.log("\nagentgrit init --claude-code");
   console.log("  settings: " + settingsPath + "\n");
@@ -289,7 +289,7 @@ async function bootstrapInit(args: string[]): Promise<void> {
   // Step 1: Discover Claude Code
   const install = discoverClaudeCode();
   if (!install) {
-    console.error("  ✗ Claude Code not found (~/.claude.json missing)");
+    console.error(`  ✗ Claude Code not found (${hostRegistryFile()} missing)`);
     console.error("    Install Claude Code first: https://docs.anthropic.com/en/docs/claude-code");
     process.exit(1);
   }
@@ -362,7 +362,7 @@ async function bootstrapInit(args: string[]): Promise<void> {
     const topProject = Object.entries(memory.byProject)
       .sort((a, b) => b[1] - a[1])[0];
     if (topProject) {
-      config.memoryDir = join(homedir(), ".claude", "projects", topProject[0], "memory");
+      config.memoryDir = join(hostTranscriptsDir(), topProject[0], "memory");
     }
   }
 

@@ -9,6 +9,8 @@
  * - Hook registration generator for CLI setup
  */
 
+import { uncapturedPathFragments } from "../adapters/paths";
+
 // ── Re-exports ──
 
 export { captureRating, parseRating, scoreSentiment } from "./rating";
@@ -56,18 +58,8 @@ export interface FileChange {
   category: ChangeCategory | null;
 }
 
-const EXCLUDED_PATHS = [
-  "MEMORY/WORK/",
-  "MEMORY/LEARNING/",
-  "MEMORY/STATE/",
-  "Plans/",
-  "projects/",
-  ".git/",
-  "node_modules/",
-];
-
 export function categorizeChange(path: string): ChangeCategory | null {
-  for (const excluded of EXCLUDED_PATHS) {
+  for (const excluded of uncapturedPathFragments()) {
     if (path.includes(excluded)) return null;
   }
 

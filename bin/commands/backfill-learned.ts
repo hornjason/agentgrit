@@ -1,14 +1,14 @@
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import { getBaseDir } from "../../src/adapters/paths";
+import { getBaseDir, rulesDir, learnedRulesFile } from "../../src/adapters/paths";
 import { writeRuleFile, updateRuleDomains } from "../../src/promote/sync";
 import { loadRuleStats, persistRuleStats, type RuleStats } from "../../src/promote/rules";
 import { defaultRuleDomainsPath } from "../../src/graph/builder";
 import { Tier, SCHEMA_VERSION, type Rule } from "../../src/adapters/types";
 
-const RULES_DIR = join(homedir(), ".claude", "MEMORY", "LEARNING", "RULES");
-const LEARNED_PATH = join(homedir(), ".claude", "CLAUDE-LEARNED.md");
+const RULES_DIR = rulesDir();
+const LEARNED_PATH = learnedRulesFile();
 
 interface ParsedRule {
   boldName: string;

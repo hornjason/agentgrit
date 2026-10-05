@@ -215,10 +215,56 @@ export interface EmbeddingProvider {
 
 // ── Config ──
 
+/**
+ * Filesystem locations AgentGrit reads or writes.
+ *
+ * Every key is optional — the defaults in src/adapters/paths.ts make a fresh
+ * install self-contained under the base dir. Set a key only to pin a path
+ * somewhere else, which is what an existing install needs during migration so
+ * its accumulated history keeps resolving. Values may start with ~ or $HOME.
+ */
+export interface AgentGritPaths {
+  /** The coding agent's config dir. Default: ~/.claude */
+  hostDir?: string;
+  /** The host's global rules file. Default: <hostDir>/CLAUDE.md */
+  hostRulesFile?: string;
+  /** The host's project registry. Default: <hostDir>.json, i.e. ~/.claude.json */
+  hostRegistryFile?: string;
+  /**
+   * The per-project config folder the host looks for inside a repo.
+   * A fixed convention of the host tool, independent of where its global
+   * config dir lives. Default: .claude
+   */
+  hostProjectDirName?: string;
+  /** Where the host stores session transcripts. Default: <hostDir>/projects */
+  hostTranscriptsDir?: string;
+  /** Generated rules file the host reads. Default: <hostDir>/CLAUDE-LEARNED.md */
+  learnedRulesFile?: string;
+  /** Default: <baseDir>/state/rule-domains.json */
+  ruleDomainsFile?: string;
+  /** Default: <baseDir>/rules */
+  rulesDir?: string;
+  /** Default: <baseDir>/PENDING-RULES.md */
+  pendingRulesFile?: string;
+  /** Default: <baseDir>/PENDING-RULES-ARCHIVE.md */
+  pendingRulesArchiveFile?: string;
+  /** Default: <baseDir>/context/GRAPH-CONTEXT.md */
+  graphContextFile?: string;
+  /** Default: <baseDir>/state/patterns.json */
+  patternsFile?: string;
+  /** Default: <baseDir>/state/recall-scores.json */
+  recallScoresFile?: string;
+  /** A prior system's signals to read alongside our own. Unset means none. */
+  legacySignalDir?: string;
+  /** Path fragments excluded from change capture as bookkeeping noise. */
+  uncapturedFragments?: string[];
+}
+
 export interface AgentGritConfig {
   signalDir: string;
   memoryDir?: string;
   transcriptDir?: string;
+  paths?: AgentGritPaths;
   adapter: "local" | "langfuse" | "both";
   langfuse?: {
     publicKey: string;

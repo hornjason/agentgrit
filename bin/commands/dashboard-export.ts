@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { spawnSync } from "child_process";
-import { getBaseDir, stateDir, signalPath, loadConfig } from "../../src/adapters/paths";
+import { getBaseDir, stateDir, signalPath, loadConfig, recallScoresFile, ratingsFile } from "../../src/adapters/paths";
 import { runDoctor } from "../../src/daemon/doctor";
 import type { DoctorReport } from "../../src/daemon/doctor";
 
@@ -181,7 +181,7 @@ export function generateDashboardResults(): DashboardResults {
 
   // ── Recall/Precision — PAI eval first, then AgentGrit eval ──
   interface PaiRecallData { mean_recall15?: number; mean_precision5?: number; mean_mrr?: number }
-  const paiRecallPath = join(homedir(), ".claude", "MEMORY", "LEARNING", "STATE", "recall-scores.json");
+  const paiRecallPath = recallScoresFile();
   const paiRecall = readJson(paiRecallPath) as PaiRecallData | null;
   const recallEval = paiRecall
     ? { meanRecall15: paiRecall.mean_recall15, meanPrecision5: paiRecall.mean_precision5, meanMrr: paiRecall.mean_mrr } as RecallEvalData
@@ -401,7 +401,7 @@ export function generateDashboardResults(): DashboardResults {
   }
 
   // ── Rating trend ──
-  const ratingsPath = join(homedir(), ".claude", "MEMORY", "LEARNING", "SIGNALS", "ratings.jsonl");
+  const ratingsPath = ratingsFile();
   let ratingTrend30: number | null = null;
   if (existsSync(ratingsPath)) {
     try {

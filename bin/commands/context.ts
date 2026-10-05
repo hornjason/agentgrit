@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { dirname, join } from "path";
 import { execSync } from "child_process";
 import { homedir } from "os";
-import { getBaseDir, resolveMemoryDir, resolveSignalDir } from "../../src/adapters/paths";
+import { getBaseDir, resolveMemoryDir, resolveSignalDir, graphContextFile } from "../../src/adapters/paths";
 import { readGraph } from "../../src/graph/builder";
 import { buildIndexFromDir } from "../../src/graph/bm25";
 import {
@@ -23,7 +23,7 @@ import { loadVectorCache } from "../../src/graph/embeddings";
 import { diagnoseBM25, tokenize } from "../../src/graph/bm25";
 import { RRF_WEIGHTS, type RRFWeights } from "../../src/graph/retrieval";
 
-const GRAPH_CONTEXT_PATH = join(homedir(), ".claude", "MEMORY", "STATE", "GRAPH-CONTEXT.md");
+const GRAPH_CONTEXT_PATH = graphContextFile();
 
 function parseArgs(args: string[]): { text?: string; issue?: number; file?: string; limit: number; verbose: boolean; strategy: RetrievalStrategy } {
   let text: string | undefined;

@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync } from 
 import { join, dirname } from "path";
 import { homedir } from "os";
 import { createHash } from "crypto";
-import { getBaseDir, stateDir } from "../adapters/paths";
+import { getBaseDir, stateDir, ruleDomainsFile } from "../adapters/paths";
 import type { GraphNode, GraphEdge, Rule } from "../adapters/types";
 import type { Graph } from "./types";
 import { propagateDomains } from "./domain-propagation";
@@ -33,7 +33,7 @@ interface RuleDomainsFile {
 }
 
 export function defaultRuleDomainsPath(): string {
-  return join(homedir(), ".claude", "MEMORY", "LEARNING", "STATE", "rule-domains.json");
+  return ruleDomainsFile();
 }
 
 export function loadRuleDomains(path: string): RuleDomainsFile | null {

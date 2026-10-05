@@ -1,6 +1,9 @@
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
-import { getBaseDir, resolveSignalDir, stateDir } from "../../src/adapters/paths";
+import {
+  getBaseDir, resolveSignalDir, stateDir, statePath,
+  hostRulesFile, hostTranscriptsDir, learnedRulesFile, ratingsFile, loadConfig,
+} from "../../src/adapters/paths";
 import { Tier, type Rule, SCHEMA_VERSION } from "../../src/adapters/types";
 import { checkBudget, type BudgetStatus } from "../../src/promote/budget";
 import { loadRuleStats, bootstrapRuleStats } from "../../src/promote/rules";
@@ -86,10 +89,9 @@ function showCorrelationStats(): void {
 function showBudget(base: string): void {
   console.log("RULE BUDGET\n");
 
-  const home = process.env.HOME ?? "";
-  const claudeMdPath = join(home, ".claude", "CLAUDE.md");
-  const learnedPath = join(home, ".claude", "CLAUDE-LEARNED.md");
-  const projectsDir = join(home, ".claude", "projects");
+  const claudeMdPath = hostRulesFile();
+  const learnedPath = learnedRulesFile();
+  const projectsDir = hostTranscriptsDir();
 
   const globalCount = countRulesInFile(claudeMdPath);
   const learnedCount = countRulesInFile(learnedPath);
@@ -99,9 +101,8 @@ function showBudget(base: string): void {
   let learnedBudget = 50;
   let projectBudgetCap = 25;
   try {
-    const configPath = join(home, ".agentgrit", "config.json");
-    if (existsSync(configPath)) {
-      const cfg = JSON.parse(readFileSync(configPath, "utf-8"));
+    {
+      const cfg = loadConfig();
       learnedBudget = cfg.rules?.learnedBudget ?? 50;
       projectBudgetCap = cfg.rules?.projectBudget ?? 25;
     }
@@ -217,8 +218,8 @@ async function doPromote(base: string, dryRun: boolean): Promise<void> {
     return;
   }
 
-  // Find CLAUDE.md for global tier promotions
-  const claudeMdPath = join(process.env.HOME ?? "", ".claude", "CLAUDE.md");
+  // Find the host rules file for global tier promotions
+  const claudeMdPath = hostRulesFile();
   let promoted = 0;
 
   for (const { pattern, route } of items) {
@@ -335,7 +336,7 @@ async function doCompact(base: string, apply: boolean): Promise<void> {
 async function doPrune(apply: boolean): Promise<void> {
   const { pruneTobudget } = await import("../../src/promote/prune");
 
-  const claudeMdPath = join(process.env.HOME ?? "", ".claude", "CLAUDE.md");
+  const claudeMdPath = hostRulesFile();
   if (!existsSync(claudeMdPath)) {
     console.log("  CLAUDE.md not found at " + claudeMdPath + "\n");
     return;
@@ -441,9 +442,8 @@ export async function rulesCommand(args: string[]): Promise<void> {
   } else if (sub === "prune") {
     await doPrune(args.includes("--yes"));
   } else if (sub === "bootstrap-stats") {
-    const home = process.env.HOME ?? "";
-    const sessionHistoryPath = join(home, ".agentgrit", "state", "session-context-history.jsonl");
-    const ratingsPath = join(home, ".claude", "MEMORY", "LEARNING", "SIGNALS", "ratings.jsonl");
+    const sessionHistoryPath = statePath("session-context-history.jsonl");
+    const ratingsPath = ratingsFile();
     const clean = args.includes("--clean");
 
     if (clean) {

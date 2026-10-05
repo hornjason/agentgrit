@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, renameSync, unlinkSync, readdirSync, openSync, closeSync } from "fs";
 import { join, basename, dirname } from "path";
-import { stateDir } from "../adapters/paths";
+import { stateDir, hostRulesFile } from "../adapters/paths";
 import { loadEvictedRegistryEntries } from "./auto-eviction";
 import { loadRuleStats } from "./rules";
 import { normalizeRuleId } from "./bridge";
@@ -157,7 +157,7 @@ const CRITICAL_SECTION_RE = /^### Critical Rules\b/;
 const CRITICAL_RULE_LINE_RE = /^- \*\*(.+?)(?:\s*\(from\s.*?\))?:\*\*\s*/;
 
 export function detectGraduatedRules(dir?: string): string[] {
-  const claudeMdPath = join(process.env.HOME ?? "", ".claude", "CLAUDE.md");
+  const claudeMdPath = hostRulesFile();
   if (!existsSync(claudeMdPath)) return [];
 
   const content = readFileSync(claudeMdPath, "utf-8");

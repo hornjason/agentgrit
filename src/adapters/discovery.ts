@@ -1,6 +1,16 @@
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
+import {
+  hostDir,
+  hostRegistryFile,
+  hostRulesFile,
+  hostRulesDir,
+  hostTranscriptsDir,
+  hostProjectRulesFile,
+  hostProjectRulesDir,
+  legacySignalDir,
+} from "./paths";
 
 // ── Types ──
 
@@ -57,8 +67,8 @@ const AGENTGRIT_HOOK_MARKER = "npx agentgrit capture";
 // ── Discovery functions ──
 
 export function discoverClaudeCode(): ClaudeCodeInstall | null {
-  const home = join(homedir(), ".claude");
-  const configPath = join(homedir(), ".claude.json");
+  const home = hostDir();
+  const configPath = hostRegistryFile();
 
   if (!existsSync(configPath)) return null;
 
@@ -78,15 +88,15 @@ export function scanRuleFiles(projectPaths: string[]): RuleScanResult {
   const files: RuleScanResult["files"] = [];
   const seen = new Set<string>();
 
-  const globalClaudeMd = join(homedir(), ".claude", "CLAUDE.md");
-  const globalRulesDir = join(homedir(), ".claude", "rules");
+  const globalClaudeMd = hostRulesFile();
+  const globalRulesDir = hostRulesDir();
 
   scanFile(globalClaudeMd, files, seen);
   scanRulesDir(globalRulesDir, files, seen);
 
   for (const projectPath of projectPaths) {
-    scanFile(join(projectPath, ".claude", "CLAUDE.md"), files, seen);
-    scanRulesDir(join(projectPath, ".claude", "rules"), files, seen);
+    scanFile(hostProjectRulesFile(projectPath), files, seen);
+    scanRulesDir(hostProjectRulesDir(projectPath), files, seen);
     scanFile(join(projectPath, "CLAUDE.md"), files, seen);
   }
 
@@ -148,7 +158,7 @@ export function scanTranscripts(projectDirs: string[]): TranscriptSignals {
     sessionsSkipped: 0,
   };
 
-  const transcriptsBase = join(homedir(), ".claude", "projects");
+  const transcriptsBase = hostTranscriptsDir();
   if (!existsSync(transcriptsBase)) return result;
 
   let dirs: string[];
@@ -316,10 +326,11 @@ function isCorrection(text: string): boolean {
 }
 
 export function detectSignalSources(): SignalSourceResult {
-  const paiSignals = join(homedir(), ".claude", "MEMORY", "LEARNING", "SIGNALS");
-  if (existsSync(paiSignals)) {
-    const counts = countSignalFiles(paiSignals);
-    return { source: "pai", signalDir: paiSignals, counts };
+  // A prior learning system's signals, read only when configured.
+  const legacy = legacySignalDir();
+  if (legacy && existsSync(legacy)) {
+    const counts = countSignalFiles(legacy);
+    return { source: "pai", signalDir: legacy, counts };
   }
 
   const agentgritSignals = join(
@@ -360,7 +371,7 @@ function countSignalFiles(dir: string): { ratings?: number; corrections?: number
 export function inventoryMemoryFiles(projectDirs: string[]): MemoryInventory {
   const result: MemoryInventory = { totalFiles: 0, byProject: {} };
 
-  const transcriptsBase = join(homedir(), ".claude", "projects");
+  const transcriptsBase = hostTranscriptsDir();
   if (!existsSync(transcriptsBase)) return result;
 
   let dirs: string[];
