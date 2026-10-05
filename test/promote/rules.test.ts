@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterAll } from "bun:test";
 import { trackRule, getEvictionCandidates, correlateRules, computeDecayedAverage, computeDifferentialLift, bootstrapDifferentialStats } from "../../src/promote/rules";
 import { Tier, SCHEMA_VERSION, type Rule } from "../../src/adapters/types";
 
@@ -246,7 +246,10 @@ describe("computeDifferentialLift", () => {
 describe("bootstrapDifferentialStats", () => {
   const { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } = require("fs");
   const { join } = require("path");
-  const tmpDir = join(process.env.HOME!, ".agentgrit", "test-bootstrap-" + Date.now());
+  const { tmpdir } = require("os");
+  // Scratch space belongs in the OS temp dir, never in the user's runtime dir —
+  // a throwing test used to strand its fixture under ~/.agentgrit forever.
+  const tmpDir = join(tmpdir(), "agentgrit-test-bootstrap-" + Date.now());
 
   function setup(ruleStats: any[], ratings: any[]) {
     mkdirSync(tmpDir, { recursive: true });
@@ -260,6 +263,9 @@ describe("bootstrapDifferentialStats", () => {
   function cleanup() {
     try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
   }
+
+  // Runs even when a test throws, so fixtures can never accumulate.
+  afterAll(cleanup);
 
   test("computes differentialLift for all rules", () => {
     const ruleStats = [

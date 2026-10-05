@@ -3,3 +3,8 @@ node_modules/
 bun.lock
 *.bun-build
 test/**/.tmp-*
+
+# Runtime state never belongs in version control
+.agentgrit/
+.metadata_never_index
+shadow-routing.jsonl
