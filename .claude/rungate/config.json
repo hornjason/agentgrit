@@ -22,7 +22,7 @@
     "runner": "ubuntu-latest",
     "bunVersion": "latest",
     "branches": [
-      "main"
+      "**"
     ]
   },
   "contextDocs": {},
