@@ -28,7 +28,12 @@ import { testCommand } from "./commands/test";
 import { undoCommand } from "./commands/undo";
 import { upgradeCommand } from "./commands/upgrade";
 
-const VERSION = "0.1.9";
+// Read from the manifest rather than restated here — the hardcoded copy drifted
+// to 0.1.9 against a 0.2.0 package and was mistaken for a stale install. The
+// bundler inlines this, so the built CLI has no runtime dependency on the file.
+import pkg from "../package.json";
+
+const VERSION: string = pkg.version;
 
 const HANDLERS: Record<string, (args: string[]) => Promise<void>> = {
   backfill: backfillCommand,
