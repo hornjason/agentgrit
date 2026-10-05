@@ -32,7 +32,8 @@
   "devDependencies": {
     "@huggingface/transformers": "^3.5.1",
     "@types/bun": "latest",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "rungate": "file:../rungate"
   },
   "engines": {
     "node": ">=22.0.0"
