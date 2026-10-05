@@ -251,7 +251,7 @@ describe("daemon cleanup step", () => {
       expect(result.cleanup.counts).toHaveProperty("ruleFiles");
       expect(result.cleanup.counts).toHaveProperty("graphNodes");
     } finally {
-      delete process.env.AGENTGRIT_DIR;
+      process.env.AGENTGRIT_DIR = process.env.AGENTGRIT_TEST_BASE ?? "";
     }
   });
 });

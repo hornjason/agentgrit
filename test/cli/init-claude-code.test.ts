@@ -12,7 +12,7 @@ beforeEach(() => {
 
 afterEach(() => {
   if (existsSync(SANDBOX)) rmSync(SANDBOX, { recursive: true });
-  delete process.env.AGENTGRIT_DIR;
+  process.env.AGENTGRIT_DIR = process.env.AGENTGRIT_TEST_BASE ?? "";
 });
 
 describe("init --claude-code", () => {

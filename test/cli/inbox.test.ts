@@ -13,7 +13,7 @@ beforeEach(() => {
 
 afterEach(() => {
   if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
-  delete process.env.AGENTGRIT_DIR;
+  process.env.AGENTGRIT_DIR = process.env.AGENTGRIT_TEST_BASE ?? "";
 });
 
 describe("inbox command", () => {

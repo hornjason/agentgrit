@@ -20,7 +20,7 @@ beforeEach(() => {
 
 afterEach(() => {
   if (existsSync(TMP_DIR)) rmSync(TMP_DIR, { recursive: true });
-  delete process.env.AGENTGRIT_DIR;
+  process.env.AGENTGRIT_DIR = process.env.AGENTGRIT_TEST_BASE ?? "";
 });
 
 describe("classifyOutcome", () => {

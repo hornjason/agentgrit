@@ -773,7 +773,7 @@ describe("getContextRules differential lift", () => {
       expect(posIdx).toBeLessThan(negIdx);
     } finally {
       if (origEnv !== undefined) process.env.AGENTGRIT_DIR = origEnv;
-      else delete process.env.AGENTGRIT_DIR;
+      else process.env.AGENTGRIT_DIR = process.env.AGENTGRIT_TEST_BASE ?? "";
     }
   });
 
@@ -816,7 +816,7 @@ describe("getContextRules differential lift", () => {
       expect(ids).toContain("no_lift_rule");
     } finally {
       if (origEnv !== undefined) process.env.AGENTGRIT_DIR = origEnv;
-      else delete process.env.AGENTGRIT_DIR;
+      else process.env.AGENTGRIT_DIR = process.env.AGENTGRIT_TEST_BASE ?? "";
     }
   });
 
@@ -856,7 +856,7 @@ describe("getContextRules differential lift", () => {
       expect(ids[0]).toBe("boosted_rule");
     } finally {
       if (origEnv !== undefined) process.env.AGENTGRIT_DIR = origEnv;
-      else delete process.env.AGENTGRIT_DIR;
+      else process.env.AGENTGRIT_DIR = process.env.AGENTGRIT_TEST_BASE ?? "";
     }
   });
 });

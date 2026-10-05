@@ -11,7 +11,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  delete process.env.AGENTGRIT_DIR;
+  process.env.AGENTGRIT_DIR = process.env.AGENTGRIT_TEST_BASE ?? "";
   if (existsSync(TEMP_DIR)) rmSync(TEMP_DIR, { recursive: true });
 });
 
@@ -19,7 +19,7 @@ describe("writeSessionContext test-env guard", () => {
   test("skips write when NODE_ENV=test and AGENTGRIT_DIR is unset", async () => {
     const { writeSessionContext } = await import("../../src/graph/context");
 
-    delete process.env.AGENTGRIT_DIR;
+    process.env.AGENTGRIT_DIR = process.env.AGENTGRIT_TEST_BASE ?? "";
     const origNodeEnv = process.env.NODE_ENV;
     process.env.NODE_ENV = "test";
 
@@ -50,7 +50,7 @@ describe("writeSessionContext test-env guard", () => {
   test("writes normally when NODE_ENV is not test", async () => {
     const { writeSessionContext, readSessionContext } = await import("../../src/graph/context");
 
-    delete process.env.AGENTGRIT_DIR;
+    process.env.AGENTGRIT_DIR = process.env.AGENTGRIT_TEST_BASE ?? "";
     process.env.AGENTGRIT_DIR = TEMP_DIR;
     const origNodeEnv = process.env.NODE_ENV;
     delete process.env.NODE_ENV;

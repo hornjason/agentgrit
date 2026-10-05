@@ -19,6 +19,11 @@ const STATE_DIR = join(TMP_DIR, "state");
 const CLAUDE_LEARNED = join(TMP_DIR, "CLAUDE-LEARNED.md");
 const RULE_DOMAINS = join(TMP_DIR, "rule-domains.json");
 
+/** YYYY-MM-DD for N days before now, so fixtures don't rot against STALE_DAYS. */
+function daysAgo(n: number): string {
+  return new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 function makeStats(id: string, overrides: Partial<RuleStats> = {}): RuleStats {
   return {
     ruleId: id,
@@ -772,11 +777,14 @@ describe("findEvictionCandidates with claudeLearnedPath", () => {
     ];
     persistRuleStats(stats, STATE_DIR);
 
+    // Dates are relative to today — hardcoded ones silently cross the 60-day
+    // STALE_DAYS boundary as wall-clock time passes and the "recent" fixture
+    // starts reading as stale.
     const learnedContent = [
       "# Learned Rules\n",
       "### Learned Rules\n",
-      "- **Old Untracked Rule (from debrief 2026-04-01):** This is 100+ days old with no stats",
-      "- **Recent Rule (from debrief 2026-07-10):** This is recent",
+      `- **Old Untracked Rule (from debrief ${daysAgo(120)}):** well past STALE_DAYS, no stats`,
+      `- **Recent Rule (from debrief ${daysAgo(10)}):** inside STALE_DAYS`,
     ].join("\n");
     writeFileSync(CLAUDE_LEARNED, learnedContent);
 

@@ -14,7 +14,7 @@ describe("init command bug fixes", () => {
 
   afterEach(() => {
     if (existsSync(SANDBOX)) rmSync(SANDBOX, { recursive: true });
-    delete process.env.AGENTGRIT_DIR;
+    process.env.AGENTGRIT_DIR = process.env.AGENTGRIT_TEST_BASE ?? "";
   });
 
   test("Bug 1: starter.json is copied to correct location", async () => {

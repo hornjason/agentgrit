@@ -183,7 +183,7 @@ describe("writeOptimalWeights", () => {
 
   afterEach(() => {
     if (origEnv) process.env.AGENTGRIT_DIR = origEnv;
-    else delete process.env.AGENTGRIT_DIR;
+    else process.env.AGENTGRIT_DIR = process.env.AGENTGRIT_TEST_BASE ?? "";
   });
 
   test("writes rrfWeights to config.json", () => {

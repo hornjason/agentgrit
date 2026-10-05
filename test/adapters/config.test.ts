@@ -14,7 +14,7 @@ describe("loadConfig and resolveSignalDir", () => {
 
   afterEach(() => {
     if (originalEnv === undefined) {
-      delete process.env.AGENTGRIT_DIR;
+      process.env.AGENTGRIT_DIR = process.env.AGENTGRIT_TEST_BASE ?? "";
     } else {
       process.env.AGENTGRIT_DIR = originalEnv;
     }
