@@ -57,7 +57,10 @@ describe("Tier 4: Rule Promotion Pipeline", () => {
   });
 
   // T19: Review proposes candidates from real PAI data
-  test("T19: review proposes candidates from real PAI data", async () => {
+  // Skipped 2026-10-05: asserts against the volume of the user's real signals,
+  // which the suite no longer reads. Needs a seeded fixture signal dir. See the
+  // note on Tier 7 T33-T36 in tier7-cli.test.ts.
+  test.skip("T19: review proposes candidates from real PAI data", async () => {
     const config = loadConfig();
     const signalDir = config.signalDir ?? resolveSignalDir();
     const stateDir = join(TMP_DIR, "state");

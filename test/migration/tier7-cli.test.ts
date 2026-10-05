@@ -12,9 +12,20 @@ import { backfillCommand } from "../../bin/commands/backfill";
 import { exportCommand } from "../../bin/commands/export";
 import { getBaseDir, resolveSignalDir, resolveMemoryDir, loadConfig } from "../../src/adapters/paths";
 
+/**
+ * T33-T36 are skipped as of the 2026-10-05 cutover.
+ *
+ * They exercise real AgentGrit code — status, doctor, review, inbox — but assert
+ * against the volume of the user's accumulated signals ("ratings > 0", ">= 1
+ * candidate from real data"). That only held while the suite resolved to the live
+ * install, which it no longer does: writing to it emptied the real
+ * rule-domains.json. This is coverage debt, not dead weight. Restoring it means
+ * giving these a seeded fixture signal dir rather than pointing them back at the
+ * user's data.
+ */
 describe("Tier 7: CLI End-to-End", () => {
   // T33: status shows real data
-  test("T33: status shows real data — ratings > 0, tool-audit > 0", async () => {
+  test.skip("T33: status shows real data — ratings > 0, tool-audit > 0", async () => {
     const config = loadConfig();
     const sigDir = config.signalDir ?? resolveSignalDir();
     const base = getBaseDir();
@@ -44,7 +55,7 @@ describe("Tier 7: CLI End-to-End", () => {
   });
 
   // T34: doctor passes — 0 failures
-  test("T34: doctor passes with 0 failures", () => {
+  test.skip("T34: doctor passes with 0 failures", () => {
     const report: DoctorReport = runDoctor();
 
     expect(report.checks.length).toBeGreaterThan(0);
@@ -58,7 +69,7 @@ describe("Tier 7: CLI End-to-End", () => {
   });
 
   // T35: review finds patterns
-  test("T35: review finds patterns and candidates", async () => {
+  test.skip("T35: review finds patterns and candidates", async () => {
     const config = loadConfig();
     const sigDir = config.signalDir ?? resolveSignalDir();
     const base = getBaseDir();
@@ -78,7 +89,7 @@ describe("Tier 7: CLI End-to-End", () => {
   });
 
   // T36: inbox shows candidates
-  test("T36: inbox shows >= 1 candidate from real data", async () => {
+  test.skip("T36: inbox shows >= 1 candidate from real data", async () => {
     const config = loadConfig();
     const sigDir = config.signalDir ?? resolveSignalDir();
 
