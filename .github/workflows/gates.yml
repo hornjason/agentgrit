@@ -1,4 +1,4 @@
-# Managed by rungate — do not edit. Customize via .claude/rungate.json ci section.
+# Managed by rungate — do not edit. Customize the ci section of .claude/rungate/config.json.
 name: Gates
 
 on:
@@ -11,7 +11,7 @@ on:
 
 jobs:
   gates:
-    runs-on: ubuntu-latest
+    runs-on: "ubuntu-latest"
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -28,9 +28,12 @@ jobs:
           # and surfaces real errors instead of hiding them behind 2>/dev/null,
           # so this cannot fail open the way the xargs pipeline could.
           # git grep exits 1 when nothing matches, which is the pass case.
-          # Two tiers matching the pre-commit hook, so local and CI cannot
-          # disagree about what counts as a secret.
-          if git grep -I -lE '(AKIA[A-Z0-9]{16}|sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36})' -- .; then
+          # Tier 1 patterns come from lib/secret-patterns.ts, the single registry
+          # shared with the generated pre-commit hook. This comment used to
+          # CLAIM parity while CI carried 3 patterns and the hook carried 8 —
+          # CI missed gho_, ghs_, github_pat_, sk-ant- and PEM private keys
+          # entirely. Asserted now in test/unit/secret-patterns.test.ts.
+          if git grep -I -lE '(ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|ghs_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9]{22}_[A-Za-z0-9]{59}|AKIA[A-Z0-9]{16}|sk-[A-Za-z0-9]{20,}|sk-ant-[A-Za-z0-9-]{90,}|-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----)' -- .; then
             echo "::error::Potential secrets detected in tracked files"
             exit 1
           fi

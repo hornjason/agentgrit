@@ -77,13 +77,6 @@ Use these exact patterns for auto-testable SCs:
 
 **Notes:** Checks that a file exists AND contains a reference to the target string.
 
-#### test-passes
-**Syntax:** `bun test passes`
-
-**Example:** `- [ ] SC-N: bun test passes`
-
-**Notes:** Placeholder assertion that always passes. Actual test execution is handled by the CI pipeline.
-
 #### canary
 **Syntax:** `canary`
 
@@ -167,6 +160,13 @@ Use these exact patterns for auto-testable SCs:
 **Example:** `- [ ] SC-N: AGENTS.md is between [50] and [300] lines`
 
 **Notes:** Checks that a file's line count falls within a range (inclusive). Useful for ensuring files are neither too short nor too long.
+
+#### command-output
+**Syntax:** `command-output `{command}` contains [{expected1}, {expected2}, ...]`
+
+**Example:** `- [ ] SC-N: command-output `bun test --help` contains [test, run]`
+
+**Notes:** Runs a shell command via spawnSync with a 10-second timeout and checks that stdout contains all listed strings. Returns FAIL (not crash) on non-zero exit.
 <!-- END GENERATED PATTERNS -->
 
 ### Writing Effective SCs

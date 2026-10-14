@@ -1,1 +1,98 @@
-{}
+{
+  "discovery": {
+    "brief": ".claude/agents/discovery.md",
+    "standardTask": "Read the issue, size the work, and write ACs with evidence commands",
+    "description": "Discovery agent — reads issue, sizes work, writes ACs with evidence methods",
+    "tools": "[Bash, Read]",
+    "model": "opus",
+    "tiers": {
+      "reinforcement": [
+        "Discovery Rules"
+      ]
+    },
+    "effort": "low",
+    "disallowedTools": [
+      "Write",
+      "Edit"
+    ],
+    "omitClaudeMd": true
+  },
+  "marcus": {
+    "brief": ".claude/agents/marcus.md",
+    "isolation": "worktree",
+    "standardTask": "Add config/test.json with {name: test} and write a unit test for it",
+    "description": "Principal engineer — implements code changes with TDD, writes tests, commits",
+    "tools": "[Bash, Read, Write, Edit]",
+    "model": "opus",
+    "tiers": {
+      "reinforcement": [
+        "Testing Rules"
+      ],
+      "mechanical": [
+        "Workflow"
+      ]
+    },
+    "memory": "project",
+    "maxTurns": 30,
+    "effort": "high"
+  },
+  "quinn": {
+    "brief": ".claude/agents/quinn.md",
+    "standardTask": "Validate the latest commit passes all tests and type checks, report AC evidence",
+    "description": "QA engineer — tests as a brand-new user using Playwright MCP tools",
+    "tools": "[Bash, Read, mcp__playwright__*]",
+    "model": "sonnet",
+    "tiers": {
+      "reinforcement": [
+        "Project Type Detection",
+        "CLI Testing Mode"
+      ]
+    },
+    "effort": "high",
+    "disallowedTools": [
+      "Write",
+      "Edit"
+    ],
+    "omitClaudeMd": true
+  },
+  "rook": {
+    "brief": ".claude/agents/rook.md",
+    "standardTask": "Review the changed files for input validation, path traversal, and command injection",
+    "description": "Security engineer — scans changed files for vulnerabilities",
+    "tools": "[Bash, Read]",
+    "model": "sonnet",
+    "effort": "low",
+    "disallowedTools": [
+      "Write",
+      "Edit"
+    ],
+    "omitClaudeMd": true
+  },
+  "serena": {
+    "brief": ".claude/agents/serena.md",
+    "standardTask": "Review the largest source module and propose a decomposition into smaller modules",
+    "description": "Software architect — structural decisions, ADRs, module boundary review",
+    "tools": "[Read]",
+    "model": "sonnet",
+    "disallowedTools": [
+      "Write",
+      "Edit"
+    ]
+  },
+  "aditi": {
+    "brief": ".claude/agents/aditi.md",
+    "standardTask": "Review the primary user-facing surface for layout, hierarchy, and accessibility",
+    "description": "UX/UI designer — component specs, visual review, accessibility",
+    "tools": "[Read]",
+    "model": "sonnet",
+    "tiers": {
+      "reinforcement": [
+        "Project Type Detection"
+      ]
+    },
+    "disallowedTools": [
+      "Write",
+      "Edit"
+    ]
+  }
+}

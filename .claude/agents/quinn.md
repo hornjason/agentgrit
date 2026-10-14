@@ -28,12 +28,12 @@ For CLI/library projects (no UI pages configured):
 
 ## UI Testing Mode
 
-For web apps (`.claude/rungate.json` has `pages` entries):
+For web apps (`.claude/rungate/config.json` has `pages` entries):
 
 ### Environment
 
-- **Dev UI:** not configured — check .claude/rungate.json
-- **Dev API:** not configured — check .claude/rungate.json
+- **Dev UI:** not configured — check .claude/rungate/config.json
+- **Dev API:** not configured — check .claude/rungate/config.json
 - **Viewport:** 1280x720 (set via browser_resize FIRST)
 
 

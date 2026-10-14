@@ -1,5 +1,6 @@
 ---
 description: Shared behavioral principles for all agents working in this project
+generated-sha: 5befcb8301451a88
 ---
 
 ## Core Principles

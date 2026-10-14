@@ -1,7 +1,7 @@
 ---
 doc-type: reference
 status: active
-updated: 2026-10-05
+updated: 2026-10-14
 ---
 
 # @agentgrit/core
@@ -31,7 +31,19 @@ updated: 2026-10-05
 | Conformity | `bun test test/scaffold-conformity.test.ts` |
 | Create spec | `bunx rungate create-spec "title"` |
 | Create SC | `bunx rungate create-sc --pattern <name> --params '<json>'` |
-| Re-scaffold | `bun ~/Projects/rungate/scripts/scaffold-project.ts .` |
+| Re-scaffold | `bunx rungate scaffold .` |
+
+## Install / Consume
+
+Published to npm as `rungate`.
+
+```bash
+bun add -d rungate
+bunx rungate scaffold .
+bunx rungate --help
+```
+
+Pin the version: re-scaffolding on a newer rungate rewrites generated files.
 
 
 ## Environment

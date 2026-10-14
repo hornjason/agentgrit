@@ -1,5 +1,6 @@
 ---
 description: All implementation work must go through the ship workflow — never spawn agents directly
+generated-sha: b4eaa1a38ec2127a
 ---
 
 ## Ship Workflow Required

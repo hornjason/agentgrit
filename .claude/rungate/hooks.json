@@ -1,1 +1,71 @@
-[]
+[
+  {
+    "name": "BashToolGuard",
+    "hookFor": "PreToolUse",
+    "command": "bun ${RUNGATE_HOOKS_DIR}/BashToolGuard.hook.ts",
+    "enabled": true,
+    "matcher": "Bash",
+    "description": "Blocks cat/head/tail file reading — agents must use the Read tool"
+  },
+  {
+    "name": "TestSuiteGuard",
+    "hookFor": "PreToolUse",
+    "command": "bun ${RUNGATE_HOOKS_DIR}/TestSuiteGuard.hook.ts",
+    "enabled": true,
+    "matcher": "Bash",
+    "description": "Blocks a third full test suite run in one session — forces targeted tests"
+  },
+  {
+    "name": "AgentBriefGuard",
+    "hookFor": "PreToolUse",
+    "command": "bun ${RUNGATE_HOOKS_DIR}/AgentBriefGuard.hook.ts",
+    "enabled": true,
+    "matcher": "Agent",
+    "description": "Validates agent brief templates and enforces the ship-active marker"
+  },
+  {
+    "name": "AgentVerdictCapture",
+    "hookFor": "SubagentStop",
+    "command": "bun ${RUNGATE_HOOKS_DIR}/AgentVerdictCapture.hook.ts",
+    "enabled": true,
+    "description": "Captures agent verdicts and writes them to workflow-state.json"
+  },
+  {
+    "name": "AutoVerifyGate",
+    "hookFor": "PostToolUse",
+    "command": "bun ${RUNGATE_HOOKS_DIR}/AutoVerifyGate.hook.ts",
+    "enabled": true,
+    "matcher": "Agent",
+    "description": "Nudges the DA to run the verify gate after an agent completes"
+  },
+  {
+    "name": "CommitEnforcement",
+    "hookFor": "PostToolUse",
+    "command": "bun ${RUNGATE_HOOKS_DIR}/CommitEnforcement.hook.ts",
+    "enabled": true,
+    "matcher": "Agent",
+    "description": "Detects uncommitted changes left behind in agent worktrees"
+  },
+  {
+    "name": "GateEnforcement",
+    "hookFor": "PreToolUse",
+    "command": "bun ${RUNGATE_HOOKS_DIR}/GateEnforcement.hook.ts",
+    "enabled": true,
+    "matcher": ".*",
+    "description": "Nags on gate failures and blocks Skill calls after max strikes"
+  },
+  {
+    "name": "PostCompact",
+    "hookFor": "PostCompact",
+    "command": "bun ${RUNGATE_HOOKS_DIR}/PostCompact.hook.ts",
+    "enabled": true,
+    "description": "Re-injects critical rules after context window compaction"
+  },
+  {
+    "name": "StaleTTLCleanup",
+    "hookFor": "SessionStart",
+    "command": "bun ${RUNGATE_HOOKS_DIR}/StaleTTLCleanup.hook.ts",
+    "enabled": true,
+    "description": "Cleans up stale workflow-state.json and ship-active files"
+  }
+]

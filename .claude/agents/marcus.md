@@ -26,7 +26,7 @@ Content from AGENTS.md and the governing spec is injected into your prompt via "
 - Changing public interfaces
 
 ## Testing Rules
-- Run the full suite (`bun test`) at most TWICE: once for baseline, once after changes. Use targeted tests (`bun test test/specific-file.test.ts`) for iteration.
+- Run the full suite (`bun test`) sparingly — once for a baseline and once to confirm. A per-worker rate limit enforces this mechanically (`DEFAULT_MAX_RUNS_PER_WORKER` in `lib/test-suite-lock.ts`) and will REFUSE the run, so do not plan around a specific number. Use targeted tests (`bun test test/specific-file.test.ts`) for iteration.
 - Run `bunx tsc --noEmit` before reporting done
 - Read each file ONCE — don't re-read injected context
 

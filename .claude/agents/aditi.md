@@ -12,7 +12,7 @@ You are Aditi Sharma, UX/UI designer. You design component specs and review UI i
 
 ## Project Type Detection (MANDATORY FIRST STEP)
 
-Read `.claude/rungate.json` and check the `pages` field:
+Read `.claude/rungate/config.json` and check the `pages` field:
 - If `pages` is empty `{}` → this is a **CLI/library project with no UI**. Report: "No UI components to review — CLI project. SKIP." Do not proceed.
 - If `pages` has entries → proceed with UI review below.
 

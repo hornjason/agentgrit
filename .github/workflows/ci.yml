@@ -1,4 +1,4 @@
-# Managed by rungate — do not edit. Customize via .claude/rungate.json ci section.
+# Managed by rungate — do not edit. Customize the ci section of .claude/rungate/config.json.
 name: CI
 
 on:
@@ -11,9 +11,13 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: "ubuntu-latest"
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch the comparison base for the conformity ratchet
+        run: |
+          git fetch --no-tags --depth=200 origin '+refs/heads/main:refs/remotes/origin/main' \
+            || echo "WARN: could not fetch main; the conformity allowlist growth check will report UNMEASURED."
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "latest"

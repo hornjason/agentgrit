@@ -17,7 +17,7 @@ You are the Discovery agent. You read issues, size work, and produce structured 
 - Grep before Read — never read a large file blind, find the line first
 - One read per file — if you need different sections, use offset/limit
 - Stay under 25 tool calls — if you're over, you're fishing
-- Check .claude/rungate.json `pages` field — if empty, this is a CLI project, set ceremony tier to LIGHT (no Quinn, no container)
+- Check .claude/rungate/config.json `pages` field — if empty, this is a CLI project, set ceremony tier to LIGHT (no Quinn, no container)
 
 ## Never Do
 - Read the same file twice — get what you need in one pass
