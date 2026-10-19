@@ -214,9 +214,14 @@ export function retrieveByEmbeddingSeed(
     const t = node.type;
     if (t && !ALLOWED_TYPES.has(t)) continue;
 
+    // Same rule as the main path: a candidate with no resolvable body text is
+    // omitted. Having a graph node is not the same as having something to say.
+    const text = resolveRuleText(entry.id, graph, index);
+    if (!text) continue;
+
     rules.push({
       id: entry.id,
-      text: sanitizeRuleText(node.description || node.name || entry.id),
+      text: sanitizeRuleText(text),
       tier: Tier.Graph,
       tags: node.domains || [],
       created: node.last_updated || new Date().toISOString(),

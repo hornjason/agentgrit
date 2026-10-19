@@ -12,7 +12,7 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { parseFrontmatter } from "./builder";
-import { canonicalRuleId } from "./rule-id";
+import { canonicalRuleId, isSafeRuleId, ruleFileName } from "./rule-id";
 import { resolveMemoryDir, rulesDir } from "../adapters/paths";
 import type { BM25Index, Graph } from "./types";
 import type { GraphNode } from "../adapters/types";
@@ -78,14 +78,26 @@ function firstBodyParagraph(content: string): string | null {
   return null;
 }
 
-/** Candidate source documents for an id, most authoritative first. */
+/**
+ * Candidate source documents for an id, most authoritative first.
+ *
+ * The id is attacker-reachable — `resolveRuleText` is exported and its ids
+ * come from the registry file and the graph, not from this module — so it is
+ * only turned into a path through `ruleFileName`, which refuses anything that
+ * is not a single path segment. An unsafe id yields no corpus paths at all,
+ * which `readRuleTextFromDocument` reports as "unresolved" rather than
+ * reading outside the memory and rules dirs.
+ */
 function documentPaths(id: string, index?: BM25Index): string[] {
   const paths: string[] = [];
   const indexed = index?.docs.find(d => d.id === id)?.file;
   if (indexed) paths.push(indexed);
 
+  if (!isSafeRuleId(id)) return paths;
+
+  const filename = ruleFileName(id);
   for (const dir of [safeDir(resolveMemoryDir), safeDir(rulesDir)]) {
-    if (dir) paths.push(join(dir, `${id}.md`));
+    if (dir) paths.push(join(dir, filename));
   }
   return paths;
 }

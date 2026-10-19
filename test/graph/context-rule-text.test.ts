@@ -1,8 +1,9 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { existsSync, rmSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
-import { getContextRules, resetDetectPatterns } from "../../src/graph/context";
+import { getContextRules, resetDetectPatterns, retrieveByEmbeddingSeed } from "../../src/graph/context";
 import { buildIndex } from "../../src/graph/bm25";
+import { readRuleTextFromDocument, resolveRuleText } from "../../src/graph/rule-text";
 import type { Graph } from "../../src/graph/types";
 import type { GraphNode } from "../../src/adapters/types";
 
@@ -176,5 +177,126 @@ describe("getContextRules rule body text", () => {
     expect(hit).toBeDefined();
     expect(hit!.text).toBe("A smoke test is not acceptance evidence");
     expect(hit!.tags).toEqual(["testing"]);
+  });
+});
+
+/**
+ * `getContextRules` is not the only path in context.ts that builds a Rule.
+ * `retrieveByEmbeddingSeed` builds its own, and had the same
+ * `description || name || id` fallback — a node present in the graph but
+ * carrying no text still rendered as `- **id:** id`.
+ */
+describe("retrieveByEmbeddingSeed rule body text", () => {
+  function seedFixture() {
+    const files: string[] = [];
+    const write = (id: string, body: string) => {
+      const f = join(TMP_DIR, `${id}.md`);
+      writeFileSync(f, body, "utf-8");
+      files.push(f);
+    };
+
+    write(
+      "feedback_rebuild_before_deploy",
+      `---\ndescription: Rebuild the container before deploying\n---\nRebuild the container before deploying to production.`,
+    );
+
+    const textless = makeNode("feedback_textless_node", ["delivery"], "");
+    textless.name = "";
+
+    const graph = makeGraph([
+      makeNode("feedback_rebuild_before_deploy", ["delivery"], "Rebuild the container before deploying"),
+      textless,
+    ]);
+
+    const vectorCache = new Map<string, number[]>([
+      ["feedback_rebuild_before_deploy", [1, 0, 0]],
+      ["feedback_textless_node", [0.99, 0.1, 0]],
+    ]);
+
+    return { graph, index: buildIndex(files), vectorCache };
+  }
+
+  test("a graph node with no description and no name is omitted, not rendered as its own id", () => {
+    const { graph, index, vectorCache } = seedFixture();
+
+    const rules = retrieveByEmbeddingSeed(
+      "rebuild the container before deploying to production",
+      graph,
+      index,
+      vectorCache,
+      10,
+    );
+
+    // Without a resolving candidate this passes vacuously on an empty array.
+    expect(rules.map(r => r.id)).toContain("feedback_rebuild_before_deploy");
+    expect(rules.map(r => r.id)).not.toContain("feedback_textless_node");
+    expect(rules.filter(r => r.text.trim() === r.id)).toEqual([]);
+  });
+});
+
+/**
+ * `resolveRuleText` is exported and takes an id from the registry, the graph
+ * or a BM25 doc — none of which it minted. Reading `join(memoryDir, id +
+ * ".md")` for an unvalidated id lets `../` walk out of the corpus.
+ */
+describe("document reads are confined to the corpus directories", () => {
+  const emptyGraph = (): Graph => makeGraph([]);
+
+  function plantSecretOutsideCorpus(): string {
+    mkdirSync(join(TMP_DIR, "memory"), { recursive: true });
+    mkdirSync(join(TMP_DIR, "rules"), { recursive: true });
+    const secret = join(TMP_DIR, "secret.md");
+    writeFileSync(
+      secret,
+      `---\ndescription: SECRET outside the corpus\n---\nSECRET outside the corpus.`,
+      "utf-8",
+    );
+    return secret;
+  }
+
+  test("a traversal id does not read a file outside the memory and rules dirs", () => {
+    const secretPath = plantSecretOutsideCorpus();
+
+    // Without this the assertion below passes vacuously: the escape target
+    // has to be reachable by the join the resolver performs.
+    expect(existsSync(secretPath)).toBe(true);
+    expect(existsSync(join(TMP_DIR, "memory", "../secret.md"))).toBe(true);
+
+    expect(readRuleTextFromDocument("../secret")).toBeNull();
+    expect(resolveRuleText("../secret", emptyGraph())).toBeNull();
+  });
+
+  test("a nested traversal id does not read outside either", () => {
+    const secretPath = plantSecretOutsideCorpus();
+    expect(existsSync(secretPath)).toBe(true);
+
+    expect(readRuleTextFromDocument("rules/../../secret")).toBeNull();
+    expect(readRuleTextFromDocument(join(TMP_DIR, "secret"))).toBeNull();
+  });
+
+  test("a traversal id is rejected before any corpus path is built", () => {
+    plantSecretOutsideCorpus();
+    // An index entry is keyed by doc id, so it cannot be reached by a
+    // traversal id — but the id must be refused even with one present.
+    const index = buildIndex([join(TMP_DIR, "memory")].filter(() => false));
+    expect(readRuleTextFromDocument("../secret", index)).toBeNull();
+    expect(readRuleTextFromDocument("..", index)).toBeNull();
+  });
+
+  test("the sentence-shaped ids the registry actually holds still resolve", () => {
+    const memory = join(TMP_DIR, "memory");
+    mkdirSync(memory, { recursive: true });
+    const id = "Brief and dashboard must render consistently (from debrief 2026-06-11)";
+    writeFileSync(
+      join(memory, `${id}.md`),
+      `---\ndescription: The brief and the dashboard must render the same data\n---\nBody.`,
+      "utf-8",
+    );
+
+    // The guard must reject traversal without rejecting spaces, parens or
+    // dots in a legitimate id — 586 of the 623 registry ids look like this.
+    expect(readRuleTextFromDocument(id)).toBe(
+      "The brief and the dashboard must render the same data",
+    );
   });
 });

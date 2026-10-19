@@ -32,8 +32,40 @@ export function ruleIdFromFilename(filename: string): string {
   return basename(filename).replace(/\.md$/i, "");
 }
 
-/** The file that an id names. Inverse of `ruleIdFromFilename`. */
+/**
+ * True when an id can be used as a filename inside one directory.
+ *
+ * Ids reach `join(dir, ruleFileName(id))` from the registry, the graph and
+ * callers of the exported resolvers — none of which this module minted. An id
+ * carrying a separator or a `..` segment turns that join into a read or a
+ * write outside the directory, so the id is checked where it becomes a path
+ * segment rather than at each call site.
+ *
+ * Deliberately narrow about *structure* only: 586 of the registry's 623 ids
+ * are sentence-shaped, with spaces, parentheses and dots, and those are
+ * legitimate filenames. Rejecting them would empty the corpus.
+ */
+export function isSafeRuleId(id: string): boolean {
+  if (!id) return false;
+  if (id.includes("\0")) return false;
+  if (id.includes("/") || id.includes("\\")) return false;
+  if (id === "." || id === "..") return false;
+  // basename() of a single safe segment is the segment itself; anything the
+  // platform reads as a path is caught by the comparison.
+  return basename(id) === id;
+}
+
+/**
+ * The file that an id names. Inverse of `ruleIdFromFilename`.
+ *
+ * Throws rather than sanitising: an id that is not a single path segment is
+ * not a rule this registry knows about, and silently rewriting it would file
+ * the rule under a name no lookup will ever ask for.
+ */
 export function ruleFileName(id: string): string {
+  if (!isSafeRuleId(id)) {
+    throw new Error(`Unsafe rule id (must be a single path segment): ${JSON.stringify(id)}`);
+  }
   return `${id}.md`;
 }
 
