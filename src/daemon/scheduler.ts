@@ -290,6 +290,21 @@ function queryLaunchd(label: string): boolean {
   }
 }
 
+/**
+ * The registry reading for this platform, used when no probe is injected.
+ *
+ * NOTE the asymmetry, which this function makes visible rather than fixes.
+ * On darwin we ask launchd whether the job is loaded. On linux we only check
+ * that the unit files exist on disk — which is the same "a file is not a
+ * scheduled job" conflation #259 was filed about, still in place for systemd.
+ * Preserved exactly as it was so this refactor changes no behaviour; see the
+ * follow-up issue for making the linux side ask systemd.
+ */
+function defaultRegistryProbe(): (label: string) => boolean {
+  if (process.platform === "darwin") return queryLaunchd;
+  return (label: string) => existsSync(timerPath(label)) && existsSync(servicePath(label));
+}
+
 function bootoutQuiet(label: string): void {
   try {
     execFileSync("launchctl", ["bootout", serviceTarget(label)], { stdio: "ignore" });
@@ -492,7 +507,7 @@ export async function checkSchedulerRegistered(
   opts: SchedulerOptions = {},
 ): Promise<SchedulerCheckResult> {
   const paths = resolvePaths(opts);
-  const probe = opts.probe ?? queryLaunchd;
+  const probe = opts.probe ?? defaultRegistryProbe();
   const configured = (config.daemon?.interval ?? "").trim();
 
   const detail: SchedulerCheckResult["detail"] = {
@@ -542,19 +557,22 @@ export async function checkSchedulerRegistered(
       ? existsSync(plistPath(paths))
       : existsSync(timerPath(paths.label)) && existsSync(servicePath(paths.label));
 
-  if (process.platform === "darwin") {
-    try {
-      detail.registered = probe(paths.label);
-    } catch (err) {
-      return {
-        ok: false,
-        status: "probe-failed",
-        message: `Could not determine whether ${paths.label} is registered: ${(err as Error).message}`,
-        detail,
-      };
-    }
-  } else {
-    detail.registered = detail.plistPresent;
+  // The probe is consulted on every supported platform, not just darwin. It
+  // used to sit inside `if (platform === "darwin")`, with the else branch
+  // assigning `registered = plistPresent` directly — so an injected probe was
+  // silently ignored off darwin, and the fail-open guard below could only be
+  // exercised on a Mac. That made the guard's own test host-coupled: green
+  // locally, red on Linux CI, for a reason that had nothing to do with
+  // fail-open handling (#249, #259).
+  try {
+    detail.registered = probe(paths.label);
+  } catch (err) {
+    return {
+      ok: false,
+      status: "probe-failed",
+      message: `Could not determine whether ${paths.label} is registered: ${(err as Error).message}`,
+      detail,
+    };
   }
 
   const logPath = stdoutPath(paths.logDir);
