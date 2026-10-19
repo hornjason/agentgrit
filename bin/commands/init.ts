@@ -93,7 +93,8 @@ export async function initCommand(args: string[]): Promise<void> {
       console.error("Usage: agentgrit init --import <backup.json>");
       process.exit(1);
     }
-    return importInit(resolve(importPath));
+    await importInit(resolve(importPath));
+    return;
   }
 
   if (args.includes("--claude-code")) {

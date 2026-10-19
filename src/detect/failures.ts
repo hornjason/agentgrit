@@ -26,6 +26,22 @@ function similarity(a: Set<string>, b: Set<string>): number {
   return union === 0 ? 0 : overlap / union;
 }
 
+/**
+ * The text a correction record carries.
+ *
+ * Cross-session message captures store it as `user_text` rather than
+ * `correction_phrase` — 21 of 3011 records in a real signal file have no
+ * `correction_phrase` at all (#254), and dereferencing it aborted the whole
+ * detection pass, so a file that was 99% readable yielded zero patterns.
+ *
+ * One accessor, so no two readers can disagree about what a record says.
+ * Returns "" when a record carries neither field; callers skip those.
+ */
+function correctionTextOf(signal: CorrectionSignal): string {
+  const raw = signal.correction_phrase ?? (signal as { user_text?: unknown }).user_text;
+  return typeof raw === "string" ? raw : "";
+}
+
 interface CorrectionGroup {
   representative: string;
   tokens: Set<string>;
@@ -40,7 +56,9 @@ function groupByKeywordSimilarity(
   const groups: CorrectionGroup[] = [];
 
   for (const signal of corrections) {
-    const text = `${signal.correction_phrase} ${signal.context}`;
+    const phrase = correctionTextOf(signal);
+    if (!phrase) continue;
+    const text = `${phrase} ${signal.context}`;
     const tokens = tokenize(text);
 
     let matched = false;
@@ -56,7 +74,7 @@ function groupByKeywordSimilarity(
 
     if (!matched) {
       groups.push({
-        representative: signal.correction_phrase.slice(0, 200),
+        representative: phrase.slice(0, 200),
         tokens,
         signals: [signal],
         sessions: new Set([signal.session_id]),
@@ -95,7 +113,7 @@ function buildCandidateRule(group: CorrectionGroup): string {
   const seen = new Set<string>();
   const uniquePhrases: string[] = [];
   for (const s of group.signals) {
-    const phrase = s.correction_phrase.trim().slice(0, 80);
+    const phrase = correctionTextOf(s).trim().slice(0, 80);
     const normalized = phrase.toLowerCase().replace(/[^a-z0-9\s]/g, "");
     if (!seen.has(normalized)) {
       seen.add(normalized);

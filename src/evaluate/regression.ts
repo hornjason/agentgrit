@@ -3,7 +3,7 @@ import { dirname, join } from "path";
 import { stateDir } from "../adapters/paths";
 import { getContextRules } from "../graph/context";
 import type { Graph, BM25Index } from "../graph/types";
-import type { GoldSet } from "./gold";
+import type { GoldSession, GoldSet } from "./gold";
 
 export interface EvalRegressionResult {
   pass: boolean;

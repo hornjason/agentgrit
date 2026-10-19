@@ -63,7 +63,7 @@ function doQuery(base: string, queryStr: string): void {
 
   console.log(`  ${clusters.length} cluster(s) for: ${domains.join(", ")}\n`);
   for (const cluster of clusters) {
-    const text = cluster.primary.ruleText?.slice(0, 80) ?? "";
+    const text = (cluster.primary.description || cluster.primary.name || "").slice(0, 80);
     console.log(`  [${cluster.score.toFixed(3)}] ${cluster.primary.id}`);
     console.log(`         ${text}`);
     console.log(`         domains: ${cluster.domains.join(", ")}`);

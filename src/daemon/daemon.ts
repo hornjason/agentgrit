@@ -763,6 +763,9 @@ export async function runDaemonCycle(
 
   // Dashboard export — write comprehensive JSON for control plane
   try {
+    const { writeFileSync } = await import("fs");
+    const { join } = await import("path");
+    const { stateDir: getState } = await import("../adapters/paths");
     const { generateDashboardResults } = await import("../../bin/commands/dashboard-export");
     const dashResults = generateDashboardResults();
     writeFileSync(
