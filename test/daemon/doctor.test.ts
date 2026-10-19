@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import type { AgentGritConfig } from "../../src/adapters/types";
 import { runDoctor } from "../../src/daemon/doctor";
+import { EXPECTED_DOCTOR_SECTIONS } from "../setup/doctor-sections";
 
 const TEST_DIR = "/tmp/agentgrit-doctor-test-" + process.pid;
 const SIGNAL_DIR = join(TEST_DIR, "signals");
@@ -37,18 +38,7 @@ describe("doctor report structure", () => {
     expect(report).toHaveProperty("timestamp");
     expect(report).toHaveProperty("overall");
     expect(report).toHaveProperty("sections");
-    expect(report.sections.length).toBe(9);
-
-    const sectionNames = report.sections.map((s) => s.name);
-    expect(sectionNames).toContain("CAPTURE");
-    expect(sectionNames).toContain("SCORING");
-    expect(sectionNames).toContain("GRAPH");
-    expect(sectionNames).toContain("RULES");
-    expect(sectionNames).toContain("SIGNALS");
-    expect(sectionNames).toContain("CONFIG");
-    expect(sectionNames).toContain("INTEGRITY");
-    expect(sectionNames).toContain("DATA INTEGRITY");
-    expect(sectionNames).toContain("WIRING");
+    expect(report.sections.map((s) => s.name)).toEqual([...EXPECTED_DOCTOR_SECTIONS]);
   });
 
   test("overall status is worst of all sections", async () => {

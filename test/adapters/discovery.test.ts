@@ -7,7 +7,8 @@ import {
   readFileSync,
 } from "fs";
 import { join } from "path";
-import { homedir } from "os";
+// No `homedir` import. Nothing in this file may ask the developer's machine a
+// question — that is what issue #249 was (see the comment above discoverClaudeCode).
 
 const SANDBOX = "/tmp/agentgrit-discovery-test";
 
@@ -28,29 +29,63 @@ afterEach(() => {
 
 // ── discoverClaudeCode ──
 
+/**
+ * Both tests here used to branch on the real `~/.claude.json` and
+ * `~/.claude/MEMORY/LEARNING/SIGNALS`, then assert whichever outcome that branch
+ * implied. The functions under test do not read those paths — they read
+ * hostRegistryFile() and legacySignalDir(), which the isolate preload points at a
+ * temp dir. So the branch and the function consulted different filesystems:
+ * red on a machine with a real Claude Code install, green on a bare CI runner,
+ * which is half of issue #249's local/CI split. They now build the state they
+ * assert on and cover both outcomes unconditionally.
+ */
+function withHostDir<T>(dir: string, fn: () => T): T {
+  const prev = process.env.AGENTGRIT_HOST_DIR;
+  process.env.AGENTGRIT_HOST_DIR = dir;
+  try {
+    return fn();
+  } finally {
+    if (prev === undefined) delete process.env.AGENTGRIT_HOST_DIR;
+    else process.env.AGENTGRIT_HOST_DIR = prev;
+  }
+}
+
 describe("discoverClaudeCode", () => {
-  test("returns null when ~/.claude.json missing", async () => {
+  test("returns null when the host registry file is missing", async () => {
     const mod = await import("../../src/adapters/discovery");
-    // This tests the real filesystem — ~/.claude.json exists for PAI users
-    // but the function itself is deterministic
-    const result = mod.discoverClaudeCode();
-    if (existsSync(join(homedir(), ".claude.json"))) {
-      expect(result).not.toBeNull();
-      expect(result!.home).toBe(join(homedir(), ".claude"));
-      expect(result!.projects).toBeDefined();
-      expect(result!.githubRepoPaths).toBeDefined();
-    } else {
-      expect(result).toBeNull();
-    }
+    const hostHome = ensureSandbox("no-registry", ".claude");
+    // hostRegistryFile() is a sibling of hostDir(), so this is the path that must
+    // be absent: <sandbox>/no-registry/.claude.json. Assert that, don't assume it.
+    expect(existsSync(join(SANDBOX, "no-registry", ".claude.json"))).toBe(false);
+
+    expect(withHostDir(hostHome, () => mod.discoverClaudeCode())).toBeNull();
   });
 
-  test("returns projects from real ~/.claude.json if present", async () => {
+  test("returns home, projects and githubRepoPaths when the registry exists", async () => {
     const mod = await import("../../src/adapters/discovery");
-    const result = mod.discoverClaudeCode();
-    if (!result) return; // skip if Claude Code not installed
+    const hostHome = ensureSandbox("with-registry", ".claude");
+    writeFileSync(
+      join(SANDBOX, "with-registry", ".claude.json"),
+      JSON.stringify({
+        projects: { "/repo/alpha": { allowedTools: [] } },
+        githubRepoPaths: { "owner/alpha": "/repo/alpha" },
+      }),
+    );
 
-    expect(typeof result.projects).toBe("object");
-    expect(typeof result.githubRepoPaths).toBe("object");
+    const result = withHostDir(hostHome, () => mod.discoverClaudeCode());
+
+    expect(result).not.toBeNull();
+    expect(result!.home).toBe(hostHome);
+    expect(Object.keys(result!.projects)).toEqual(["/repo/alpha"]);
+    expect(result!.githubRepoPaths).toEqual({ "owner/alpha": "/repo/alpha" });
+  });
+
+  test("returns null when the registry exists but is not valid JSON", async () => {
+    const mod = await import("../../src/adapters/discovery");
+    const hostHome = ensureSandbox("bad-registry", ".claude");
+    writeFileSync(join(SANDBOX, "bad-registry", ".claude.json"), "{ not json");
+
+    expect(withHostDir(hostHome, () => mod.discoverClaudeCode())).toBeNull();
   });
 });
 
@@ -166,22 +201,30 @@ describe("scanTranscripts", () => {
     return makeTranscript([...filler, ...signalLines]);
   }
 
-  test("skips transcripts with <=50 lines", async () => {
-    const dir = ensureSandbox("transcripts", "proj");
+  // The DI the old comment here said was impossible is AGENTGRIT_HOST_DIR:
+  // scanTranscripts reads hostTranscriptsDir(), which honours it. It used to build
+  // the fixture below, ignore it, scan the developer's real ~/.claude/projects and
+  // assert `sessionsSkipped >= 0` — true of every number the function can return,
+  // including the 0 a machine with no transcripts gives. Green everywhere for no
+  // reason, which is why it is in neither failure list and still had to change.
+  test("counts a short transcript as skipped and a long one as scanned", async () => {
+    const mod = await import("../../src/adapters/discovery");
+    const hostHome = ensureSandbox("transcript-host", ".claude");
+    const projects = ensureSandbox("transcript-host", ".claude", "projects", "proj");
+
     writeFileSync(
-      join(dir, "short.jsonl"),
+      join(projects, "short.jsonl"),
       makeTranscript([
         { type: "user", message: { content: "/rate M:5 S:5 Q:5" } },
         { type: "assistant", message: { content: [{ type: "text", text: "ok" }] } },
       ]),
     );
+    writeFileSync(join(projects, "long.jsonl"), makePaddedTranscript([]));
 
-    // Monkey-patch homedir for testing — not possible without DI
-    // Instead, test the internal logic through a real dir if available
-    const mod = await import("../../src/adapters/discovery");
-    // This tests real ~/.claude/projects if they exist
-    const result = mod.scanTranscripts([]);
-    expect(result.sessionsSkipped).toBeGreaterThanOrEqual(0);
+    const result = withHostDir(hostHome, () => mod.scanTranscripts([]));
+
+    expect(result.sessionsSkipped).toBe(1);
+    expect(result.sessionsScanned).toBe(1);
   });
 
   test("extracts ratings from /rate pattern", async () => {
@@ -277,27 +320,69 @@ describe("scanTranscripts", () => {
 
 // ── detectSignalSources ──
 
-describe("detectSignalSources", () => {
-  test("detects PAI signals when directory exists", async () => {
-    const mod = await import("../../src/adapters/discovery");
-    const result = mod.detectSignalSources();
+/**
+ * Runs `fn` against a fixture install at <SANDBOX>/<name>, with config.json
+ * written from `config`. detectSignalSources reads legacySignalDir() out of that
+ * config and AGENTGRIT_DIR from the environment — never ~/.claude — so this is
+ * the full set of inputs it has.
+ */
+function withBaseDir<T>(name: string, config: Record<string, unknown>, fn: () => T): T {
+  const base = ensureSandbox(name);
+  writeFileSync(join(base, "config.json"), JSON.stringify(config));
+  const prev = process.env.AGENTGRIT_DIR;
+  process.env.AGENTGRIT_DIR = base;
+  try {
+    return fn();
+  } finally {
+    if (prev === undefined) delete process.env.AGENTGRIT_DIR;
+    else process.env.AGENTGRIT_DIR = prev;
+  }
+}
 
-    const paiPath = join(homedir(), ".claude", "MEMORY", "LEARNING", "SIGNALS");
-    if (existsSync(paiPath)) {
-      expect(result.source).toBe("pai");
-      expect(result.signalDir).toBe(paiPath);
-    } else {
-      expect(["agentgrit", "none"]).toContain(result.source);
-    }
+describe("detectSignalSources", () => {
+  test("reports 'pai' and the legacy dir when a configured legacy signal dir exists", async () => {
+    const mod = await import("../../src/adapters/discovery");
+    const legacy = ensureSandbox("legacy-signals");
+    writeFileSync(join(legacy, "ratings.jsonl"), '{"rating":8}\n{"rating":9}\n');
+
+    const result = withBaseDir("pai-install", { paths: { legacySignalDir: legacy } }, () =>
+      mod.detectSignalSources(),
+    );
+
+    expect(result.source).toBe("pai");
+    expect(result.signalDir).toBe(legacy);
+    expect(result.counts?.ratings).toBe(2);
   });
 
-  test("returns correct signalDir for non-PAI installs", async () => {
+  test("reports 'agentgrit' when only the base dir's own signals/ exists", async () => {
     const mod = await import("../../src/adapters/discovery");
-    const result = mod.detectSignalSources();
+    ensureSandbox("own-install", "signals");
 
-    if (result.source === "none") {
-      expect(result.signalDir).toContain("signals");
-    }
+    const result = withBaseDir("own-install", {}, () => mod.detectSignalSources());
+
+    expect(result.source).toBe("agentgrit");
+    expect(result.signalDir).toBe(join(SANDBOX, "own-install", "signals"));
+  });
+
+  test("reports 'none' with a signals path when neither source exists", async () => {
+    const mod = await import("../../src/adapters/discovery");
+
+    const result = withBaseDir("empty-install", {}, () => mod.detectSignalSources());
+
+    expect(result.source).toBe("none");
+    expect(result.signalDir).toBe(join(SANDBOX, "empty-install", "signals"));
+  });
+
+  test("a configured legacy dir that does not exist falls through rather than reporting 'pai'", async () => {
+    const mod = await import("../../src/adapters/discovery");
+    const missing = join(SANDBOX, "nope", "signals");
+    expect(existsSync(missing)).toBe(false);
+
+    const result = withBaseDir("stale-config", { paths: { legacySignalDir: missing } }, () =>
+      mod.detectSignalSources(),
+    );
+
+    expect(result.source).toBe("none");
   });
 });
 

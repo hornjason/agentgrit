@@ -730,7 +730,13 @@ describe("capture work-completion", () => {
     mkdirSync(cleanGitDir, { recursive: true });
     const { execSync: exec } = require("child_process");
     exec("git init", { cwd: cleanGitDir });
-    exec("git commit --allow-empty -m init", { cwd: cleanGitDir });
+    // Identity on the command line, not from the environment: CI has no global
+    // git identity, so a bare `git commit` exits non-zero there and passes on a
+    // developer machine that happens to have one configured (#249).
+    exec(
+      'git -c user.name=agentgrit-test -c user.email=test@example.invalid commit --allow-empty -m init',
+      { cwd: cleanGitDir },
+    );
 
     const transcriptPath = join(TMP_DIR, "transcript-trivial.jsonl");
     writeFileSync(transcriptPath, [
