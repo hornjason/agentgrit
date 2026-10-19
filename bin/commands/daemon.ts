@@ -87,15 +87,31 @@ async function doStart(base: string): Promise<void> {
 
   // Pass argv explicitly — splitting a command string on spaces breaks as soon
   // as an install path contains one.
-  const bunPath = process.execPath || "bun";
-  const entry = join(__dirname, "..", "agentgrit.ts");
+  //
+  // Schedule the interpreter and the script THIS process is running, rather
+  // than pairing a discovered interpreter with a hardcoded entry. The previous
+  // version took process.execPath — whichever interpreter is running, not
+  // necessarily bun despite the variable's old name — and paired it with
+  // bin/agentgrit.ts unconditionally. Invoked through the published shim, which
+  // is `#!/usr/bin/env node` resolving to dist/agentgrit.js, that scheduled
+  // `node …/bin/agentgrit.ts` and died on every run with ERR_MODULE_NOT_FOUND.
+  // It worked only when run as `bun bin/agentgrit.ts`, which is the developer
+  // path and the reason it survived (#277).
+  //
+  // Chosen together, the two cannot disagree: under the shim this is
+  // `node dist/agentgrit.js`, under bun it is `bun bin/agentgrit.ts`.
+  const interpreter = process.execPath;
+  const entry = process.argv[1] ?? join(__dirname, "..", "agentgrit.ts");
 
   console.log("  Installing scheduler...");
   try {
     await installScheduler({
       interval,
-      command: bunPath,
+      command: interpreter,
       args: [entry, "daemon", "run"],
+      // Proven to start before anything is registered. `--version` exits 0
+      // without touching any state.
+      verifyArgs: [entry, "--version"],
     });
   } catch (err) {
     console.log(`  Failed to install scheduler: ${(err as Error).message}\n`);
