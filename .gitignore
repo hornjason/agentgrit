@@ -18,3 +18,13 @@ shadow-routing.jsonl
 *.key
 credentials.json/
 service-account/
+
+# Added by rungate scaffold
+.bun/
+build/
+*.tsbuildinfo
+*.p12
+*.pfx
+credentials.json
+service-account*
+.secret*

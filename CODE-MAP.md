@@ -1,8 +1,8 @@
 ---
 doc-type: code-map
 status: generated
-updated: 2026-10-05
-scanned-at-sha: 4dca3b99
+updated: 2026-10-19
+scanned-at-sha: 296ed3b7
 generator: rungate/scripts/generate-code-map.ts
 ---
 
@@ -17,13 +17,13 @@ Regenerate when src/ has commits since scanned-at-sha.
 |--------|-------|
 | Source directories | 9 |
 | Dependencies | 0 |
-| Dev dependencies | 3 |
+| Dev dependencies | 4 |
 | API routes | 0 |
 | React components | 0 |
-| Entry points (fallow) | 145 |
-| Unused files | 23 |
-| Unused exports | 81 |
-| Circular dependencies | 6 |
+| Entry points (fallow) | UNMEASURED |
+| Unused files | UNMEASURED |
+| Unused exports | UNMEASURED |
+| Circular dependencies | UNMEASURED |
 | Module import mappings | 0 |
 | Page-component mappings | 0 |
 
@@ -34,42 +34,16 @@ Regenerate when src/ has commits since scanned-at-sha.
 | test/ | 231 | detect, capture, ts, optimize, bin |
 | src/ | 111 | detect, capture, optimize, promote, graph |
 | bin/ | 31 | md, ts, commands |
+| .claude/ | 20 | agents, rungate, rules, md, json |
 | docs/ | 12 | md, adr, png |
 | scripts/ | 7 | ts, py |
-| .claude/ | 6 | rules, md |
 | rubrics/ | 2 | json, md |
+| specs/ | 1 | md |
 | templates/ | 1 | md |
-| specs/ | 0 |  |
 
 ## Code Health (fallow)
 
-### Circular Dependencies (6)
-
-- src/graph/builder.ts → src/graph/domain-propagation.ts
-- src/graph/builder.ts → src/graph/generate-patterns.ts
-- src/promote/auto-eviction.ts → src/promote/lifecycle.ts
-- src/promote/bridge.ts → src/promote/budget.ts
-- src/promote/bridge.ts → src/promote/budget.ts → src/promote/evict.ts
-- src/promote/bridge.ts → src/promote/budget.ts → src/promote/evict.ts → src/promote/lifecycle.ts
-
-### Unused Files (23)
-
-- bin/agentgrit.ts
-- bin/commands/cleanup-orphans.ts
-- bin/commands/context.ts
-- bin/commands/daemon.ts
-- bin/commands/eval.ts
-- bin/commands/evict.ts
-- bin/commands/graph.ts
-- bin/commands/health.ts
-- bin/commands/memory.ts
-- bin/commands/optimize.ts
-- bin/commands/patterns.ts
-- bin/commands/test.ts
-- bin/commands/upgrade.ts
-- scripts/apply-gold-corrections.ts
-- scripts/build-doc-sections.ts
-- ... and 8 more
+**UNMEASURED** — fallow is not installed (it is an optional tool, not a declared dependency) — no static analysis was run, and no registry fetch was attempted.
 
 ## Package Scripts
 

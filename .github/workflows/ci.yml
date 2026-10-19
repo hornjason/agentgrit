@@ -20,7 +20,10 @@ jobs:
             || echo "WARN: could not fetch main; the conformity allowlist growth check will report UNMEASURED."
       - uses: oven-sh/setup-bun@v2
         with:
+          # From ci.bunVersion in .claude/rungate/config.json — this project declares no
+          # .bun-version. Add one and re-scaffold to let CI read the declaration directly.
           bun-version: "latest"
       - run: bun install
+      # No global tools installed: the config declares no ci.globalTools.
       - run: bun test
-      - run: bunx tsc --noEmit
+      - run: bun run typecheck

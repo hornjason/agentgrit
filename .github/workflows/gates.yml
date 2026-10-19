@@ -16,6 +16,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
+          # From ci.bunVersion in .claude/rungate/config.json — this project declares no
+          # .bun-version. Add one and re-scaffold to let CI read the declaration directly.
           bun-version: "latest"
       - run: bun install
       - name: Conformity + spec drift
