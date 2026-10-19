@@ -214,8 +214,8 @@ export function retrieveByEmbeddingSeed(
     const t = node.type;
     if (t && !ALLOWED_TYPES.has(t)) continue;
 
-    // Same rule as the main path: a candidate with no resolvable body text is
-    // omitted. Having a graph node is not the same as having something to say.
+    // Same rule as the keyword path: no body text means omit the candidate.
+    // Substituting the id here produced `- **some_rule:** some_rule`.
     const text = resolveRuleText(entry.id, graph, index);
     if (!text) continue;
 

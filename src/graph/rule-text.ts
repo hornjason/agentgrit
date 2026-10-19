@@ -81,12 +81,10 @@ function firstBodyParagraph(content: string): string | null {
 /**
  * Candidate source documents for an id, most authoritative first.
  *
- * The id is attacker-reachable — `resolveRuleText` is exported and its ids
- * come from the registry file and the graph, not from this module — so it is
- * only turned into a path through `ruleFileName`, which refuses anything that
- * is not a single path segment. An unsafe id yields no corpus paths at all,
- * which `readRuleTextFromDocument` reports as "unresolved" rather than
- * reading outside the memory and rules dirs.
+ * Retrieval candidate ids come from the registry and the BM25 corpus, neither
+ * of which validates them as filenames, so an id carrying `../` would read
+ * outside the memory and rules dirs. `ruleFileName` rejects those ids; a
+ * rejected id simply has no document, which `resolveRuleText` reports as null.
  */
 function documentPaths(id: string, index?: BM25Index): string[] {
   const paths: string[] = [];
@@ -94,10 +92,9 @@ function documentPaths(id: string, index?: BM25Index): string[] {
   if (indexed) paths.push(indexed);
 
   if (!isSafeRuleId(id)) return paths;
-
-  const filename = ruleFileName(id);
+  const fileName = ruleFileName(id);
   for (const dir of [safeDir(resolveMemoryDir), safeDir(rulesDir)]) {
-    if (dir) paths.push(join(dir, filename));
+    if (dir) paths.push(join(dir, fileName));
   }
   return paths;
 }
@@ -144,4 +141,33 @@ export function resolveRuleText(id: string, graph: Graph, index?: BM25Index): st
     if (fromNode) return fromNode;
   }
   return readRuleTextFromDocument(id, index);
+}
+
+/** How many of a set of rule ids have body text the context command can emit. */
+export interface RuleTextCoverage {
+  total: number;
+  resolved: number;
+  /** The ids that would be omitted from injected context. */
+  unresolved: string[];
+}
+
+/**
+ * Count the rule ids that resolve to usable body text.
+ *
+ * This is the measurement behind #258: before the fix 37 of 623
+ * `rule-domains.json` ids had body text, and the other 586 were emitted with
+ * their own id as the body.
+ */
+export function countResolvableRuleIds(
+  ids: string[],
+  graph: Graph,
+  index?: BM25Index,
+): RuleTextCoverage {
+  const unresolved: string[] = [];
+  let resolved = 0;
+  for (const id of ids) {
+    if (resolveRuleText(id, graph, index)) resolved++;
+    else unresolved.push(id);
+  }
+  return { total: ids.length, resolved, unresolved };
 }

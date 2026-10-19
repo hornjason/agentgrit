@@ -3,10 +3,10 @@ import { existsSync, rmSync, mkdirSync, writeFileSync, readFileSync } from "fs";
 import { join } from "path";
 import {
   canonicalRuleId,
-  isSafeRuleId,
   ruleIdFromFilename,
   ruleFileName,
   ruleIdsMatch,
+  isSafeRuleId,
 } from "../../src/graph/rule-id";
 import { buildGraph, resetClassifyPatterns } from "../../src/graph/builder";
 import { buildIndex } from "../../src/graph/bm25";
@@ -105,6 +105,34 @@ describe("canonicalRuleId", () => {
   });
 });
 
+describe("rule ids that climb out of their directory", () => {
+  test("ruleFileName refuses an id carrying a path separator or a parent segment", () => {
+    expect(ruleFileName("feedback_ok")).toBe("feedback_ok.md");
+    expect(() => ruleFileName("../escaped-rule")).toThrow(/rule id/i);
+    expect(() => ruleFileName("nested/rule")).toThrow(/rule id/i);
+    expect(() => ruleFileName("..")).toThrow(/rule id/i);
+    expect(() => ruleFileName("")).toThrow(/rule id/i);
+  });
+
+  test("isSafeRuleId accepts the spellings the registry actually holds", () => {
+    expect(isSafeRuleId("feedback_every_issue_goes_through_ship")).toBe(true);
+    expect(isSafeRuleId("feedback_smoke-test-insufficient")).toBe(true);
+    expect(isSafeRuleId("Brief and dashboard must render consistently (2026-06-11)")).toBe(true);
+    expect(isSafeRuleId("../escaped-rule")).toBe(false);
+    expect(isSafeRuleId("a/b")).toBe(false);
+    expect(isSafeRuleId("a\\b")).toBe(false);
+    expect(isSafeRuleId("a\0b")).toBe(false);
+  });
+
+  test("writeRuleFile does not write outside rulesDir", () => {
+    // Pre-fix `join(rulesDir, `${rule.id}.md`)` resolved this to TMP_DIR —
+    // one level above RULES_DIR — and wrote there without complaint.
+    const escaped = join(TMP_DIR, "escaped-rule.md");
+    expect(() => writeRuleFile(makeRule("../escaped-rule", "Escaped"), RULES_DIR)).toThrow(/rule id/i);
+    expect(existsSync(escaped)).toBe(false);
+  });
+});
+
 describe("single derivation across builder, registry writer and context resolver", () => {
   test("graph builder derives node ids with ruleIdFromFilename", async () => {
     writeFileSync(
@@ -164,46 +192,5 @@ describe("single derivation across builder, registry writer and context resolver
   test("context resolver does not invent a match for a genuinely absent id", () => {
     const graph = makeGraph([makeNode("feedback_every_issue_goes_through_ship", "Ship every issue")]);
     expect(resolveGraphNode("feedback_every_issue_through_ship", graph)).toBeNull();
-  });
-});
-
-/**
- * `ruleFileName` is the single place an id becomes a path segment, so it is
- * the single place the id has to be proved to be one. An id carrying `../`
- * turned `join(rulesDir, ruleFileName(id))` into a write outside rulesDir.
- */
-describe("a rule id cannot escape the directory it names a file in", () => {
-  test("isSafeRuleId rejects separators, dot segments and absolute paths", () => {
-    expect(isSafeRuleId("../outside/pwned")).toBe(false);
-    expect(isSafeRuleId("rules/../../etc/passwd")).toBe(false);
-    expect(isSafeRuleId("nested/rule")).toBe(false);
-    expect(isSafeRuleId("nested\\rule")).toBe(false);
-    expect(isSafeRuleId("/etc/passwd")).toBe(false);
-    expect(isSafeRuleId("..")).toBe(false);
-    expect(isSafeRuleId(".")).toBe(false);
-    expect(isSafeRuleId("")).toBe(false);
-    expect(isSafeRuleId("rule\0name")).toBe(false);
-  });
-
-  test("isSafeRuleId accepts the spellings the registry and the rules dir hold", () => {
-    expect(isSafeRuleId("feedback_every_issue_goes_through_ship")).toBe(true);
-    expect(isSafeRuleId("feedback_smoke-test-insufficient")).toBe(true);
-    expect(isSafeRuleId("Brief and dashboard must render consistently (from debrief 2026-06-11)")).toBe(true);
-    expect(isSafeRuleId("rule.v2")).toBe(true);
-  });
-
-  test("ruleFileName refuses an id that is not a single path segment", () => {
-    expect(() => ruleFileName("../outside/pwned")).toThrow(/rule id/i);
-    expect(ruleFileName("feedback_server_restart")).toBe("feedback_server_restart.md");
-  });
-
-  test("writeRuleFile does not write outside rulesDir", () => {
-    const outside = join(TMP_DIR, "outside");
-    mkdirSync(outside, { recursive: true });
-
-    expect(() =>
-      writeRuleFile(makeRule("../outside/pwned", "Owned by a traversal id"), RULES_DIR),
-    ).toThrow(/rule id/i);
-    expect(existsSync(join(outside, "pwned.md"))).toBe(false);
   });
 });

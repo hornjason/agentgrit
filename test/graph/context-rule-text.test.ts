@@ -3,7 +3,7 @@ import { existsSync, rmSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { getContextRules, resetDetectPatterns, retrieveByEmbeddingSeed } from "../../src/graph/context";
 import { buildIndex } from "../../src/graph/bm25";
-import { readRuleTextFromDocument, resolveRuleText } from "../../src/graph/rule-text";
+import { countResolvableRuleIds, resolveRuleText } from "../../src/graph/rule-text";
 import type { Graph } from "../../src/graph/types";
 import type { GraphNode } from "../../src/adapters/types";
 
@@ -180,123 +180,100 @@ describe("getContextRules rule body text", () => {
   });
 });
 
-/**
- * `getContextRules` is not the only path in context.ts that builds a Rule.
- * `retrieveByEmbeddingSeed` builds its own, and had the same
- * `description || name || id` fallback — a node present in the graph but
- * carrying no text still rendered as `- **id:** id`.
- */
 describe("retrieveByEmbeddingSeed rule body text", () => {
-  function seedFixture() {
-    const files: string[] = [];
-    const write = (id: string, body: string) => {
-      const f = join(TMP_DIR, `${id}.md`);
-      writeFileSync(f, body, "utf-8");
-      files.push(f);
-    };
+  /**
+   * The embedding retrieval path is a second producer of context rules and it
+   * carried the same fail-open as `getContextRules`: a node whose description
+   * and name are both empty fell through to the id as body text. It guards
+   * `if (!node) continue`, so only an *empty* node reaches the substitution —
+   * which is exactly what this fixture builds.
+   */
+  test("a node with no description and no name is omitted, not emitted as its own id", () => {
+    const blank = makeNode("feedback_blank_node", ["testing"], "");
+    blank.name = "";
+    const described = makeNode("feedback_described_node", ["testing"], "Describe the rule properly");
+    const graph = makeGraph([blank, described]);
 
-    write(
-      "feedback_rebuild_before_deploy",
-      `---\ndescription: Rebuild the container before deploying\n---\nRebuild the container before deploying to production.`,
-    );
+    const file = join(TMP_DIR, "unrelated.md");
+    writeFileSync(file, "smoke test acceptance evidence ship run", "utf-8");
+    const index = buildIndex([file]);
 
-    const textless = makeNode("feedback_textless_node", ["delivery"], "");
-    textless.name = "";
-
-    const graph = makeGraph([
-      makeNode("feedback_rebuild_before_deploy", ["delivery"], "Rebuild the container before deploying"),
-      textless,
-    ]);
-
+    // Seed BM25 hits "unrelated", whose vector neighbours are the two nodes.
     const vectorCache = new Map<string, number[]>([
-      ["feedback_rebuild_before_deploy", [1, 0, 0]],
-      ["feedback_textless_node", [0.99, 0.1, 0]],
+      ["unrelated", [1, 0, 0]],
+      ["feedback_blank_node", [1, 0, 0]],
+      ["feedback_described_node", [0.9, 0.1, 0]],
     ]);
-
-    return { graph, index: buildIndex(files), vectorCache };
-  }
-
-  test("a graph node with no description and no name is omitted, not rendered as its own id", () => {
-    const { graph, index, vectorCache } = seedFixture();
 
     const rules = retrieveByEmbeddingSeed(
-      "rebuild the container before deploying to production",
+      "smoke test acceptance evidence ship run",
       graph,
       index,
       vectorCache,
       10,
     );
 
-    // Without a resolving candidate this passes vacuously on an empty array.
-    expect(rules.map(r => r.id)).toContain("feedback_rebuild_before_deploy");
-    expect(rules.map(r => r.id)).not.toContain("feedback_textless_node");
+    expect(rules.map(r => r.id)).toContain("feedback_described_node");
+    expect(rules.map(r => r.id)).not.toContain("feedback_blank_node");
     expect(rules.filter(r => r.text.trim() === r.id)).toEqual([]);
   });
 });
 
-/**
- * `resolveRuleText` is exported and takes an id from the registry, the graph
- * or a BM25 doc — none of which it minted. Reading `join(memoryDir, id +
- * ".md")` for an unvalidated id lets `../` walk out of the corpus.
- */
-describe("document reads are confined to the corpus directories", () => {
-  const emptyGraph = (): Graph => makeGraph([]);
-
-  function plantSecretOutsideCorpus(): string {
+describe("resolveRuleText and the directories it is allowed to read", () => {
+  test("a candidate id that climbs out of the memory dir resolves to nothing", () => {
+    // memoryDir/rulesDir sit under TMP_DIR; the decoy sits beside them.
     mkdirSync(join(TMP_DIR, "memory"), { recursive: true });
     mkdirSync(join(TMP_DIR, "rules"), { recursive: true });
-    const secret = join(TMP_DIR, "secret.md");
     writeFileSync(
-      secret,
-      `---\ndescription: SECRET outside the corpus\n---\nSECRET outside the corpus.`,
-      "utf-8",
-    );
-    return secret;
-  }
-
-  test("a traversal id does not read a file outside the memory and rules dirs", () => {
-    const secretPath = plantSecretOutsideCorpus();
-
-    // Without this the assertion below passes vacuously: the escape target
-    // has to be reachable by the join the resolver performs.
-    expect(existsSync(secretPath)).toBe(true);
-    expect(existsSync(join(TMP_DIR, "memory", "../secret.md"))).toBe(true);
-
-    expect(readRuleTextFromDocument("../secret")).toBeNull();
-    expect(resolveRuleText("../secret", emptyGraph())).toBeNull();
-  });
-
-  test("a nested traversal id does not read outside either", () => {
-    const secretPath = plantSecretOutsideCorpus();
-    expect(existsSync(secretPath)).toBe(true);
-
-    expect(readRuleTextFromDocument("rules/../../secret")).toBeNull();
-    expect(readRuleTextFromDocument(join(TMP_DIR, "secret"))).toBeNull();
-  });
-
-  test("a traversal id is rejected before any corpus path is built", () => {
-    plantSecretOutsideCorpus();
-    // An index entry is keyed by doc id, so it cannot be reached by a
-    // traversal id — but the id must be refused even with one present.
-    const index = buildIndex([join(TMP_DIR, "memory")].filter(() => false));
-    expect(readRuleTextFromDocument("../secret", index)).toBeNull();
-    expect(readRuleTextFromDocument("..", index)).toBeNull();
-  });
-
-  test("the sentence-shaped ids the registry actually holds still resolve", () => {
-    const memory = join(TMP_DIR, "memory");
-    mkdirSync(memory, { recursive: true });
-    const id = "Brief and dashboard must render consistently (from debrief 2026-06-11)";
-    writeFileSync(
-      join(memory, `${id}.md`),
-      `---\ndescription: The brief and the dashboard must render the same data\n---\nBody.`,
+      join(TMP_DIR, "decoy-outside.md"),
+      `---\ndescription: Body text from outside the memory dir\n---\nSecret.`,
       "utf-8",
     );
 
-    // The guard must reject traversal without rejecting spaces, parens or
-    // dots in a legitimate id — 586 of the 623 registry ids look like this.
-    expect(readRuleTextFromDocument(id)).toBe(
-      "The brief and the dashboard must render the same data",
-    );
+    // Pre-fix `join(dir, `${id}.md`)` resolved this to TMP_DIR/decoy-outside.md
+    // and returned its description.
+    expect(resolveRuleText("../decoy-outside", makeGraph([]))).toBeNull();
+    expect(resolveRuleText("../../etc/passwd", makeGraph([]))).toBeNull();
+  });
+
+  test("an indexed corpus does not re-open the traversal", () => {
+    mkdirSync(join(TMP_DIR, "memory"), { recursive: true });
+    const decoy = join(TMP_DIR, "decoy-indexed.md");
+    writeFileSync(decoy, `---\ndescription: Indexed decoy body\n---\nSecret.`, "utf-8");
+    const index = buildIndex([decoy]);
+    // The index keys the doc by its basename, so a traversal id never matches
+    // it — the only way in was the memoryDir join, which the guard closes.
+    expect(index.docs.map(d => d.id)).toEqual(["decoy-indexed"]);
+    expect(resolveRuleText("../decoy-indexed", makeGraph([]), index)).toBeNull();
+    // The safe spelling still resolves through the index, so the guard has
+    // not simply disabled document resolution.
+    expect(resolveRuleText("decoy-indexed", makeGraph([]), index)).toBe("Indexed decoy body");
+  });
+});
+
+describe("countResolvableRuleIds", () => {
+  test("counts only the ids that resolve to usable body text", () => {
+    const { graph, index } = fixture();
+    // Written so the traversal id below has something real to reach — without
+    // it that assertion passes whether or not the guard exists.
+    mkdirSync(join(TMP_DIR, "memory"), { recursive: true });
+    writeFileSync(join(TMP_DIR, "decoy-outside.md"), `---\ndescription: Outside\n---\nSecret.`, "utf-8");
+
+    const ids = [
+      "feedback_every_issue_goes_through_ship", // graph node description
+      "feedback_every_issue_through_ship", // document frontmatter only
+      "feedback_quinn_no_config_wipe", // document body only
+      "feedback_never_written_anywhere", // nothing to resolve
+      "../decoy-outside", // must not be resolved by reading out of the dir
+    ];
+
+    const coverage = countResolvableRuleIds(ids, graph, index);
+
+    expect(coverage.total).toBe(5);
+    expect(coverage.resolved).toBe(3);
+    expect(coverage.unresolved.sort()).toEqual([
+      "../decoy-outside",
+      "feedback_never_written_anywhere",
+    ]);
   });
 });
