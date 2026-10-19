@@ -41,6 +41,12 @@ export interface SchedulerConfig {
   args?: string[];
   label?: string;
   logDir?: string;
+  /**
+   * Argv for a cheap "can this even start" probe of `command`, run before the
+   * job is registered. Omitting it skips the probe and the install reports
+   * UNVERIFIED rather than silently treating "not checked" as "fine" (#277).
+   */
+  verifyArgs?: string[];
 }
 
 export interface SchedulerPaths {
@@ -55,6 +61,11 @@ export interface SchedulerOptions extends Partial<SchedulerPaths> {
   runAtLoad?: boolean;
   /** Injectable registry probe. Used by tests to prove the check is not fail-open. */
   probe?: (label: string) => boolean;
+  /**
+   * Injectable executability probe for the scheduled command. Returns nothing
+   * on success and throws on failure, mirroring execFileSync.
+   */
+  verify?: (command: string, args: string[]) => void;
 }
 
 export interface SchedulerStatus {
@@ -305,6 +316,14 @@ function defaultRegistryProbe(): (label: string) => boolean {
   return (label: string) => existsSync(timerPath(label)) && existsSync(servicePath(label));
 }
 
+/**
+ * Default executability probe: run the command and let a non-zero exit throw.
+ * Capped so a command that hangs cannot hang the install.
+ */
+function defaultVerify(command: string, args: string[]): void {
+  execFileSync(command, args, { stdio: "ignore", timeout: 30_000 });
+}
+
 function bootoutQuiet(label: string): void {
   try {
     execFileSync("launchctl", ["bootout", serviceTarget(label)], { stdio: "ignore" });
@@ -344,6 +363,33 @@ export async function installScheduler(
       `Unrecognized daemon.interval "${config.interval}". ` +
         `Use daily, hourly, weekly, or a duration like 30m / 2h / 1d.`,
     );
+  }
+
+  // Registration is not the same thing as a working daemon, and #259 is the
+  // proof that collapsing the two costs weeks of silence. That issue was a
+  // plist on disk treated as a scheduled job; this is a scheduled job whose
+  // command cannot start. `daemon status` says "Registered: yes" either way,
+  // so the only native evidence of failure is an exit code in `launchctl list`
+  // and a stack trace in a log nobody opens (#277).
+  //
+  // So the command is run once, cheaply, BEFORE anything is registered. A
+  // refusal here leaves nothing installed, which is the honest outcome: no
+  // scheduler is a state the user can see, and a scheduler that fails nightly
+  // is one they cannot.
+  if (config.verifyArgs) {
+    const verify = opts.verify ?? defaultVerify;
+    try {
+      verify(config.command, config.verifyArgs);
+    } catch (err) {
+      const e = err as Error & { stderr?: Buffer };
+      const detail = e.stderr?.toString().trim() || e.message;
+      throw new Error(
+        `Refusing to schedule a command that does not run.\n` +
+          `  ${[config.command, ...(config.args ?? [])].join(" ")}\n` +
+          `The probe '${[config.command, ...config.verifyArgs].join(" ")}' failed: ${detail}\n` +
+          `Nothing was installed.`,
+      );
+    }
   }
 
   mkdirSync(paths.logDir, { recursive: true });
