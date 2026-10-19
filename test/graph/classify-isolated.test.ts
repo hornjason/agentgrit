@@ -1,7 +1,14 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, mock, beforeEach, afterAll } from "bun:test";
 import type { GraphNode } from "../../src/adapters/types";
 import type { Graph } from "../../src/graph/types";
 import { DOMAINS, writeGraphFile } from "../../src/graph/builder";
+import * as realInferenceModule from "../../src/adapters/inference";
+import * as realBuilderModule from "../../src/graph/builder";
+import { mockModuleScoped } from "../setup/module-mock";
+
+// Snapshot the real namespaces before anything mocks them — see test/setup/module-mock.ts.
+const REAL_INFERENCE = { ...realInferenceModule };
+const REAL_BUILDER = { ...realBuilderModule };
 
 function makeNode(id: string, domains: string[], overrides?: Partial<GraphNode>): GraphNode {
   return {
@@ -42,14 +49,26 @@ const mockInference = mock(() =>
   }),
 );
 
-mock.module("../../src/adapters/inference", () => ({
-  inference: mockInference,
-}));
+const restoreInference = mockModuleScoped(
+  "../../src/adapters/inference",
+  REAL_INFERENCE,
+  { inference: mockInference },
+);
 
-mock.module("../../src/graph/builder", () => ({
-  DOMAINS,
-  writeGraphFile: mock(() => {}),
-}));
+// The old call here replaced the whole of src/graph/builder with just DOMAINS and a
+// writeGraphFile stub, leaving its other fifteen exports undefined for every later
+// file in the run. Spreading REAL_BUILDER keeps them; restoreBuilder puts the real
+// writeGraphFile back when this file is done.
+const restoreBuilder = mockModuleScoped(
+  "../../src/graph/builder",
+  REAL_BUILDER,
+  { writeGraphFile: mock(() => {}) },
+);
+
+afterAll(() => {
+  restoreInference();
+  restoreBuilder();
+});
 
 describe("classifyIsolatedNodes", () => {
   beforeEach(() => {

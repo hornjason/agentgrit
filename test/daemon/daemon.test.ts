@@ -2,6 +2,7 @@ import { describe, test, expect, mock, beforeEach, afterAll } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "fs";
 import { join } from "path";
 import type { AgentGritConfig, Pattern } from "../../src/adapters/types";
+import { EXPECTED_DOCTOR_SECTIONS } from "../setup/doctor-sections";
 
 const TEST_DIR = "/tmp/agentgrit-daemon-test-" + process.pid;
 const SIGNAL_DIR = join(TEST_DIR, "signals");
@@ -296,6 +297,8 @@ describe("doctor dedup", () => {
     const report = await runDoctor(config);
     expect(report).toHaveProperty("sections");
     expect(report).toHaveProperty("overall");
-    expect(report.sections.length).toBe(9);
+    // Same contract as test/daemon/doctor.test.ts; see EXPECTED_DOCTOR_SECTIONS there
+    // for why this is a name list rather than the bare count it used to be.
+    expect(report.sections.map((s) => s.name)).toEqual([...EXPECTED_DOCTOR_SECTIONS]);
   });
 });
