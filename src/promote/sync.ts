@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkS
 import { dirname, join } from "path";
 import type { Rule } from "../adapters/types";
 import { keywordClassify } from "../graph/builder";
+import { canonicalRuleId, ruleFileName } from "../graph/rule-id";
 
 interface RuleDomainEntry {
   domains: string[];
@@ -17,7 +18,7 @@ interface RuleDomainsFile {
 export function writeRuleFile(rule: Rule, rulesDir: string): string {
   if (!existsSync(rulesDir)) mkdirSync(rulesDir, { recursive: true });
 
-  const filePath = join(rulesDir, `${rule.id}.md`);
+  const filePath = join(rulesDir, ruleFileName(rule.id));
   const content = [
     "---",
     `name: ${rule.id}`,
@@ -52,6 +53,13 @@ export function updateRuleDomains(
     file = { version: 1, reviewed: false, rules: {} };
   }
 
+  // The registry accumulated near-duplicate spellings of the same rule until
+  // it held 590 ids against 47 graph nodes. Writing a rule retires every
+  // other spelling of it, so one rule keeps one registry key.
+  const canonical = canonicalRuleId(rule.id);
+  for (const key of Object.keys(file.rules)) {
+    if (key !== rule.id && canonicalRuleId(key) === canonical) delete file.rules[key];
+  }
   file.rules[rule.id] = { domains, source: "auto" };
   atomicWrite(ruleDomainsPath, JSON.stringify(file, null, 2));
   return domains;
