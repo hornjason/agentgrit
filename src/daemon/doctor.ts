@@ -360,6 +360,17 @@ function checkConfig(config: AgentGritConfig): DoctorSection {
 
 // ── Integrity: Cross-reference validation ──
 
+/**
+ * The same filter the graph builder applies (see `discoverRuleFiles`). Index
+ * files like MEMORY.md and README.md are never nodes, so counting them here
+ * would report rules "missing from the graph" that are not rules at all.
+ */
+function isIndexableRuleFile(filename: string): boolean {
+  return filename.endsWith(".md")
+    && !filename.startsWith("MEMORY")
+    && !filename.startsWith("README");
+}
+
 function checkCrossReferences(config: AgentGritConfig): DoctorSection {
   const checks: CheckResult[] = [];
   const stateBase = join(config.signalDir, "..", "state");
@@ -377,13 +388,13 @@ function checkCrossReferences(config: AgentGritConfig): DoctorSection {
 
       // 1. Check rulesBase (if exists)
       if (existsSync(rulesBase)) {
-        const ruleFiles = readdirSync(rulesBase).filter((f) => f.endsWith(".md"));
+        const ruleFiles = readdirSync(rulesBase).filter(isIndexableRuleFile);
         ruleFiles.forEach((f) => allFileIds.add(f.replace(/\.md$/, "")));
       }
 
       // 2. Check memoryDir (if configured) — this is where the graph is built from
       if (config.memoryDir && existsSync(config.memoryDir)) {
-        const memoryFiles = readdirSync(config.memoryDir).filter((f) => f.endsWith(".md"));
+        const memoryFiles = readdirSync(config.memoryDir).filter(isIndexableRuleFile);
         memoryFiles.forEach((f) => allFileIds.add(f.replace(/\.md$/, "")));
       }
 

@@ -2,9 +2,9 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { existsSync, rmSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { getContextRules, sanitizeRuleText } from "../../src/graph/context";
-import { buildIndex } from "../../src/graph/bm25";
+import { buildIndex, searchIndex, searchIndexExpanded, stemToken, expandQueryTerms } from "../../src/graph/bm25";
 import { saveVectorCache } from "../../src/graph/embeddings";
-import { rrfMerge } from "../../src/graph/retrieval";
+import { rrfMerge, hybridRetrieve, hybridRetrieveWithFloor } from "../../src/graph/retrieval";
 import type { Graph } from "../../src/graph/types";
 import type { GraphNode } from "../../src/adapters/types";
 
@@ -118,6 +118,121 @@ describe("hybrid BM25+vector retrieval", () => {
     const result = await getContextRules(graph, index, ["testing"], 10, undefined, "verify source", cachePath);
     expect(result.length).toBe(1);
     expect(result[0].id).toBe("rule_x");
+  });
+});
+
+describe("hybridRetrieveWithFloor", () => {
+  /** Eight docs, one of which is the only node in the queried domain. */
+  function thinCorpus() {
+    const bodies: Array<[string, string, string]> = [
+      ["only_match", "deployment", "promote the release candidate to production"],
+      ["other_a", "ui", "look at the rendered page before calling it done"],
+      ["other_b", "testing", "write the failing regression test first"],
+      ["other_c", "memory", "rebuild the knowledge store before reading it back"],
+      ["other_d", "delivery", "commit after every working change"],
+      ["other_e", "security", "never swallow an error in a catch"],
+      ["other_f", "infra", "pin the tool version before using a newer flag"],
+      ["other_g", "scope", "verify before asserting anything at all"],
+    ];
+    const files = bodies.map(([id, , body]) => {
+      const f = join(TMP_DIR, `${id}.md`);
+      writeFileSync(f, body, "utf-8");
+      return f;
+    });
+    return {
+      index: buildIndex(files),
+      graph: makeGraph(bodies.map(([id, domain, body]) => makeNode(id, [domain], body))),
+    };
+  }
+
+  test("widens a thin result up to the floor", () => {
+    const { index, graph } = thinCorpus();
+    const query = "schema migration rollback";
+
+    const plain = hybridRetrieve(query, ["deployment"], graph, index, 15);
+    const floored = hybridRetrieveWithFloor(query, ["deployment"], graph, index, 15, 5);
+
+    expect(plain.length).toBeLessThan(5);
+    expect(floored.length).toBeGreaterThanOrEqual(5);
+    // Everything the un-floored call found is still there, and still first.
+    expect(floored.slice(0, plain.length).map(r => r.id)).toEqual(plain.map(r => r.id));
+  });
+
+  test("top-up never outscores a real domain match", () => {
+    const { index, graph } = thinCorpus();
+    const floored = hybridRetrieveWithFloor("schema migration rollback", ["deployment"], graph, index, 15, 5);
+    const scores = floored.map(r => r.rrfScore);
+    expect([...scores].sort((a, b) => b - a)).toEqual(scores);
+    expect(floored[0].id).toBe("only_match");
+  });
+
+  test("top-up is query-ranked, not a fixed list", () => {
+    const { index, graph } = thinCorpus();
+    const a = hybridRetrieveWithFloor("rendered page", ["deployment"], graph, index, 15, 5);
+    const b = hybridRetrieveWithFloor("failing regression", ["deployment"], graph, index, 15, 5);
+    expect(a.map(r => r.id)).not.toEqual(b.map(r => r.id));
+    expect(a.map(r => r.id).indexOf("other_a")).toBeLessThan(b.map(r => r.id).indexOf("other_a"));
+    expect(b.map(r => r.id).indexOf("other_b")).toBeLessThan(a.map(r => r.id).indexOf("other_b"));
+  });
+
+  test("floor of zero leaves hybridRetrieve untouched", () => {
+    const { index, graph } = thinCorpus();
+    const plain = hybridRetrieve("schema migration rollback", ["deployment"], graph, index, 15);
+    const floored = hybridRetrieveWithFloor("schema migration rollback", ["deployment"], graph, index, 15, 0);
+    expect(floored).toEqual(plain);
+  });
+
+  test("an empty corpus is still empty — the floor invents nothing", () => {
+    const empty = buildIndex([]);
+    const graph = makeGraph([]);
+    expect(hybridRetrieveWithFloor("anything", ["deployment"], graph, empty, 15, 5)).toEqual([]);
+  });
+
+  test("the floor never exceeds the caller's limit", () => {
+    const { index, graph } = thinCorpus();
+    const floored = hybridRetrieveWithFloor("schema migration rollback", ["deployment"], graph, index, 3, 5);
+    expect(floored.length).toBeLessThanOrEqual(3);
+  });
+});
+
+describe("stem-expanded BM25", () => {
+  test("stemToken collapses inflections onto a shared stem", () => {
+    expect(stemToken("measurements")).toBe("measur");
+    expect(stemToken("measure")).toBe("measur");
+    expect(stemToken("asserting")).toBe(stemToken("asserted"));
+    expect(stemToken("rebuilds")).toBe(stemToken("rebuild"));
+    // Short words are left alone rather than mangled into collisions.
+    expect(stemToken("less")).toBe("less");
+    expect(stemToken("deploy")).not.toBe(stemToken("delete"));
+  });
+
+  test("expandQueryTerms finds near misses and skips exact hits", () => {
+    const f = join(TMP_DIR, "expand.md");
+    writeFileSync(f, "record the measurements before asserting the rebuild", "utf-8");
+    const index = buildIndex([f]);
+
+    const expanded = expandQueryTerms(index, ["measure", "rebuild"]);
+    expect(expanded).toContain("measurements");
+    // "rebuild" is in the vocabulary verbatim, so it is the caller's exact hit.
+    expect(expanded).not.toContain("rebuild");
+  });
+
+  test("searchIndexExpanded finds a doc exact search misses", () => {
+    const f1 = join(TMP_DIR, "doc_measure.md");
+    writeFileSync(f1, "record the measurements before calling it done", "utf-8");
+    const f2 = join(TMP_DIR, "doc_other.md");
+    writeFileSync(f2, "promote the release candidate to production", "utf-8");
+    const index = buildIndex([f1, f2]);
+
+    expect(searchIndex(index, "measure", 10).map(r => r.id)).toEqual([]);
+    expect(searchIndexExpanded(index, "measure", 10).map(r => r.id)).toEqual(["doc_measure"]);
+  });
+
+  test("searchIndexExpanded leaves a satisfied exact search alone", () => {
+    const f = join(TMP_DIR, "doc_exact.md");
+    writeFileSync(f, "promote the release candidate to production", "utf-8");
+    const index = buildIndex([f]);
+    expect(searchIndexExpanded(index, "release", 1)).toEqual(searchIndex(index, "release", 1));
   });
 });
 

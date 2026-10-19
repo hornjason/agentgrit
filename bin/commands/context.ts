@@ -1,7 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { dirname, join } from "path";
 import { execSync } from "child_process";
-import { homedir } from "os";
 import { getBaseDir, resolveMemoryDir, resolveSignalDir, graphContextFile } from "../../src/adapters/paths";
 import { readGraph } from "../../src/graph/builder";
 import { buildIndexFromDir } from "../../src/graph/bm25";
@@ -22,8 +21,6 @@ import { filterContradictions } from "../../src/graph/contradictions";
 import { loadVectorCache } from "../../src/graph/embeddings";
 import { diagnoseBM25, tokenize } from "../../src/graph/bm25";
 import { RRF_WEIGHTS, type RRFWeights } from "../../src/graph/retrieval";
-
-const GRAPH_CONTEXT_PATH = graphContextFile();
 
 function parseArgs(args: string[]): { text?: string; issue?: number; file?: string; limit: number; verbose: boolean; strategy: RetrievalStrategy } {
   let text: string | undefined;
@@ -87,6 +84,10 @@ function resolveInputText(opts: { text?: string; issue?: number; file?: string }
 
 async function doRefresh(args: string[]): Promise<void> {
   const base = getBaseDir();
+  // Resolved per call, not at module load, so the file this writes is the one
+  // a session resolving graphContextFile() reads — even when the base dir or
+  // the configured path changes after this module is imported.
+  const graphContextPath = graphContextFile();
   if (!existsSync(base)) {
     console.error("  agentgrit not initialized. Run 'agentgrit init' first.");
     process.exit(1);
@@ -194,20 +195,20 @@ async function doRefresh(args: string[]): Promise<void> {
 
   const markdown = formatGraphContext(rules, domains);
 
-  const dir = dirname(GRAPH_CONTEXT_PATH);
+  const dir = dirname(graphContextPath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
-  const existing = existsSync(GRAPH_CONTEXT_PATH) ? readFileSync(GRAPH_CONTEXT_PATH, "utf-8") : "";
+  const existing = existsSync(graphContextPath) ? readFileSync(graphContextPath, "utf-8") : "";
   const merged = mergeGraphContextMarkdown(existing, markdown, 15);
   const filtered = filterContradictions(merged);
-  writeFileSync(GRAPH_CONTEXT_PATH, filtered, "utf-8");
+  writeFileSync(graphContextPath, filtered, "utf-8");
 
   const totalContextLines = merged.split("\n").length;
   writeSessionContext(rules, domains, domainSource, totalContextLines);
 
   console.log(`  Domains: [${domains.join(", ")}]`);
   console.log(`  Rules: ${rules.length}`);
-  console.log(`  Output: ${GRAPH_CONTEXT_PATH}`);
+  console.log(`  Output: ${graphContextPath}`);
   console.log(`  Lines: ${totalContextLines}`);
 }
 

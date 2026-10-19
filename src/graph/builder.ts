@@ -1,8 +1,8 @@
 import { existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, resolve } from "path";
 import { homedir } from "os";
 import { createHash } from "crypto";
-import { getBaseDir, stateDir, ruleDomainsFile } from "../adapters/paths";
+import { getBaseDir, stateDir, ruleDomainsFile, rulesDir as promotedRulesDir } from "../adapters/paths";
 import type { GraphNode, GraphEdge, Rule } from "../adapters/types";
 import type { Graph } from "./types";
 import { propagateDomains } from "./domain-propagation";
@@ -313,6 +313,34 @@ function discoverRuleFiles(rulesDir: string): MemoryFile[] {
     });
 }
 
+/**
+ * Every markdown file the graph indexes: the directory the caller names, plus
+ * the promoted-rules directory.
+ *
+ * Callers pass the memory directory, which is where raw memories live. Rules
+ * promoted out of them are written somewhere else entirely (`rulesDir()`), and
+ * until #258 nothing ever indexed that directory — 44 of 47 promoted rules
+ * were invisible to every session and to retrieval.
+ *
+ * The named directory wins on id collisions, and when the two resolve to the
+ * same place the second pass is skipped, so a caller that already points at
+ * the rules directory sees exactly what it saw before.
+ */
+function discoverIndexedFiles(primaryDir: string): MemoryFile[] {
+  const files = discoverRuleFiles(primaryDir);
+
+  const rulesPath = promotedRulesDir();
+  if (resolve(rulesPath) === resolve(primaryDir)) return files;
+
+  const seen = new Set(files.map((f) => f.id));
+  for (const file of discoverRuleFiles(rulesPath)) {
+    if (seen.has(file.id)) continue;
+    seen.add(file.id);
+    files.push(file);
+  }
+  return files;
+}
+
 // ── Same-Domain Edges ──
 
 function buildSameDomainEdges(
@@ -441,8 +469,8 @@ export function buildCoOccurrenceEdges(
 
 // ── Build Graph ──
 
-export async function buildGraph(rulesDir: string, stateOutputDir?: string, ruleDomainsPath?: string): Promise<Graph> {
-  const files = discoverRuleFiles(rulesDir);
+export async function buildGraph(memoryDir: string, stateOutputDir?: string, ruleDomainsPath?: string): Promise<Graph> {
+  const files = discoverIndexedFiles(memoryDir);
   const existingGraph = readGraph();
 
   const cachedHashes = new Map<string, { domains: string[]; hash: string; domainSource?: GraphNode["domainSource"] }>();
@@ -578,12 +606,12 @@ export async function buildGraph(rulesDir: string, stateOutputDir?: string, rule
 // ── Build Graph with AI domain detection ──
 
 export async function buildGraphWithAI(
-  rulesDir: string,
+  memoryDir: string,
   detector: DomainDetector,
   stateOutputDir?: string,
   ruleDomainsPath?: string,
 ): Promise<Graph> {
-  const files = discoverRuleFiles(rulesDir);
+  const files = discoverIndexedFiles(memoryDir);
   const existingGraph = readGraph();
 
   const cachedHashes = new Map<string, { domains: string[]; hash: string; domainSource?: GraphNode["domainSource"] }>();

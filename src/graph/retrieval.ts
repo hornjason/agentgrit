@@ -1,6 +1,6 @@
 import type { Graph, RankedCluster, BM25Index, RetrievalResult } from "./types";
 import { queryGraph } from "./query";
-import { searchIndex } from "./bm25";
+import { searchIndex, searchIndexExpanded } from "./bm25";
 import { loadConfig } from "../adapters/paths";
 
 // RRF constant (standard value from Cormack et al.)
@@ -92,6 +92,25 @@ export function rrfMerge(
 
 // ── Hybrid Retrieve ──
 
+function flattenClusters(clusters: RankedCluster[]): Array<{ id: string; rank: number }> {
+  const seen = new Set<string>();
+  const list: Array<{ id: string; rank: number }> = [];
+  let rank = 1;
+  for (const c of clusters) {
+    if (!seen.has(c.primary.id)) {
+      list.push({ id: c.primary.id, rank: rank++ });
+      seen.add(c.primary.id);
+    }
+    for (const conn of c.connected) {
+      if (!seen.has(conn.node.id)) {
+        list.push({ id: conn.node.id, rank: rank++ });
+        seen.add(conn.node.id);
+      }
+    }
+  }
+  return list;
+}
+
 export function hybridRetrieve(
   query: string,
   domains: string[],
@@ -106,22 +125,7 @@ export function hybridRetrieve(
   const bm25List = bm25Results.map((r, i) => ({ id: r.id, rank: i + 1 }));
 
   // Step 2: Graph domain traversal (top 50) — include connected nodes
-  const clusters: RankedCluster[] = queryGraph(graph, domains, 50);
-  const graphSeen = new Set<string>();
-  const graphList: Array<{ id: string; rank: number }> = [];
-  let graphRank = 1;
-  for (const c of clusters) {
-    if (!graphSeen.has(c.primary.id)) {
-      graphList.push({ id: c.primary.id, rank: graphRank++ });
-      graphSeen.add(c.primary.id);
-    }
-    for (const conn of c.connected) {
-      if (!graphSeen.has(conn.node.id)) {
-        graphList.push({ id: conn.node.id, rank: graphRank++ });
-        graphSeen.add(conn.node.id);
-      }
-    }
-  }
+  const graphList = flattenClusters(queryGraph(graph, domains, 50));
 
   if (bm25List.length === 0 && graphList.length === 0 && !vectorList?.length) return [];
 
@@ -140,4 +144,73 @@ export function hybridRetrieve(
     graphRank: entry.graphRank,
     vectorRank: entry.vectorRank,
   }));
+}
+
+// ── Hybrid Retrieve with a Floor ──
+
+/**
+ * `hybridRetrieve`, widened when it comes back thin (#258).
+ *
+ * `hybridRetrieve` only ever sees two pools: documents whose exact tokens match
+ * the query, and nodes whose `domains` literally overlap the caller's. When a
+ * session asks for domains only a couple of nodes carry — the state #258 was
+ * stuck in — both pools are nearly empty and the caller gets two results no
+ * matter how large the corpus is.
+ *
+ * The top-up re-runs the same merge against the whole corpus: stem-expanded
+ * lexical search for query signal, domain-agnostic graph ranking for the rest.
+ * It is correlation-ranked, not a fixed list — change the query and the top-up
+ * reorders. Top-up scores are scaled below the weakest primary hit so a real
+ * domain match is never displaced by a floor filler.
+ */
+export function hybridRetrieveWithFloor(
+  query: string,
+  domains: string[],
+  graph: Graph,
+  index: BM25Index,
+  limit: number = 15,
+  floor: number = 0,
+  vectorList?: Array<{ id: string; rank: number }>,
+  weights?: RRFWeights,
+): RetrievalResult[] {
+  const primary = hybridRetrieve(query, domains, graph, index, limit, vectorList, weights);
+
+  const target = Math.min(limit, floor);
+  if (primary.length >= target) return primary;
+
+  const poolSize = Math.max(limit, target * 4);
+  const lexList = searchIndexExpanded(index, query, poolSize)
+    .map((r, i) => ({ id: r.id, rank: i + 1 }));
+  // Domain-agnostic: queryGraph with no domains ranks on severity and edge
+  // strength, which is what is left once domain overlap has nothing to say.
+  const graphList = flattenClusters(queryGraph(graph, [], poolSize));
+
+  if (lexList.length === 0 && graphList.length === 0) return primary;
+
+  const merged = rrfMerge(lexList, graphList, vectorList, weights ?? RRF_WEIGHTS);
+  const seen = new Set(primary.map(r => r.id));
+  const extras = Array.from(merged.values())
+    .filter(e => !seen.has(e.id))
+    .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+  if (extras.length === 0) return primary;
+
+  // Keep every primary hit ahead of every top-up.
+  const weakestPrimary = primary.length > 0 ? primary[primary.length - 1].rrfScore : 0;
+  const strongestExtra = extras[0].score;
+  const scale = primary.length > 0 && strongestExtra > 0
+    ? (weakestPrimary * 0.9) / strongestExtra
+    : 1;
+
+  const floored = [...primary];
+  for (const extra of extras) {
+    if (floored.length >= target) break;
+    floored.push({
+      id: extra.id,
+      rrfScore: extra.score * scale,
+      bm25Rank: extra.bm25Rank,
+      graphRank: extra.graphRank,
+      vectorRank: extra.vectorRank,
+    });
+  }
+  return floored;
 }

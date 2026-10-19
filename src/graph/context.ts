@@ -12,7 +12,7 @@ import { Tier, type Rule, type EmbeddingProvider } from "../adapters/types";
 import { loadConfig } from "../adapters/paths";
 import { searchIndex, tokenize } from "./bm25";
 import { queryTrajectoriesSync } from "../detect/trajectories";
-import { hybridRetrieve, type RRFWeights } from "./retrieval";
+import { hybridRetrieveWithFloor, type RRFWeights } from "./retrieval";
 import { loadVectorCache, rankByVectorSimilarity } from "./embeddings";
 import { cosine } from "./embedder";
 import { loadPatterns, loadHybridPatterns } from "./generate-patterns";
@@ -25,6 +25,16 @@ import { loadRuleStats, type RuleStats } from "../promote/rules";
 
 const _cfg = loadConfig();
 const DEFAULT_DOMAINS = _cfg.thresholds?.defaultDomains ?? ["testing", "delivery", "process"];
+
+/**
+ * Fewest context rules a session is worth injecting (#258).
+ *
+ * Below this the injected block stops being context and becomes noise: the same
+ * two or three rules every session, regardless of what the session is doing.
+ * `getContextRules` treats this as a floor, not a target — it only applies while
+ * the corpus still has eligible candidates and the caller's own limit allows it.
+ */
+export const MIN_CONTEXT_RULES = 5;
 
 // ── Domain Detection from Text ──
 
@@ -260,7 +270,15 @@ export async function getContextRules(
     }
   }
 
-  let candidates = hybridRetrieve(searchText, domains, graph, index, fetchLimit, vectorList, rrfWeights);
+  // Ask for more candidates than the floor needs — the type, registry and
+  // eviction filters below all shrink this list, and a floor measured before
+  // them is not a floor.
+  const floorTarget = Math.min(limit, MIN_CONTEXT_RULES);
+  const candidateFloor = Math.min(fetchLimit, floorTarget * 3);
+
+  let candidates = hybridRetrieveWithFloor(
+    searchText, domains, graph, index, fetchLimit, candidateFloor, vectorList, rrfWeights,
+  );
 
   // Fallback: if hybrid returns nothing (no domain matches + no BM25 hits), use BM25-only
   if (candidates.length === 0) {
@@ -297,47 +315,57 @@ export async function getContextRules(
     .map(c => [c.id, c.rrfScore * nodeTypeWeight(c.id) * liftFactor(c.id)] as [string, number])
     .sort((a, b) => b[1] - a[1]);
 
-  // 2b. Per-domain diversity cap — prevent any single domain from taking all slots
-  const domainSet = new Set<string>();
-  for (const [id] of scored) {
-    const d = graph.nodes[id]?.domains[0];
-    if (d) domainSet.add(d);
-  }
-  const distinctDomains = Math.max(domainSet.size, 1);
-  const perDomainCap = Math.ceil(limit / distinctDomains);
-
-  const ranked: Array<[string, number]> = [];
-  const domainSlots: Record<string, number> = {};
-  for (const entry of scored) {
-    if (ranked.length >= limit) break;
-    const d = graph.nodes[entry[0]]?.domains[0] || "_none";
-    const used = domainSlots[d] || 0;
-    if (used >= perDomainCap) continue;
-    domainSlots[d] = used + 1;
-    ranked.push(entry);
-  }
-
-  // 3. Type-allowlist — defense-in-depth filter
+  // 2b. Type-allowlist and registry suppression — defense-in-depth filters.
+  //    These run before slot allocation: a slot handed to a node the allowlist
+  //    drops two steps later is a slot the floor never gets back.
   const ALLOWED_TYPES = new Set(["feedback", "steering", "success", "learned"]);
   const INDEX_NODE_PATTERN = /^(MEMORY|README|INDEX)$/i;
-  const filtered = ranked.filter(([id]) => {
+  const suppressedIds = getFilteredRuleIds(["evicted", "graduated"]);
+  const eligible = scored.filter(([id]) => {
     if (INDEX_NODE_PATTERN.test(id)) return false;
+    if (suppressedIds.has(id)) return false;
     const t = graph.nodes[id]?.type;
     if (!t) return true;
     return ALLOWED_TYPES.has(t);
   });
 
-  // 4. Auto-eviction filter — exclude low-value rules from injection
-  const suppressedIds = getFilteredRuleIds(["evicted", "graduated"]);
-  const afterRegistryFilter = filtered.filter(([id]) => !suppressedIds.has(id));
+  // 2c. Per-domain diversity cap — prevent any single domain from taking all
+  //     slots. Entries the cap defers are held, not discarded: diversity decides
+  //     who gets a slot first, it does not decide that the slot goes empty.
+  const domainOf = (id: string): string => graph.nodes[id]?.domains[0] || "_none";
+  const domainSet = new Set(eligible.map(([id]) => domainOf(id)));
+  const perDomainCap = Math.max(1, Math.ceil(limit / Math.max(domainSet.size, 1)));
 
+  const ranked: Array<[string, number]> = [];
+  const deferred: Array<[string, number]> = [];
+  const domainSlots: Record<string, number> = {};
+  for (const entry of eligible) {
+    const d = domainOf(entry[0]);
+    const used = domainSlots[d] || 0;
+    if (ranked.length >= limit || used >= perDomainCap) {
+      deferred.push(entry);
+      continue;
+    }
+    domainSlots[d] = used + 1;
+    ranked.push(entry);
+  }
+  // The cap stays hard up to the floor only. Starving a session down to two
+  // rules to keep a domain quota is the #258 failure; starving it from fifteen
+  // to eleven is the quota doing its job.
+  let deferredCursor = 0;
+  while (ranked.length < floorTarget && deferredCursor < deferred.length) {
+    ranked.push(deferred[deferredCursor++]);
+  }
+  ranked.sort((a, b) => b[1] - a[1]);
+
+  // 3. Auto-eviction filter — exclude low-value rules from injection
   const allowlist = loadEvictionAllowlist();
   const historyPath = statePath(SESSION_HISTORY_FILE);
   const totalSessions = existsSync(historyPath)
     ? readFileSync(historyPath, "utf-8").split("\n").filter(l => l.trim()).length
     : 0;
   const newlyEvicted: Array<{ id: string; eviction: { trigger: EvictionTrigger; reason: string }; stats: RuleStats }> = [];
-  const afterEviction = afterRegistryFilter.filter(([id]) => {
+  const survivesEviction = ([id]: [string, number]): boolean => {
     const stats = ruleStatsMap.get(id);
     if (!stats) return true;
     const eviction = shouldEvict(stats, allowlist, totalSessions);
@@ -346,7 +374,17 @@ export async function getContextRules(
       return false;
     }
     return true;
-  });
+  };
+  const afterEviction = ranked.filter(survivesEviction);
+
+  // 3b. Floor — eviction can take the result back under MIN_CONTEXT_RULES even
+  //     when eligible candidates are still waiting. Pull them, in score order,
+  //     through the same eviction check.
+  while (afterEviction.length < floorTarget && deferredCursor < deferred.length) {
+    const entry = deferred[deferredCursor++];
+    if (survivesEviction(entry)) afterEviction.push(entry);
+  }
+  afterEviction.sort((a, b) => b[1] - a[1]);
 
   for (const { id, eviction, stats } of newlyEvicted) {
     transitionRule(id, "evicted", eviction.reason, "context-refresh-inline");

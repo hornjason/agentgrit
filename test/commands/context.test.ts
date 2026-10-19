@@ -1,12 +1,25 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { existsSync, rmSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
+import { graphContextFile } from "../../src/adapters/paths";
 
 const TMP_DIR = join(import.meta.dir, ".tmp-context-test");
-const GRAPH_CONTEXT_PATH = join(homedir(), ".claude", "MEMORY", "STATE", "GRAPH-CONTEXT.md");
 
 const BIN = join(import.meta.dir, "../../bin/agentgrit.ts");
+
+/**
+ * Resolved the same way a session resolves it, against the sandboxed base dir
+ * these tests point AGENTGRIT_DIR at. Hardcoding a path here is what let these
+ * assertions read a stale file the command had never written to (#258).
+ */
+function graphContextPath(): string {
+  return graphContextFile();
+}
+
+/** The rule ids GRAPH-CONTEXT.md actually carries, ignoring the timestamp line. */
+function ruleIds(content: string): string[] {
+  return (content.match(/- \*\*(\S+?)\*\*/g) ?? []).sort();
+}
 
 beforeEach(() => {
   if (existsSync(TMP_DIR)) rmSync(TMP_DIR, { recursive: true });
@@ -114,8 +127,8 @@ describe("context refresh", () => {
     const result = await runContext("--text", "Fix BM25 scoring");
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Rules:");
-    expect(existsSync(GRAPH_CONTEXT_PATH)).toBe(true);
-    const content = readFileSync(GRAPH_CONTEXT_PATH, "utf-8");
+    expect(existsSync(graphContextPath())).toBe(true);
+    const content = readFileSync(graphContextPath(), "utf-8");
     expect(content).toContain("# Graph Context");
     expect(content).toContain("Context Rules (correlation-ranked)");
   });
@@ -127,7 +140,7 @@ describe("context refresh", () => {
     const result = await runContext("--file", testFile);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Rules:");
-    const content = readFileSync(GRAPH_CONTEXT_PATH, "utf-8");
+    const content = readFileSync(graphContextPath(), "utf-8");
     expect(content).toContain("# Graph Context");
   });
 
@@ -136,19 +149,27 @@ describe("context refresh", () => {
     const result = await runContext();
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Rules:");
-    const content = readFileSync(GRAPH_CONTEXT_PATH, "utf-8");
+    const content = readFileSync(graphContextPath(), "utf-8");
     expect(content).toContain("# Graph Context");
   });
 
   test("different --text produces different context", async () => {
     seedGraph();
     await runContext("--text", "Fix BM25 scoring algorithm");
-    const content1 = readFileSync(GRAPH_CONTEXT_PATH, "utf-8");
+    const content1 = readFileSync(graphContextPath(), "utf-8");
+
+    // Start the second run from a clean file: merging the previous run in
+    // would make the two outputs differ no matter what the input selected.
+    rmSync(graphContextPath());
 
     await runContext("--text", "Deploy container to production");
-    const content2 = readFileSync(GRAPH_CONTEXT_PATH, "utf-8");
+    const content2 = readFileSync(graphContextPath(), "utf-8");
 
     expect(content1).not.toBe(content2);
+    // Bytes alone differ on the Generated timestamp, which says nothing about
+    // the input. The rules themselves have to differ.
+    expect(ruleIds(content1).length).toBeGreaterThan(0);
+    expect(ruleIds(content1)).not.toEqual(ruleIds(content2));
   });
 
   test("writes session-context.json alongside GRAPH-CONTEXT.md", async () => {
@@ -161,11 +182,11 @@ describe("context refresh", () => {
     expect(session.domains).toBeInstanceOf(Array);
   });
 
-  test("nonsense input still produces >=5 rules via fallback", async () => {
+  test("nonsense input still produces at least one rule via fallback", async () => {
     seedGraph();
     const result = await runContext("--text", "xyzzy foobar quux blorp");
     expect(result.exitCode).toBe(0);
-    const content = readFileSync(GRAPH_CONTEXT_PATH, "utf-8");
+    const content = readFileSync(graphContextPath(), "utf-8");
     expect(content).toContain("# Graph Context");
     const ruleMatches = content.match(/- \*\*\S+\*\*/g) || [];
     expect(ruleMatches.length).toBeGreaterThanOrEqual(1);

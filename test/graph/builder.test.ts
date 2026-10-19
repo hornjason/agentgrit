@@ -223,6 +223,60 @@ Run make rebuild to deploy.`);
   });
 });
 
+describe("buildGraph rules-directory indexing", () => {
+  // AGENTGRIT_DIR is TMP_DIR for every test here, so the promoted-rules
+  // directory the path authority resolves is RULES_DIR. Passing a *different*
+  // directory as the first argument is what separates the two sources.
+  const MEMORY_DIR = join(TMP_DIR, "memory");
+
+  function writeMemory(id: string, content: string): void {
+    writeFileSync(join(MEMORY_DIR, `${id}.md`), content, "utf-8");
+  }
+
+  beforeEach(() => {
+    mkdirSync(MEMORY_DIR, { recursive: true });
+  });
+
+  test("indexes rule files from the rules directory alongside the passed directory", async () => {
+    writeMemory("feedback_memory_rule", `---
+name: memory-rule
+description: deploy sequence
+---
+Run make rebuild before deploying.`);
+
+    writeRule("feedback_promoted_rule", `---
+name: promoted-rule
+description: Stay focused
+---
+Keep minimal scope, don't add unrequested features, stay focused.`);
+
+    const graph = await buildGraph(MEMORY_DIR, STATE_DIR);
+
+    expect(graph.nodes["feedback_memory_rule"]).toBeDefined();
+    expect(graph.nodes["feedback_promoted_rule"]).toBeDefined();
+    expect(graph.nodeCount).toBe(2);
+  });
+
+  test("the passed directory wins when the same id exists in both", async () => {
+    writeMemory("feedback_shared", `---
+name: memory-copy
+description: deploy sequence
+---
+Run make rebuild before deploying.`);
+
+    writeRule("feedback_shared", `---
+name: rules-copy
+description: deploy sequence
+---
+Run make rebuild before deploying.`);
+
+    const graph = await buildGraph(MEMORY_DIR, STATE_DIR);
+
+    expect(graph.nodeCount).toBe(1);
+    expect(graph.nodes["feedback_shared"].name).toBe("memory-copy");
+  });
+});
+
 describe("updateGraph", () => {
   test("adds new rules to existing graph", () => {
     const graph: Graph = {

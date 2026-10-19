@@ -137,6 +137,91 @@ export function searchIndex(
     .slice(0, limit);
 }
 
+// ── Morphological Expansion ──
+
+/**
+ * Suffixes stripped, longest first, repeatedly. Crude on purpose: the point is
+ * to make "measure" and "measurements" collide, not to be a real stemmer.
+ */
+const SUFFIXES = ["ements", "ement", "ation", "ingly", "ness", "ment", "able", "ible", "ing", "ers", "ies", "est", "ed", "es", "er", "ly", "s", "e"];
+const MIN_STEM_LENGTH = 4;
+
+export function stemToken(token: string): string {
+  let stem = token;
+  let stripped = true;
+  while (stripped) {
+    stripped = false;
+    for (const suffix of SUFFIXES) {
+      if (stem.length - suffix.length < MIN_STEM_LENGTH) continue;
+      if (!stem.endsWith(suffix)) continue;
+      stem = stem.slice(0, -suffix.length);
+      stripped = true;
+      break;
+    }
+  }
+  return stem;
+}
+
+/**
+ * Vocabulary terms that share a stem with a query term but are not the query
+ * term itself. Exact matches are the caller's job — these are the near misses.
+ */
+export function expandQueryTerms(index: BM25Index, queryTerms: string[]): string[] {
+  const exact = new Set(queryTerms);
+  const wanted = new Set<string>();
+  for (const term of queryTerms) {
+    const stem = stemToken(term);
+    if (stem.length < MIN_STEM_LENGTH) continue;
+    wanted.add(stem);
+  }
+  if (wanted.size === 0) return [];
+
+  const expanded: string[] = [];
+  for (const vocabTerm of Object.keys(index.vocabulary)) {
+    if (exact.has(vocabTerm)) continue;
+    if (wanted.has(stemToken(vocabTerm))) expanded.push(vocabTerm);
+  }
+  return expanded;
+}
+
+/** Expanded-term contribution, discounted so an exact hit always outranks it. */
+const EXPANSION_WEIGHT = 0.5;
+
+/**
+ * `searchIndex`, plus stem-matched terms when the exact search comes up short.
+ *
+ * Used by the retrieval floor (#258): when a task description shares no exact
+ * vocabulary with the rule corpus, exact BM25 returns nothing and the floor has
+ * no query signal to rank by. Expansion gives it one. Exact behaviour is
+ * untouched whenever the exact search already fills the limit.
+ */
+export function searchIndexExpanded(
+  index: BM25Index,
+  query: string,
+  limit: number = 15,
+): SearchResult[] {
+  const exact = searchIndex(index, query, limit);
+  if (exact.length >= limit) return exact;
+
+  const queryTerms = tokenize(query);
+  if (queryTerms.length === 0) return exact;
+
+  const expandedTerms = expandQueryTerms(index, queryTerms);
+  if (expandedTerms.length === 0) return exact;
+
+  const scores = new Map<string, number>(exact.map(r => [r.id, r.score]));
+  for (const doc of index.docs) {
+    const score = scoreDoc(doc, expandedTerms, index.vocabulary, index.avgDocLen) * EXPANSION_WEIGHT;
+    if (score <= 0) continue;
+    scores.set(doc.id, (scores.get(doc.id) ?? 0) + score);
+  }
+
+  return Array.from(scores.entries())
+    .map(([id, score]) => ({ id, score }))
+    .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
+    .slice(0, limit);
+}
+
 // ── BM25 Diagnostic ──
 
 export interface BM25Diagnostic {
