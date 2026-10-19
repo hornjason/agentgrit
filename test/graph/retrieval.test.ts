@@ -103,15 +103,29 @@ describe("hybridRetrieve", () => {
     expect(results).toEqual([]);
   });
 
-  test("works with BM25 only (empty graph)", () => {
+  test("works with BM25 only (no domain overlap)", () => {
     const f1 = writeDoc("rule.md", "deploy containers to production");
     const index = buildIndex([f1]);
-    const graph = makeGraph([]);
+    // The node exists but carries none of the queried domains, so BM25 is the
+    // only signal that fires. It used to be written with an empty graph, which
+    // since #258 means the document cannot be retrieved at all — see
+    // "a document the graph has no node for is not a result" below.
+    const graph = makeGraph([makeNode("rule", ["memory"])]);
 
     const results = hybridRetrieve("deploy production", ["deployment"], graph, index);
     expect(results.length).toBe(1);
     expect(results[0].bm25Rank).toBeDefined();
     expect(results[0].graphRank).toBeUndefined();
+  });
+
+  test("a document the graph has no node for is not a result", () => {
+    // 648 indexed documents against 47 nodes was the live state in #258. A hit
+    // with no node has no domain, no severity and no text, so every consumer
+    // rendered it as its own filename — five of those are not five rules.
+    const f1 = writeDoc("rule.md", "deploy containers to production");
+    const index = buildIndex([f1]);
+
+    expect(hybridRetrieve("deploy production", ["deployment"], makeGraph([]), index)).toEqual([]);
   });
 
   test("works with graph only (empty index)", () => {
@@ -144,9 +158,12 @@ describe("hybridRetrieve", () => {
   test("RRF score follows 1/(k+rank) formula", () => {
     const f1 = writeDoc("only_bm25.md", "deploy production containers rebuild");
     const index = buildIndex([f1]);
-    const graph = makeGraph([]);
+    // The node exists — since #258 a document without one is not retrievable
+    // at all — but carries none of the queried domains, so the graph
+    // contributes no rank and BM25 is the sole term in the sum.
+    const graph = makeGraph([makeNode("only_bm25", ["deployment"])]);
 
-    const results = hybridRetrieve("deploy", [], graph, index);
+    const results = hybridRetrieve("deploy", ["ui"], graph, index);
     expect(results.length).toBe(1);
 
     // rank=1, RRF_K=60, bm25 weight from config: score = weight * 1/(60+1)

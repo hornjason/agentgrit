@@ -324,7 +324,16 @@ export async function getContextRules(
   const eligible = scored.filter(([id]) => {
     if (INDEX_NODE_PATTERN.test(id)) return false;
     if (suppressedIds.has(id)) return false;
-    const t = graph.nodes[id]?.type;
+    // A candidate with no node has no text: step 5 falls back to printing the
+    // id, and the session gets a bullet reading "feedback_smoke_test_pipelines"
+    // and nothing else. The index and the graph are built from overlapping but
+    // unequal file sets, so BM25 routinely hits documents the graph never
+    // indexed — 601 of them in the install #258 was found on. Drop them here
+    // and let the floor find a candidate that can actually be read.
+    const node = graph.nodes[id];
+    if (!node) return false;
+    if (!node.description && !node.name) return false;
+    const t = node.type;
     if (!t) return true;
     return ALLOWED_TYPES.has(t);
   });
@@ -1098,12 +1107,18 @@ export function mergeGraphContextMarkdown(
   const existingRules = parseRulesFromMarkdown(existing);
   const incomingRules = parseRulesFromMarkdown(incoming);
 
+  // Incoming first, then whatever the previous file had that this run did not
+  // retrieve. A Map preserves insertion order and the cap slices off the end,
+  // so seeding it with the existing rules made the first file ever written
+  // permanent: its entries held every slot and newly-retrieved rules queued up
+  // past the cap (#258). Carry-over is continuity, not seniority.
   const merged = new Map<string, ParsedRule>();
 
-  for (const rule of existingRules) {
+  for (const rule of incomingRules) {
     merged.set(rule.id, rule);
   }
-  for (const rule of incomingRules) {
+  for (const rule of existingRules) {
+    if (merged.has(rule.id)) continue;
     merged.set(rule.id, rule);
   }
 

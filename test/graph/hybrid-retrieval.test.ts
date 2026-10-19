@@ -195,6 +195,59 @@ describe("hybridRetrieveWithFloor", () => {
   });
 });
 
+describe("retrieval is bounded by the graph", () => {
+  /**
+   * The index and the graph are built from overlapping but unequal file sets.
+   * On the install #258 was found on that was 648 indexed documents against 47
+   * nodes, so BM25's top hits were routinely documents with no node — nothing
+   * downstream could read a domain, a severity or even a line of text off
+   * them, and they filled the result in place of rules that had all three.
+   *
+   * A document with no node is not a retrieval result. Counting one toward the
+   * floor is how a session ends up with five entries and no rules.
+   */
+  function splitCorpus() {
+    const bodies: Array<[string, string]> = [
+      ["known_rule", "migrate the invoice schema before backfilling totals"],
+      ["other_known", "commit after every working change"],
+    ];
+    const strays: Array<[string, string]> = [
+      ["stray_note_a", "migrate the invoice schema, then migrate invoice totals again"],
+      ["stray_note_b", "invoice schema migration notes and more invoice schema notes"],
+    ];
+    const files = [...bodies, ...strays].map(([id, body]) => {
+      const f = join(TMP_DIR, `${id}.md`);
+      writeFileSync(f, body, "utf-8");
+      return f;
+    });
+    return {
+      index: buildIndex(files),
+      graph: makeGraph(bodies.map(([id, body]) => makeNode(id, ["data"], body))),
+    };
+  }
+
+  test("the stray documents really do win the lexical search", () => {
+    const { index } = splitCorpus();
+    const top = searchIndex(index, "migrate invoice schema", 10).map(r => r.id);
+    expect(top).toContain("stray_note_a");
+    expect(top).toContain("stray_note_b");
+  });
+
+  test("hybridRetrieve returns only ids the graph knows", () => {
+    const { index, graph } = splitCorpus();
+    const results = hybridRetrieve("migrate invoice schema", ["data"], graph, index, 15);
+    expect(results.length).toBeGreaterThan(0);
+    for (const r of results) expect(graph.nodes[r.id]).toBeDefined();
+  });
+
+  test("the floor's top-up is bounded the same way", () => {
+    const { index, graph } = splitCorpus();
+    const floored = hybridRetrieveWithFloor("migrate invoice schema", ["deployment"], graph, index, 15, 5);
+    expect(floored.length).toBeGreaterThan(0);
+    for (const r of floored) expect(graph.nodes[r.id]).toBeDefined();
+  });
+});
+
 describe("stem-expanded BM25", () => {
   test("stemToken collapses inflections onto a shared stem", () => {
     expect(stemToken("measurements")).toBe("measur");

@@ -140,6 +140,87 @@ describe("mergeGraphContextMarkdown", () => {
     expect(ruleMatches!.length).toBeLessThanOrEqual(15);
   });
 
+  /**
+   * The file is headed "Context Rules (correlation-ranked)", and until #258 it
+   * was ranked by nothing of the sort: existing entries were inserted first and
+   * the budget was sliced off the end, so whatever landed in the file on its
+   * first write held the top slots for good. The live
+   * ~/.agentgrit/context/GRAPH-CONTEXT.md had carried the same five entries
+   * since 2026-10-05 while every freshly-retrieved rule queued up behind them,
+   * past the cap. Carry-over is for continuity, not seniority.
+   */
+  test("this session's ranking leads; carried-over rules fill what is left", async () => {
+    const { mergeGraphContextMarkdown } = await import("../../src/graph/context");
+
+    const header = (n: number) => [
+      "# Graph Context — testing",
+      `*Generated: 2026-08-22T00:00:00Z | ${n} context rules from [testing]*`,
+      "",
+      "## Context Rules (correlation-ranked)",
+      "",
+    ];
+
+    const existingLines = header(6);
+    for (let i = 1; i <= 6; i++) {
+      existingLines.push(`- **rule_stale_${i}** [t] (score: 0.10)`);
+      existingLines.push(`  stale text ${i}`);
+      existingLines.push("");
+    }
+
+    const incomingLines = header(3);
+    for (let i = 1; i <= 3; i++) {
+      incomingLines.push(`- **rule_fresh_${i}** [t] (score: 0.90)`);
+      incomingLines.push(`  fresh text ${i}`);
+      incomingLines.push("");
+    }
+
+    const merged = mergeGraphContextMarkdown(existingLines.join("\n"), incomingLines.join("\n"), 15);
+    const order = [...merged.matchAll(/^- \*\*([^*]+)\*\*/gm)].map(m => m[1]);
+
+    expect(order.slice(0, 3)).toEqual(["rule_fresh_1", "rule_fresh_2", "rule_fresh_3"]);
+    // Continuity is kept, just behind this session's own ranking.
+    expect(order).toContain("rule_stale_1");
+    expect(order.length).toBe(9);
+  });
+
+  test("a full file cannot lock new rules out — the cap cuts the oldest", async () => {
+    const { mergeGraphContextMarkdown } = await import("../../src/graph/context");
+
+    const lines: string[] = [
+      "# Graph Context — testing",
+      "*Generated: 2026-08-22T00:00:00Z | 15 context rules*",
+      "",
+      "## Context Rules (correlation-ranked)",
+      "",
+    ];
+    for (let i = 1; i <= 15; i++) {
+      lines.push(`- **rule_existing_${i}** [t] (score: 0.10)`);
+      lines.push(`  text ${i}`);
+      lines.push("");
+    }
+
+    const incoming = [
+      "# Graph Context — testing",
+      "*Generated: 2026-08-22T01:00:00Z | 2 context rules*",
+      "",
+      "## Context Rules (correlation-ranked)",
+      "",
+      "- **rule_fresh_1** [t] (score: 0.95)",
+      "  fresh text 1",
+      "",
+      "- **rule_fresh_2** [t] (score: 0.94)",
+      "  fresh text 2",
+      "",
+    ].join("\n");
+
+    const merged = mergeGraphContextMarkdown(lines.join("\n"), incoming, 15);
+    const order = [...merged.matchAll(/^- \*\*([^*]+)\*\*/gm)].map(m => m[1]);
+
+    expect(order.length).toBe(15);
+    expect(order.slice(0, 2)).toEqual(["rule_fresh_1", "rule_fresh_2"]);
+    expect(order).not.toContain("rule_existing_15");
+  });
+
   test("handles empty existing file", async () => {
     const { mergeGraphContextMarkdown } = await import("../../src/graph/context");
 

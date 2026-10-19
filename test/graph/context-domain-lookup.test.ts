@@ -18,7 +18,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { buildGraph } from "../../src/graph/builder";
-import { buildIndexFromDir } from "../../src/graph/bm25";
+import { buildIndexFromDir, searchIndex } from "../../src/graph/bm25";
 import { getContextRules, MIN_CONTEXT_RULES } from "../../src/graph/context";
 import type { Graph } from "../../src/graph/types";
 import type { BM25Index } from "../../src/graph/types";
@@ -144,5 +144,40 @@ describe("getContextRules retrieval floor", () => {
   test("floor respects the caller's limit when it is below the floor", async () => {
     const rules = await getContextRules(graph, index, SESSION_DOMAINS, 3, undefined, "migrate invoice schema");
     expect(rules.length).toBe(3);
+  });
+
+  /**
+   * The index and the graph are built from different file sets in a live
+   * install: ~/.agentgrit held 648 indexed documents against 47 graph nodes.
+   * A BM25 hit on one of the 601 extras has no node to read text from, and
+   * `getContextRules` rendered it as its own id — the live GRAPH-CONTEXT.md
+   * carried seven bullets whose entire body was "feedback_smoke_test_pipelines"
+   * and six more like it. Five rules of that are not five rules.
+   */
+  test("a candidate the graph cannot describe is not injected as its own id", async () => {
+    const strayDir = join(TMP_DIR, "unindexed-memory");
+    mkdirSync(strayDir, { recursive: true });
+    const strays = ["memo_invoice_schema_notes", "memo_invoice_schema_rollout"];
+    for (const id of strays) {
+      writeFileSync(
+        join(strayDir, `${id}.md`),
+        "invoice schema migration notes: migrate the invoice schema, then migrate invoice totals.\n",
+        "utf-8",
+      );
+    }
+
+    // Index covers both; the graph only knows the rules directory.
+    const widerIndex = buildIndexFromDir([RULES_DIR, strayDir]);
+    const strayHits = searchIndex(widerIndex, "migrate invoice schema", 10).map(r => r.id);
+    expect(strayHits).toContain(strays[0]);
+
+    const rules = await getContextRules(graph, widerIndex, SESSION_DOMAINS, 10, undefined, "migrate invoice schema");
+
+    for (const rule of rules) {
+      expect(graph.nodes[rule.id]).toBeDefined();
+      expect(rule.text).not.toBe(rule.id);
+    }
+    // Dropping the undescribable ones must not drop the session below the floor.
+    expect(rules.length).toBeGreaterThanOrEqual(MIN_CONTEXT_RULES);
   });
 });

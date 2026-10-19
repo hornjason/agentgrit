@@ -87,11 +87,33 @@ export function buildIndex(files: string[]): BM25Index {
 
 // ── Build from directory ──
 
-export function buildIndexFromDir(dir: string): BM25Index {
-  if (!existsSync(dir)) return buildIndex([]);
-  const files = readdirSync(dir)
-    .filter(f => f.endsWith(".md"))
-    .map(f => join(dir, f));
+/**
+ * Index every markdown file in one directory, or in several.
+ *
+ * Several, because the graph does: `buildGraph` indexes the memory directory
+ * *and* the promoted-rules directory (#258). An index built from only the
+ * first has no lexical entry for a promoted rule, so BM25 can never surface
+ * one no matter how exactly the query matches its text — the rule reaches
+ * retrieval only through domain overlap, if it has a domain at all.
+ *
+ * Earlier directories win on id collisions, matching `discoverIndexedFiles`,
+ * and a missing directory contributes nothing rather than throwing.
+ */
+export function buildIndexFromDir(dirs: string | string[]): BM25Index {
+  const list = typeof dirs === "string" ? [dirs] : dirs;
+
+  const seen = new Set<string>();
+  const files: string[] = [];
+  for (const dir of list) {
+    if (!existsSync(dir)) continue;
+    for (const f of readdirSync(dir)) {
+      if (!f.endsWith(".md")) continue;
+      const id = f.replace(/\.md$/, "");
+      if (seen.has(id)) continue;
+      seen.add(id);
+      files.push(join(dir, f));
+    }
+  }
   return buildIndex(files);
 }
 

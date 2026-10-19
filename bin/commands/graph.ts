@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { getBaseDir, stateDir, resolveMemoryDir, resolveSignalDir } from "../../src/adapters/paths";
+import { getBaseDir, stateDir, graphSourceDirs, resolveMemoryDir, resolveSignalDir } from "../../src/adapters/paths";
 import { readGraph, buildGraph, writeGraphFile } from "../../src/graph/builder";
 import { queryGraph } from "../../src/graph/query";
 import { generateReport, formatReportMarkdown } from "../../src/graph/report";
@@ -155,8 +155,9 @@ export async function graphCommand(args: string[]): Promise<void> {
       console.log("  Empty graph. Run 'agentgrit graph build' first.\n");
       return;
     }
-    const memoryDir = resolveMemoryDir();
-    const index = buildIndexFromDir(memoryDir);
+    // This is the SessionStart surface. It has to see the same rules the
+    // graph does, promoted ones included (#258).
+    const index = buildIndexFromDir(graphSourceDirs());
     const queryIdx = args.indexOf("--query");
     const queryText = queryIdx !== -1 && args[queryIdx + 1] ? args.slice(queryIdx + 1).join(" ") : "";
     const signalDir = resolveSignalDir();

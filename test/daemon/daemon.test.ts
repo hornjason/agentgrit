@@ -296,6 +296,8 @@ describe("doctor dedup", () => {
     const report = await runDoctor(config);
     expect(report).toHaveProperty("sections");
     expect(report).toHaveProperty("overall");
-    expect(report.sections.length).toBe(9);
+    // Ten: HEALTH joined runDoctor without either section-count assertion
+    // being updated (see test/daemon/doctor.test.ts).
+    expect(report.sections.length).toBe(10);
   });
 });

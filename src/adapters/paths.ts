@@ -204,6 +204,24 @@ export function rulesDir(): string {
   return configured("rulesDir", join(getBaseDir(), "rules"));
 }
 
+/**
+ * Every directory the knowledge graph and its lexical index read rules from.
+ *
+ * Raw memories and promoted rules live in two different places, and before
+ * #258 each consumer picked one: the graph builder read the memory directory,
+ * the doctor counted both, and nothing indexed `rulesDir()` at all — so 44 of
+ * 47 promoted rules existed on disk and nowhere else. Anything that answers
+ * "which rules are there" resolves the set here instead of choosing a
+ * directory for itself.
+ *
+ * Ordered memory-first, deduplicated, and returned whether or not the
+ * directories exist — the callers already skip what is missing.
+ */
+export function graphSourceDirs(): string[] {
+  const dirs = [resolveMemoryDir(), rulesDir()].map((d) => resolve(d));
+  return [...new Set(dirs)];
+}
+
 export function pendingRulesFile(): string {
   return configured("pendingRulesFile", join(getBaseDir(), "PENDING-RULES.md"));
 }

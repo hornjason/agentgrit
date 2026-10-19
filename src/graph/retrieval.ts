@@ -111,6 +111,27 @@ function flattenClusters(clusters: RankedCluster[]): Array<{ id: string; rank: n
   return list;
 }
 
+/**
+ * Lexical hits the graph has a node for, re-ranked densely.
+ *
+ * The index and the graph are built from overlapping but unequal file sets —
+ * 648 indexed documents against 47 nodes on the install #258 was found on. A
+ * hit with no node carries no domain, no severity and no text, so every
+ * consumer downstream renders it as its own id. Dropping it here rather than
+ * at the end keeps the floor honest: a document that cannot become a rule must
+ * not occupy a slot that a rule was going to fill.
+ *
+ * Ranks are recomputed after the drop so RRF sees 1..n with no holes.
+ */
+function rankKnown(
+  results: Array<{ id: string }>,
+  graph: Graph,
+): Array<{ id: string; rank: number }> {
+  return results
+    .filter(r => graph.nodes[r.id] !== undefined)
+    .map((r, i) => ({ id: r.id, rank: i + 1 }));
+}
+
 export function hybridRetrieve(
   query: string,
   domains: string[],
@@ -120,9 +141,9 @@ export function hybridRetrieve(
   vectorList?: Array<{ id: string; rank: number }>,
   weights?: RRFWeights,
 ): RetrievalResult[] {
-  // Step 1: BM25 keyword search (top 50)
-  const bm25Results = searchIndex(index, query, 50);
-  const bm25List = bm25Results.map((r, i) => ({ id: r.id, rank: i + 1 }));
+  // Step 1: BM25 keyword search (top 50), restricted to documents the graph
+  // can describe. See `rankKnown`.
+  const bm25List = rankKnown(searchIndex(index, query, 50), graph);
 
   // Step 2: Graph domain traversal (top 50) — include connected nodes
   const graphList = flattenClusters(queryGraph(graph, domains, 50));
@@ -179,8 +200,7 @@ export function hybridRetrieveWithFloor(
   if (primary.length >= target) return primary;
 
   const poolSize = Math.max(limit, target * 4);
-  const lexList = searchIndexExpanded(index, query, poolSize)
-    .map((r, i) => ({ id: r.id, rank: i + 1 }));
+  const lexList = rankKnown(searchIndexExpanded(index, query, poolSize), graph);
   // Domain-agnostic: queryGraph with no domains ranks on severity and edge
   // strength, which is what is left once domain overlap has nothing to say.
   const graphList = flattenClusters(queryGraph(graph, [], poolSize));

@@ -37,7 +37,10 @@ describe("doctor report structure", () => {
     expect(report).toHaveProperty("timestamp");
     expect(report).toHaveProperty("overall");
     expect(report).toHaveProperty("sections");
-    expect(report.sections.length).toBe(9);
+    // Ten sections, not nine: HEALTH (eviction registry + context freshness)
+    // was added to runDoctor without updating this count, so the whole
+    // structure assertion had been red and unlisted.
+    expect(report.sections.length).toBe(10);
 
     const sectionNames = report.sections.map((s) => s.name);
     expect(sectionNames).toContain("CAPTURE");
@@ -49,6 +52,7 @@ describe("doctor report structure", () => {
     expect(sectionNames).toContain("INTEGRITY");
     expect(sectionNames).toContain("DATA INTEGRITY");
     expect(sectionNames).toContain("WIRING");
+    expect(sectionNames).toContain("HEALTH");
   });
 
   test("overall status is worst of all sections", async () => {
