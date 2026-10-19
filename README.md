@@ -497,6 +497,62 @@ Tests live in `test/` mirroring `src/` structure. Each module has isolated unit 
 
 The test suite uses fixture JSONL files with known patterns that must produce specific candidates, and noise files that must not trigger false positives.
 
+## Building, and keeping an installed binary current
+
+The `agentgrit` command runs the **bundle**, not the source:
+
+```
+agentgrit -> <prefix>/lib/node_modules/@agentgrit/core/dist/agentgrit.js
+```
+
+`dist/` is gitignored, so it only ever exists on a machine that built it. Every
+`agentgrit capture …` hook in `~/.claude/settings.json` executes that bundle, so
+if it is older than `src/`, your hooks are running old code while the repo shows
+the fix. Between 2026-10-05 and 2026-10-19 that gap was two weeks and six merged
+issues wide (#264).
+
+```bash
+bun run build     # rebuild the bundle from bin/agentgrit.ts
+bun test test/dist-freshness.test.ts
+```
+
+Three things keep this honest, and it is worth knowing which covers you:
+
+| Situation | What handles it |
+|---|---|
+| fresh clone, `bun install`, or a global link | the `prepare` script — it runs `build` on install |
+| you edited `src/` and did not rebuild | `test/dist-freshness.test.ts` fails, naming the stale files |
+| publishing to npm | `prepublishOnly` |
+
+### A development install, and why it is easy to get wrong
+
+Linking the repo globally points the binary at **this working copy's** `dist/`:
+
+```bash
+bun link                  # from the repo root
+agentgrit --version
+```
+
+That is convenient and it is the whole reason staleness bites: nothing about
+`agentgrit` on your PATH changes when you pull or switch branches, because the
+symlink target is a build artifact nobody regenerated. After a `git pull`, a
+branch switch, or a rebase, run `bun run build`.
+
+A consumer who installed from npm instead (`bun add -g @agentgrit/core`) gets a
+bundle built at publish time and updates it the ordinary way, by reinstalling.
+They are never affected by this.
+
+### Do not build with `NODE_ENV=test`
+
+`bun build` resolves `process.env.NODE_ENV` **at build time**, and
+`src/graph/context.ts` guards on it. A bundle built with `NODE_ENV=test` carries
+a test-only early return, and `agentgrit graph context` then silently does
+nothing for any user who has not set `AGENTGRIT_DIR`.
+
+The `build` script pins this with `env -u NODE_ENV`, so you do not have to
+remember — but if you invoke `bun build` by hand, unset it yourself.
+`test/dist-freshness.test.ts` fails on a bundle carrying that guard.
+
 ## Roadmap
 
 ### v0.1.8 (current)
