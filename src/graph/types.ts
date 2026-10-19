@@ -30,6 +30,8 @@ export interface ConnectedNode {
 
 export interface DocEntry {
   id: string;
+  /** Path the doc was indexed from, so its body text can be read back. */
+  file?: string;
   tokens: Record<string, number>;
   len: number;
 }

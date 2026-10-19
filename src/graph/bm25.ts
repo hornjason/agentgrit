@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import type { BM25Index, DocEntry, SearchResult, VocabEntry } from "./types";
+import { ruleIdFromFilename } from "./rule-id";
 
 const K1 = 1.5;
 const B = 0.75;
@@ -47,10 +48,11 @@ export function buildIndex(files: string[]): BM25Index {
     const raw = readFileSync(file, "utf-8");
     const body = stripMarkdown(stripFrontmatter(raw));
     const tokens = tokenize(body);
-    const id = file.split("/").pop()!.replace(/\.md$/, "");
+    const id = ruleIdFromFilename(file);
 
     docs.push({
       id,
+      file,
       tokens: countTerms(tokens),
       len: tokens.length,
     });
