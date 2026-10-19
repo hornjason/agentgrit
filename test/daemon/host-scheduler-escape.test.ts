@@ -26,15 +26,67 @@ describe("tests cannot reach the real scheduler (#281)", () => {
     expect(escape).toContain(REAL_DIR);
   });
 
-  test("a scoped label is allowed even in the real directory", () => {
-    expect(
-      hostSchedulerEscape({ label: "com.agentgrit.test.scoped" }, "test"),
-    ).toBeNull();
+  // The two cases below replace a pair that asserted each of these was
+  // ALLOWED. They were written with the first version of the guard and they
+  // encoded its hole as intended behaviour — a check certifying the defect it
+  // was written to block. Both are now refusals (#283).
+
+  test("scoping only the directory is refused: launchd is addressed by label", () => {
+    // The HIGH one. `uninstallScheduler({ launchAgentDir: "/tmp/x" })` keeps
+    // DEFAULT_LABEL, and `bootoutQuiet(label)` removes the live launchd job
+    // no matter which directory the plist was written to. The unlink lands
+    // harmlessly in /tmp; the bootout has already happened.
+    const escape = hostSchedulerEscape(
+      { launchAgentDir: "/tmp/agentgrit-scoped", logDir: "/tmp/agentgrit-scoped/logs" },
+      "test",
+    );
+    expect(escape).not.toBeNull();
+    expect(escape).toContain("com.agentgrit.daemon");
   });
 
-  test("a scoped directory is allowed even with the default label", () => {
+  test("scoping only the label is refused: the plist lands in the user's real dir", () => {
+    const escape = hostSchedulerEscape(
+      { label: "com.agentgrit.test.scoped", logDir: "/tmp/agentgrit-scoped/logs" },
+      "test",
+    );
+    expect(escape).not.toBeNull();
+    expect(escape).toContain(REAL_DIR);
+  });
+
+  test("a real logDir is refused on its own", () => {
+    const escape = hostSchedulerEscape(
+      { label: "com.agentgrit.test.scoped", launchAgentDir: "/tmp/agentgrit-scoped" },
+      "test",
+    );
+    expect(escape).not.toBeNull();
+    expect(escape).toContain("logDir");
+  });
+
+  test("the real directory spelled differently is still the real directory", () => {
+    // A guard comparing strings rather than paths is bypassed by a trailing
+    // slash, a `..`, or a symlink — the comparison has to be by value.
+    const escape = hostSchedulerEscape(
+      {
+        label: "com.agentgrit.test.scoped",
+        launchAgentDir: `${REAL_DIR}/`,
+        logDir: "/tmp/agentgrit-scoped/logs",
+      },
+      "test",
+    );
+    expect(escape).not.toBeNull();
+    expect(escape).toContain(REAL_DIR);
+  });
+
+  test("all three scoped is allowed — the guard is not simply a refusal", () => {
     expect(
-      hostSchedulerEscape({ launchAgentDir: "/tmp/agentgrit-scoped" }, "test"),
+      hostSchedulerEscape(
+        {
+          label: "com.agentgrit.test.scoped",
+          launchAgentDir: "/tmp/agentgrit-scoped",
+          logDir: "/tmp/agentgrit-scoped/logs",
+        },
+        "test",
+      ),
     ).toBeNull();
   });
 

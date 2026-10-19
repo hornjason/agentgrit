@@ -20,8 +20,8 @@
  * Scheduler support slots in.
  */
 
-import { existsSync, mkdirSync, unlinkSync, writeFileSync, statSync } from "fs";
-import { join } from "path";
+import { existsSync, mkdirSync, realpathSync, unlinkSync, writeFileSync, statSync } from "fs";
+import { join, resolve } from "path";
 import { homedir } from "os";
 import { execFileSync } from "child_process";
 import { getBaseDir } from "../adapters/paths";
@@ -148,18 +148,58 @@ function defaultLaunchAgentDir(): string {
 // so `f(opts, undefined)` reads process.env.NODE_ENV and cannot express the
 // unset case at all — which made the first version of the control case here
 // fail against correct code.
+/** Compare two paths by value, not by spelling. */
+function samePath(a: string, b: string): boolean {
+  const norm = (p: string) => {
+    const r = resolve(p);
+    try {
+      return realpathSync.native(r);
+    } catch {
+      // Not yet created — a temp dir the caller is about to make. `resolve`
+      // alone is the right answer there, and it is still normalized.
+      return r;
+    }
+  };
+  return norm(a) === norm(b);
+}
+
 export function hostSchedulerEscape(
   opts: SchedulerOptions,
   nodeEnv: string | null | undefined = process.env.NODE_ENV,
 ): string | null {
   if (nodeEnv !== "test") return null;
-  const usesRealLabel = (opts.label ?? DEFAULT_LABEL) === DEFAULT_LABEL;
-  const usesRealDir = (opts.launchAgentDir ?? defaultLaunchAgentDir()) === defaultLaunchAgentDir();
-  if (!usesRealLabel || !usesRealDir) return null;
+
+  // EVERY real resource is refused on its own, not only the combination.
+  //
+  // The first version of this guard required label AND directory to both be
+  // real before refusing, which left the hole it was written to close:
+  // `uninstallScheduler({ launchAgentDir: "/tmp/x" })` kept DEFAULT_LABEL, was
+  // allowed through, and `bootoutQuiet(label)` removed the live launchd job —
+  // #281 verbatim, reintroduced by its own fix. launchd is addressed BY LABEL
+  // and knows nothing about which directory the plist came from, so scoping
+  // the directory does not scope the side effect. The mirror case is just as
+  // real: a scoped label with the default directory writes a plist into the
+  // user's own ~/Library/LaunchAgents.
+  //
+  // So the rule is: a test must scope all three, and any one left at its real
+  // value is refused by name.
+  const offenders: string[] = [];
+  if ((opts.label ?? DEFAULT_LABEL) === DEFAULT_LABEL) {
+    offenders.push(`label "${DEFAULT_LABEL}" (launchd is addressed by label, not by path)`);
+  }
+  if (samePath(opts.launchAgentDir ?? defaultLaunchAgentDir(), defaultLaunchAgentDir())) {
+    offenders.push(`launchAgentDir ${defaultLaunchAgentDir()}`);
+  }
+  if (samePath(opts.logDir ?? defaultLogDir(), defaultLogDir())) {
+    offenders.push(`logDir ${defaultLogDir()}`);
+  }
+  if (offenders.length === 0) return null;
+
   return (
-    `Refusing to touch the real scheduler from a test run: label ` +
-    `"${DEFAULT_LABEL}" in ${defaultLaunchAgentDir()}. Pass { label, ` +
-    `launchAgentDir, logDir } scoped to a temp directory (#281).`
+    `Refusing to touch the real scheduler from a test run — ` +
+    `${offenders.join("; ")}. Scope label, launchAgentDir and logDir to a ` +
+    `temp directory; any one left real is refused, because each reaches the ` +
+    `host on its own (#281, #283).`
   );
 }
 
