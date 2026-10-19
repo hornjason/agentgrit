@@ -7,6 +7,26 @@ updated: 2026-08-07
 
 # Changelog
 
+## [Unreleased]
+
+### Fixes
+- **`graph context` no longer emits a rule id as its own body (#258)** — `src/graph/context.ts` fell open to
+  `node?.description || node?.name || id` on a missed graph-node lookup, so every candidate the graph was
+  missing was injected as `- **feedback_every_issue_through_ship:** feedback_every_issue_through_ship`.
+  Body text now comes from `resolveRuleText`, which returns `null` when neither the graph node nor the
+  rule's own markdown carries real text; a `null` candidate is omitted rather than rendered. Measured
+  against the real base dir: 6 rule lines emitted, 0 whose body equals its id, and 623 of 623
+  `rule-domains.json` ids resolve to body text (37 did before, via an exact graph-node hit).
+- **One derivation for a rule id** — new `src/graph/rule-id.ts` owns filename↔id spelling
+  (`ruleIdFromFilename`, `ruleFileName`) and canonical comparison (`canonicalRuleId`), replacing the
+  separate derivations in `builder.ts` and `bm25.ts`. `ruleFileName` rejects any id that is not its own
+  basename, closing the `../` traversal that `writeRuleFile` and the document lookup would otherwise follow.
+- **`updateRuleDomains` retires near-duplicate spellings** — the registry had grown to 623 ids against
+  47 rule files; writing a rule now drops every other spelling that shares its canonical id.
+
+The regression tests were proven by reverting `resolveRuleText` to `readRuleTextFromDocument(id, index) ?? id`
+in a scratch edit: `test/graph/context-rule-text.test.ts` goes 8 pass / 0 fail → 4 pass / 4 fail.
+
 ## [0.1.8] — 2026-08-07
 
 Full parity with PAI learning loop. 13 hooks, 44/44 Docker E2E tests, zero gaps remaining. Closes #176, #178, #187.
