@@ -60,6 +60,80 @@ function readStdin(): string {
   }
 }
 
+function warn(sub: string, msg: string): void {
+  process.stderr.write(`[agentgrit] capture ${sub}: ${msg}\n`);
+}
+
+/**
+ * Pull the user's text out of a hook payload.
+ *
+ * Claude Code's UserPromptSubmit event puts it in a TOP-LEVEL `prompt`. Verified
+ * against a payload captured from the live binary on 2026-10-19:
+ *
+ *   {"session_id":"...","transcript_path":"...","cwd":"...","prompt_id":"...",
+ *    "permission_mode":"bypassPermissions","hook_event_name":"UserPromptSubmit",
+ *    "prompt":"say hi"}
+ *
+ * There is no `message` key. Reading only `message.content` (issue #257) meant
+ * rating, correction and sentiment capture wrote nothing at all — corrections.jsonl
+ * and sentiment.jsonl were never created once in the lifetime of the install.
+ *
+ * `message.content` is still accepted: non-hook callers and the existing CLI tests
+ * drive these subcommands with that envelope.
+ *
+ * Returns null when NEITHER field is present — which is a broken payload, not an
+ * absent rating, and callers must say so out loud rather than return quietly.
+ */
+function extractPromptText(input: unknown): string | null {
+  if (!input || typeof input !== "object") return null;
+  const o = input as { prompt?: unknown; message?: { content?: unknown } };
+  if (typeof o.prompt === "string") return o.prompt;
+  if (typeof o.message?.content === "string") return o.message.content;
+  return null;
+}
+
+/**
+ * Parse a hook payload and extract the user text, complaining to stderr on every
+ * failure path. A silent `return` here is what made #257 invisible for 18 days.
+ */
+function readPromptPayload(
+  sub: string,
+  raw: string,
+): { sessionId: string; text: string } | null {
+  if (!raw.trim()) {
+    warn(sub, "empty stdin — no hook payload received, nothing captured");
+    return null;
+  }
+
+  let input: unknown;
+  try {
+    input = JSON.parse(raw);
+  } catch {
+    warn(sub, `stdin is not valid JSON (${raw.length} bytes), nothing captured`);
+    return null;
+  }
+
+  const text = extractPromptText(input);
+  if (text === null) {
+    const keys =
+      input && typeof input === "object" ? Object.keys(input).join(", ") : typeof input;
+    warn(
+      sub,
+      `no user text in payload — expected top-level "prompt" (UserPromptSubmit) ` +
+        `or "message.content". Got keys: [${keys}]. Nothing captured.`,
+    );
+    return null;
+  }
+
+  const sessionId =
+    (input as { session_id?: unknown }).session_id &&
+    typeof (input as { session_id?: unknown }).session_id === "string"
+      ? ((input as { session_id: string }).session_id)
+      : "unknown";
+
+  return { sessionId, text };
+}
+
 async function maybeGenerateLearning(rating: number, ratingSignal: RatingSignal): Promise<void> {
   try {
     const memoryDir = resolveMemoryDir();
@@ -74,21 +148,12 @@ async function maybeGenerateLearning(rating: number, ratingSignal: RatingSignal)
 }
 
 async function captureRatingCommand(): Promise<void> {
-  const raw = readStdin();
-  if (!raw) return;
+  const payload = readPromptPayload("rating", readStdin());
+  if (!payload) return;
 
-  let input: { session_id?: string; message?: { content?: string } };
-  try {
-    input = JSON.parse(raw);
-  } catch {
-    return;
-  }
-
-  const content = input.message?.content;
-  if (typeof content !== "string") return;
-
+  const content = payload.text;
   const dir = getSignalDir();
-  const sessionId = input.session_id || "unknown";
+  const sessionId = payload.sessionId;
   const ts = new Date().toISOString();
 
   // 1. Explicit /rate M:N S:N Q:N (highest priority)
@@ -179,19 +244,10 @@ async function captureRatingCommand(): Promise<void> {
 }
 
 async function captureCorrectionCommand(): Promise<void> {
-  const raw = readStdin();
-  if (!raw) return;
+  const payload = readPromptPayload("correction", readStdin());
+  if (!payload) return;
 
-  let input: { session_id?: string; message?: { content?: string } };
-  try {
-    input = JSON.parse(raw);
-  } catch {
-    return;
-  }
-
-  const content = input.message?.content;
-  if (typeof content !== "string") return;
-
+  const content = payload.text;
   if (NOISE_PATTERNS.some((p) => p.test(content))) return;
 
   const isCorrection = CORRECTION_STARTERS.some((p) => p.test(content.trim()));
@@ -202,7 +258,7 @@ async function captureCorrectionCommand(): Promise<void> {
     id: randomUUID(),
     type: "correction",
     timestamp: new Date().toISOString(),
-    session_id: input.session_id || "unknown",
+    session_id: payload.sessionId,
     schemaVersion: SCHEMA_VERSION,
     correction_phrase: content.slice(0, 300),
   };
@@ -305,18 +361,11 @@ export function keywordSentiment(text: string): number {
 }
 
 async function captureSentimentCommand(infer: InferenceFn = inference): Promise<void> {
-  const raw = readStdin();
-  if (!raw) return;
+  const payload = readPromptPayload("sentiment", readStdin());
+  if (!payload) return;
 
-  let input: { session_id?: string; message?: { content?: string } };
-  try {
-    input = JSON.parse(raw);
-  } catch {
-    return;
-  }
-
-  const content = input.message?.content;
-  if (typeof content !== "string" || !content.trim()) return;
+  const content = payload.text;
+  if (!content.trim()) return;
 
   let score: number;
 
@@ -346,7 +395,7 @@ async function captureSentimentCommand(infer: InferenceFn = inference): Promise<
     id: randomUUID(),
     type: "sentiment",
     timestamp: new Date().toISOString(),
-    session_id: input.session_id || "unknown",
+    session_id: payload.sessionId,
     schemaVersion: SCHEMA_VERSION,
     score,
     message_preview: content.slice(0, 100),
@@ -659,7 +708,12 @@ export async function captureCommand(args: string[]): Promise<void> {
 
   try {
     await SUBCOMMANDS[sub]();
-  } catch {
-    // hooks must not block Claude Code
+  } catch (err) {
+    // Hooks must not block Claude Code, so the exit code stays 0 — but the
+    // failure is reported. Swallowing it silently is what let #257 run for 18
+    // days with nobody noticing (.claude/rules/checks-must-be-able-to-fail.md).
+    process.stderr.write(
+      `[agentgrit] capture ${sub} failed: ${err instanceof Error ? err.stack ?? err.message : String(err)}\n`,
+    );
   }
 }
