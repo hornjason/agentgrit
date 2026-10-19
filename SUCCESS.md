@@ -24,9 +24,13 @@ full database.
 ## The claims
 
 All four below are stated as things that can be shown false, and each carries
-the command that would show it. Every one is failing today, with the issue
-number that tracks it — a claim recorded as met without a measurement beside
-it is the thing this file exists to prevent.
+the command that would show it. A claim recorded as met without a measurement
+beside it is the thing this file exists to prevent — so the Standing table at
+the bottom carries the date, the reading and the issue for every row, and a
+row with no reading is `failing` by default rather than unknown.
+
+All four were failing on the morning of 2026-10-19. All four are passing as of
+that evening; the readings are in the table.
 
 ### Claim 1 — Every captured correction reaches the detector
 
@@ -88,7 +92,19 @@ indistinguishable from success; `UNMEASURED` is not.
 
 | Claim | Standing | Measured |
 |---|---|---|
-| 1 — corrections reach the detector | **failing** | 2026-10-19 — throws on `signal.correction_phrase.slice`; 0 patterns detected. #254 |
-| 2 — learned rules reach the session | **failing** | 2026-10-19 — 44 of 47 rule files absent from graph; GRAPH-CONTEXT.md frozen 2026-10-05 at the unavailable banner. #258 |
-| 3 — the loop runs unasked | **failing** | 2026-10-19 — no launchd agent, no crontab entry; `daemon.log` ends 2026-10-17 03:00. #259 |
-| 4 — a step that did not run says so | **failing** | 2026-10-19 — `test-results.json` reads `{"pass":0,"fail":0}` from a spawn in a nonexistent cwd. #256 |
+| 1 — corrections reach the detector | **passing** | 2026-10-19 21:47 — `detect-failures` no longer appears in the daemon's error list and `Patterns` went 4 → 43 across the same log. #254 |
+| 2 — learned rules reach the session | **passing** | 2026-10-19 — `GRAPH-CONTEXT.md` regenerated 16:17 with 15 ranked rules carrying real text; doctor reports 47 graph nodes against 47 learned rules. #258 |
+| 3 — the loop runs unasked | **passing** | 2026-10-19 — `com.agentgrit.daemon` registered with launchd at last exit status 0, and `daemon.log` written by a scheduled run rather than by hand. #259, #277 |
+| 4 — a step that did not run says so | **passing** | 2026-10-19 — `test-results.json` reads `{"status":"MEASURED","pass":1860,"fail":9}` and names the cwd it measured, where it previously read `{"pass":0,"fail":0}`. #256 |
+
+Measured on Jason's machine against `main` at `7b3aacd`, through the installed
+`agentgrit` binary rather than from source — the two were two weeks apart until
+#264, and reading one while claiming the other is the failure mode this table
+exists to prevent.
+
+**Claim 3 was passing once before and did not hold.** It was installed, then
+removed by the suite itself: `uninstallScheduler()` with no arguments reaches
+the real `~/Library/LaunchAgents`, so running `bun test` deleted the live job
+and said nothing. Re-verified the way it has to be — install, run the daemon
+suite, confirm the job is still registered afterwards (#281). A standing of
+"passing" that has not survived the repo's own test suite is not a standing.
