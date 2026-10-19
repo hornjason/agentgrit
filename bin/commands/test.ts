@@ -1,10 +1,14 @@
 import { spawnSync } from "child_process";
 import { writeFileSync, mkdirSync, existsSync } from "fs";
-import { join } from "path";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
 import { stateDir } from "../../src/adapters/paths";
 
 export async function testCommand(args: string[]): Promise<void> {
-  const agRoot = join(import.meta.dir, "..", "..");
+  // import.meta.url, not import.meta.dir — the latter is bun-only and is
+  // undefined under node in the --target=node bundle, making this
+  // join(undefined, …) (#279).
+  const agRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
   const verbose = args.includes("--verbose");
 
   console.log("\nagentgrit test\n");

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { homedir } from "os";
 import { basename, dirname, join, resolve } from "path";
+import { fileURLToPath } from "url";
 import type { AgentGritConfig, AgentGritPaths } from "./types";
 
 const ENV_KEY = "AGENTGRIT_DIR";
@@ -190,7 +191,14 @@ export function agentgritRepoRoot(): string | null {
 
   // src/adapters/paths.ts → repo root is two levels up, but walk rather than
   // hardcode so a build that relocates this file still resolves.
-  let dir = resolve(import.meta.dir);
+  //
+  // `import.meta.url`, not `import.meta.dir`. The latter is a bun extension:
+  // node does not define it, and `bun build --target=node` does not rewrite or
+  // polyfill it, so it survived verbatim into dist/agentgrit.js and
+  // `resolve(undefined)` threw for every consumer of the published bundle —
+  // whose shim is `#!/usr/bin/env node`. Invisible in development, where the
+  // entry point is run by bun (#279).
+  let dir = dirname(fileURLToPath(import.meta.url));
   for (let depth = 0; depth < 8; depth++) {
     candidates.push(dir);
     const parent = dirname(dir);
