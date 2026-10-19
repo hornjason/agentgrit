@@ -15,7 +15,8 @@
   ],
   "scripts": {
     "test": "bun test",
-    "build": "bun build bin/agentgrit.ts --outfile dist/agentgrit.js --target=node --minify",
+    "build": "env -u NODE_ENV bun build bin/agentgrit.ts --outfile dist/agentgrit.js --target=node --minify",
+    "prepare": "bun run build",
     "prepublishOnly": "bun run build",
     "lint": "bunx biome check .",
     "typecheck": "bunx tsc --noEmit"
