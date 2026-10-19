@@ -42,6 +42,181 @@ export interface WeeklyReviewResult {
   errors: string[];
 }
 
+// ─── Test cache ──────────────────────────────────────────────────────────────
+
+/**
+ * Set on the spawned child so a `bun test` run that reaches this code again
+ * refuses instead of forking another suite. Exported so the test can set it.
+ */
+export const TEST_CACHE_CHILD_ENV = "AGENTGRIT_TEST_CACHE_CHILD";
+
+/** `force` runs the cache even inside a test process; `off` never runs it. */
+const TEST_CACHE_MODE_ENV = "AGENTGRIT_TEST_CACHE";
+
+/**
+ * The outcome of a test-cache run.
+ *
+ * A discriminated union on purpose: in the UNMEASURED arm there is no `pass`
+ * field to be zero. #256 was a `0` that nobody could tell apart from a green
+ * suite, and the fix is a shape in which that number cannot be written at all
+ * unless a run actually produced it.
+ */
+export type TestCacheOutcome =
+  | {
+      status: "MEASURED";
+      pass: number;
+      fail: number;
+      exitCode: number;
+      cwd: string;
+      timestamp: string;
+    }
+  | {
+      status: "UNMEASURED";
+      reason: string;
+      cwd: string | null;
+      timestamp: string;
+    };
+
+/**
+ * Pull the pass/fail totals out of a `bun test` run, or null if the output
+ * does not contain a summary we recognise.
+ *
+ * Null, not zero. The previous parser summed `/(\d+)\s+pass/g` across the whole
+ * output and defaulted to 0, so empty output — the exact thing a failed spawn
+ * produces — looked like a clean run of nothing. Anchoring to the summary line
+ * also stops a test name like "rejects 7 password attempts" from being counted.
+ */
+export function parseBunTestSummary(output: string): { pass: number; fail: number } | null {
+  let pass: number | null = null;
+  let fail: number | null = null;
+
+  for (const m of output.matchAll(/^\s*(\d+)\s+pass\s*$/gm)) {
+    pass = (pass ?? 0) + parseInt(m[1], 10);
+  }
+  for (const m of output.matchAll(/^\s*(\d+)\s+fail\s*$/gm)) {
+    fail = (fail ?? 0) + parseInt(m[1], 10);
+  }
+
+  if (pass === null && fail === null) return null;
+  return { pass: pass ?? 0, fail: fail ?? 0 };
+}
+
+/**
+ * Should the daemon cycle spawn a suite right now?
+ *
+ * Off by default inside a test process. `runDaemonCycle` is called six times
+ * by test/daemon/daemon.test.ts; once the cwd bug is fixed, each of those
+ * would fork a real 600-second suite, and each of those suites would reach
+ * this code and fork again. The hardcoded-wrong path was accidentally the only
+ * thing keeping that from happening.
+ */
+export function shouldRunTestCache(): boolean {
+  // The recursion guard outranks every override, including `force`. A child
+  // of the test cache must never start another one, whatever the caller asked.
+  if (process.env[TEST_CACHE_CHILD_ENV] === "1") return false;
+
+  const mode = process.env[TEST_CACHE_MODE_ENV];
+  if (mode === "off") return false;
+  if (mode === "force") return true;
+  return process.env.NODE_ENV !== "test";
+}
+
+/**
+ * Run the suite and cache the counts for the dashboard.
+ *
+ * Pass `cwd` to override repo-root resolution (the regression test points it
+ * at a path that does not exist). `undefined` means "resolve it"; `null` means
+ * "resolution already failed".
+ */
+export async function runTestCache(
+  opts: { cwd?: string | null } = {},
+): Promise<TestCacheOutcome> {
+  const { spawnSync } = await import("child_process");
+  const { existsSync, mkdirSync, writeFileSync } = await import("fs");
+  const { join } = await import("path");
+  const { stateDir, agentgritRepoRoot } = await import("../adapters/paths");
+
+  const timestamp = new Date().toISOString();
+  const cwd = opts.cwd === undefined ? agentgritRepoRoot() : opts.cwd;
+
+  const record = (outcome: TestCacheOutcome): TestCacheOutcome => {
+    try {
+      const dir = stateDir();
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, "test-results.json"),
+        JSON.stringify(outcome, null, 2),
+        "utf-8",
+      );
+    } catch {
+      // The cache file is a convenience for the dashboard. Failing to write it
+      // must not swallow the outcome we are returning to the caller.
+    }
+    return outcome;
+  };
+
+  const unmeasured = (reason: string): TestCacheOutcome =>
+    record({ status: "UNMEASURED", reason, cwd, timestamp });
+
+  if (!cwd) {
+    return unmeasured(
+      "could not resolve the AgentGrit checkout — set AGENTGRIT_REPO_ROOT to a directory " +
+        "containing package.json and src/daemon/daemon.ts",
+    );
+  }
+  if (!existsSync(cwd)) {
+    return unmeasured(`test-cache cwd does not exist: ${cwd}`);
+  }
+  if (process.env[TEST_CACHE_CHILD_ENV] === "1") {
+    return unmeasured("refusing to recurse: already running inside a test-cache child");
+  }
+
+  const result = spawnSync("bun", ["test", "test/"], {
+    cwd,
+    timeout: 600_000,
+    encoding: "utf-8",
+    // The default 1 MB truncates a suite this size and sets an ENOBUFS error,
+    // which the old code read as empty output and recorded as zero.
+    maxBuffer: 64 * 1024 * 1024,
+    env: { ...process.env, [TEST_CACHE_CHILD_ENV]: "1" },
+  });
+
+  if (result.error) {
+    return unmeasured(`bun test could not be spawned in ${cwd}: ${result.error.message}`);
+  }
+  if (result.signal) {
+    return unmeasured(`bun test in ${cwd} was killed by signal ${result.signal}`);
+  }
+
+  const output = (result.stdout ?? "") + (result.stderr ?? "");
+  const counts = parseBunTestSummary(output);
+
+  if (!counts) {
+    const head = output.trim().slice(0, 300) || "<no output>";
+    return unmeasured(
+      `bun test in ${cwd} exited ${result.status} with no parseable summary: ${head}`,
+    );
+  }
+  if (counts.pass === 0 && counts.fail === 0) {
+    return unmeasured(`bun test in ${cwd} reported no tests (exit ${result.status})`);
+  }
+  if (result.status !== 0 && counts.fail === 0) {
+    // Exit code and parse disagree — trust neither rather than publish one.
+    return unmeasured(
+      `bun test in ${cwd} exited ${result.status} but the summary reported 0 fail`,
+    );
+  }
+
+  return record({
+    status: "MEASURED",
+    pass: counts.pass,
+    fail: counts.fail,
+    exitCode: result.status ?? -1,
+    cwd,
+    timestamp,
+  });
+}
+
 const DAY_NAMES: Record<string, number> = {
   sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
   thursday: 4, friday: 5, saturday: 6,
@@ -737,28 +912,17 @@ export async function runDaemonCycle(
   }
 
   // 8. Test cache — run tests and cache results for dashboard
-  try {
-    const { spawnSync } = await import("child_process");
-    const { writeFileSync } = await import("fs");
-    const { join } = await import("path");
-    const { stateDir: getState } = await import("../adapters/paths");
-    const agRoot = join(process.env.HOME ?? "", "agentgrit");
-    const testResult = spawnSync("bun", ["test", "test/"], {
-      cwd: agRoot,
-      timeout: 600_000,
-      encoding: "utf-8",
-    });
-    const output = (testResult.stdout ?? "") + (testResult.stderr ?? "");
-    let pass = 0, fail = 0;
-    for (const m of output.matchAll(/(\d+)\s+pass/g)) pass += parseInt(m[1], 10);
-    for (const m of output.matchAll(/(\d+)\s+fail/g)) fail += parseInt(m[1], 10);
-    writeFileSync(
-      join(getState(), "test-results.json"),
-      JSON.stringify({ pass, fail, timestamp: new Date().toISOString() }, null, 2),
-      "utf-8",
-    );
-  } catch (err) {
-    result.errors.push(`test-cache: ${err instanceof Error ? err.message : String(err)}`);
+  if (shouldRunTestCache()) {
+    try {
+      const outcome = await runTestCache();
+      if (outcome.status === "UNMEASURED") {
+        // #256: this used to write {"pass":0,"fail":0} and return quietly, so
+        // a test cache that had never once run looked like a green suite.
+        result.errors.push(`test-cache: UNMEASURED — ${outcome.reason}`);
+      }
+    } catch (err) {
+      result.errors.push(`test-cache: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   // Dashboard export — write comprehensive JSON for control plane

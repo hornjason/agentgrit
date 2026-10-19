@@ -5,6 +5,7 @@ import type { AgentGritConfig, AgentGritPaths } from "./types";
 
 const ENV_KEY = "AGENTGRIT_DIR";
 const HOST_ENV_KEY = "AGENTGRIT_HOST_DIR";
+const REPO_ROOT_ENV_KEY = "AGENTGRIT_REPO_ROOT";
 
 export function expandPath(path: string): string {
   const home = homedir();
@@ -113,6 +114,94 @@ export function projectSignalsDir(workingDir?: string): string {
 
 export function projectStateDir(workingDir?: string): string {
   return join(projectDir(workingDir), "state");
+}
+
+// ─── The AgentGrit checkout itself ───────────────────────────────────────────
+// Distinct from the base dir: this is the source tree, not the user's data.
+// Only the test cache needs it, and it needs it to spawn `bun test` there —
+// which makes an unvalidated path remote code execution, not a wrong directory.
+
+/**
+ * Every marker a directory must carry to be accepted as an AgentGrit checkout.
+ *
+ * Two files, not one. A lone `package.json` is the easiest thing in the world
+ * to plant in a world-writable directory, and the package name below is read
+ * from it, so the name alone proves nothing without a second file an attacker
+ * would also have to place.
+ */
+const REPO_MARKERS = ["package.json", join("src", "daemon", "daemon.ts")];
+
+/** The name this repo's package.json must declare. */
+const REPO_PACKAGE_NAME = "@agentgrit/core";
+
+/**
+ * Does `dir` carry every marker of a real AgentGrit checkout?
+ *
+ * This is a security boundary, not a convenience check. The one caller hands
+ * the result to `spawnSync("bun", ["test"], { cwd })`, and bun reads
+ * `bunfig.toml` — including its `preload` — from its working directory. A
+ * directory that passes this check and should not have is arbitrary code
+ * execution as the user running the daemon.
+ *
+ * Deleting this and trusting the env var directly is exactly the regression a
+ * security review caught on the first attempt at #256. Do not do it again.
+ */
+export function isRepoRoot(dir: string): boolean {
+  if (!dir) return false;
+  for (const marker of REPO_MARKERS) {
+    if (!existsSync(join(dir, marker))) return false;
+  }
+  try {
+    const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf-8")) as { name?: string };
+    return pkg.name === REPO_PACKAGE_NAME;
+  } catch {
+    // Unreadable or unparseable package.json — cannot prove it is ours, so it
+    // is not. Failing closed is the whole point of this function.
+    return false;
+  }
+}
+
+/** A configured repo root, if one is set. Not part of AgentGritPaths yet. */
+function configuredRepoRoot(): string | undefined {
+  const paths = loadConfig().paths as unknown as Record<string, unknown> | undefined;
+  const value = paths?.repoRoot;
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * The AgentGrit source checkout, or null if it cannot be proven to be one.
+ *
+ * Order: env override, then config, then a walk up from this module's own
+ * location. Every candidate — including the env var — must pass isRepoRoot.
+ *
+ * Returns null rather than a best guess. #256 was caused by a confident guess
+ * (`$HOME/agentgrit`) that did not exist: the spawn failed, the output was
+ * coalesced to "", and `0 pass / 0 fail` was recorded as a measurement. A null
+ * the caller must handle cannot be mistaken for a result.
+ */
+export function agentgritRepoRoot(): string | null {
+  const candidates: string[] = [];
+
+  const env = process.env[REPO_ROOT_ENV_KEY];
+  if (env) candidates.push(resolve(expandPath(env)));
+
+  const configured = configuredRepoRoot();
+  if (configured) candidates.push(resolve(expandPath(configured)));
+
+  // src/adapters/paths.ts → repo root is two levels up, but walk rather than
+  // hardcode so a build that relocates this file still resolves.
+  let dir = resolve(import.meta.dir);
+  for (let depth = 0; depth < 8; depth++) {
+    candidates.push(dir);
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+
+  for (const candidate of candidates) {
+    if (isRepoRoot(candidate)) return candidate;
+  }
+  return null;
 }
 
 // ─── Host integration ────────────────────────────────────────────────────────
