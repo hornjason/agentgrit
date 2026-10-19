@@ -1,6 +1,6 @@
 import { resolve } from "path";
 import { afterAll } from "bun:test";
-import { runScaffoldConformity, runSpecDiscovery, runSpecDrift, runDocHygiene, runFallowCheck, runAgentFileValidation, runDirectoryValidation, runPackageValidation, runTsconfigValidation, writeFindingsReport } from "rungate/lib/conformity";
+import { runScaffoldConformity, runSpecDiscovery, runSpecDrift, runDocHygiene, runFallowCheck, runAgentFileValidation, runDirectoryValidation, runPackageValidation, runTsconfigValidation, runConfigAccessValidation, runPromptConfigAccessValidation, runSuccessDocValidation, runAiReviewValidation, writeFindingsReport } from "rungate/lib/conformity";
 
 const ROOT = resolve(import.meta.dir, "..");
 
@@ -13,5 +13,9 @@ runAgentFileValidation(ROOT);
 runDirectoryValidation(ROOT);
 runPackageValidation(ROOT);
 runTsconfigValidation(ROOT);
+runConfigAccessValidation(ROOT);
+runPromptConfigAccessValidation(ROOT);
+runSuccessDocValidation(ROOT);
+runAiReviewValidation(ROOT);
 
 afterAll(() => writeFindingsReport(ROOT));
