@@ -128,7 +128,44 @@ function defaultLaunchAgentDir(): string {
   return join(homedir(), "Library", "LaunchAgents");
 }
 
+/**
+ * Refuse to let a test reach the developer's real scheduler.
+ *
+ * Exported so there is one binding to mutate, and so the case proving it can
+ * fail is pointed at the thing that decides rather than at a message.
+ *
+ * A test that scopes neither the label nor the directory is not testing the
+ * scheduler, it is editing the machine — and because `uninstallScheduler()`
+ * takes every argument optionally, reaching the real job is what you get by
+ * writing nothing at all. That is what #281 was: one no-argument call deleted
+ * a live launchd job and its plist, with the suite green and nothing said.
+ *
+ * Scoped by NODE_ENV rather than by a flag the caller passes, because the
+ * callers that need stopping are the ones that did not think to pass anything.
+ */
+// `null` means "there is no NODE_ENV", which is distinct from omitting the
+// argument. A default parameter is applied when the argument is `undefined`,
+// so `f(opts, undefined)` reads process.env.NODE_ENV and cannot express the
+// unset case at all — which made the first version of the control case here
+// fail against correct code.
+export function hostSchedulerEscape(
+  opts: SchedulerOptions,
+  nodeEnv: string | null | undefined = process.env.NODE_ENV,
+): string | null {
+  if (nodeEnv !== "test") return null;
+  const usesRealLabel = (opts.label ?? DEFAULT_LABEL) === DEFAULT_LABEL;
+  const usesRealDir = (opts.launchAgentDir ?? defaultLaunchAgentDir()) === defaultLaunchAgentDir();
+  if (!usesRealLabel || !usesRealDir) return null;
+  return (
+    `Refusing to touch the real scheduler from a test run: label ` +
+    `"${DEFAULT_LABEL}" in ${defaultLaunchAgentDir()}. Pass { label, ` +
+    `launchAgentDir, logDir } scoped to a temp directory (#281).`
+  );
+}
+
 function resolvePaths(opts: SchedulerOptions = {}): SchedulerPaths {
+  const escape = hostSchedulerEscape(opts);
+  if (escape) throw new Error(escape);
   return {
     launchAgentDir: opts.launchAgentDir ?? defaultLaunchAgentDir(),
     logDir: opts.logDir ?? defaultLogDir(),

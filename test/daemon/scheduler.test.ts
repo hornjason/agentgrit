@@ -89,7 +89,22 @@ describe("systemd timer generation", () => {
 describe("install/uninstall/status", () => {
   test("getSchedulerStatus returns platform info", async () => {
     const { getSchedulerStatus } = await import("../../src/daemon/scheduler");
-    const status = await getSchedulerStatus();
+    const { mkdtempSync, rmSync } = await import("fs");
+    const { tmpdir } = await import("os");
+    const { join } = await import("path");
+
+    // Scoped like the case below. This read the developer's real scheduler,
+    // so its answer depended on whether the daemon happened to be installed
+    // on the machine running it — the shape of problem #249 spent a day on.
+    // Reading is not destructive the way the uninstall was, but a test whose
+    // result is a fact about the host is not a test of this function.
+    const root = mkdtempSync(join(tmpdir(), "agentgrit-status-"));
+    const status = await getSchedulerStatus({
+      launchAgentDir: join(root, "LaunchAgents"),
+      logDir: join(root, "logs"),
+      label: "com.agentgrit.test.status",
+    });
+    rmSync(root, { recursive: true, force: true });
 
     expect(status).toHaveProperty("installed");
     expect(status).toHaveProperty("running");
@@ -98,8 +113,33 @@ describe("install/uninstall/status", () => {
     expect(typeof status.running).toBe("boolean");
   });
 
-  test("uninstallScheduler does not throw on clean system", async () => {
+  test("uninstallScheduler does not throw when there is nothing to remove", async () => {
     const { uninstallScheduler } = await import("../../src/daemon/scheduler");
-    await expect(uninstallScheduler()).resolves.toBeUndefined();
+    const { mkdtempSync, rmSync } = await import("fs");
+    const { tmpdir } = await import("os");
+    const { join } = await import("path");
+
+    // Scoped to a temp dir and a test label. This previously called
+    // uninstallScheduler() with no arguments, which falls back to
+    // DEFAULT_LABEL and the real ~/Library/LaunchAgents — so running the
+    // suite on a machine where the daemon was installed booted out the live
+    // job and deleted its plist, silently, with the suite green (#281).
+    //
+    // Nothing is lost by scoping it: the question is "does this throw when
+    // there is nothing to remove", and an empty temp directory is a better
+    // answer to that than the developer's home directory, which is only
+    // empty by luck.
+    const root = mkdtempSync(join(tmpdir(), "agentgrit-uninstall-"));
+    try {
+      await expect(
+        uninstallScheduler({
+          launchAgentDir: join(root, "LaunchAgents"),
+          logDir: join(root, "logs"),
+          label: "com.agentgrit.test.uninstall-noop",
+        }),
+      ).resolves.toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
