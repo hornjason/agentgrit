@@ -2,7 +2,13 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { getBaseDir } from "../../src/adapters/paths";
 import { runDaemonCycle, runWeeklyReview, isWeeklyDay } from "../../src/daemon/daemon";
-import { installScheduler, uninstallScheduler, getSchedulerStatus } from "../../src/daemon/scheduler";
+import {
+  installScheduler,
+  uninstallScheduler,
+  getSchedulerStatus,
+  checkSchedulerRegistered,
+  parseSchedule,
+} from "../../src/daemon/scheduler";
 import type { AgentGritConfig } from "../../src/adapters/types";
 
 function loadConfig(base: string): AgentGritConfig | null {
@@ -71,16 +77,36 @@ async function doStart(base: string): Promise<void> {
     return;
   }
 
+  const interval = config.daemon?.interval ?? "30m";
+  if (!parseSchedule(interval)) {
+    console.log(`  Cannot schedule daemon.interval "${interval}".`);
+    console.log("  Use daily, hourly, weekly, or a duration like 30m / 2h / 1d.\n");
+    process.exitCode = 1;
+    return;
+  }
+
+  // Pass argv explicitly — splitting a command string on spaces breaks as soon
+  // as an install path contains one.
   const bunPath = process.execPath || "bun";
-  const scriptPath = join(base, "..", ".agentgrit-daemon-entry.sh");
-  const command = `${bunPath} ${join(__dirname, "..", "agentgrit.ts")} daemon run`;
+  const entry = join(__dirname, "..", "agentgrit.ts");
 
   console.log("  Installing scheduler...");
-  await installScheduler({
-    interval: config.daemon?.interval ?? "30m",
-    command,
-  });
-  console.log(`  Scheduler installed (interval: ${config.daemon?.interval ?? "30m"}).`);
+  try {
+    await installScheduler({
+      interval,
+      command: bunPath,
+      args: [entry, "daemon", "run"],
+    });
+  } catch (err) {
+    console.log(`  Failed to install scheduler: ${(err as Error).message}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  // Report what the scheduler actually says, not what we just asked for.
+  const status = await getSchedulerStatus();
+  console.log(`  Scheduler installed (interval: ${interval}).`);
+  console.log(`  Registered with ${status.platform === "darwin" ? "launchd" : "systemd"}: ${status.registered ? "yes" : "no"}`);
   console.log("  Use 'agentgrit daemon status' to check.\n");
 }
 
@@ -90,14 +116,24 @@ async function doStop(): Promise<void> {
   console.log("  Scheduler removed.\n");
 }
 
-async function doStatus(): Promise<void> {
+async function doStatus(base: string): Promise<void> {
   const status = await getSchedulerStatus();
 
-  console.log(`  Platform:  ${status.platform}`);
-  console.log(`  Installed: ${status.installed ? "yes" : "no"}`);
-  console.log(`  Running:   ${status.running ? "yes" : "no"}`);
+  console.log(`  Platform:   ${status.platform}`);
+  console.log(`  Label:      ${status.label}`);
+  console.log(`  Plist file: ${status.installed ? "present" : "absent"}`);
+  console.log(`  Registered: ${status.registered ? "yes" : "no"}`);
   if (status.lastRun) {
-    console.log(`  Last run:  ${status.lastRun}`);
+    console.log(`  Last run:   ${status.lastRun}`);
+  }
+
+  // A plist on disk is not a scheduled job. Say so plainly (issue #259).
+  const config = loadConfig(base);
+  if (config) {
+    const check = await checkSchedulerRegistered(config);
+    console.log("");
+    console.log(`  Check: ${check.ok ? "OK" : "FAIL"} — ${check.message}`);
+    if (!check.ok) process.exitCode = 1;
   }
 }
 
@@ -119,7 +155,7 @@ export async function daemonCommand(args: string[]): Promise<void> {
   } else if (sub === "stop") {
     await doStop();
   } else if (sub === "status") {
-    await doStatus();
+    await doStatus(base);
   } else {
     console.log("  Usage: agentgrit daemon <run|start|stop|status>");
     console.log("");
