@@ -7,6 +7,7 @@ import type { GraphNode, GraphEdge, Rule } from "../adapters/types";
 import type { Graph } from "./types";
 import { propagateDomains } from "./domain-propagation";
 import { loadPatterns } from "./generate-patterns";
+import { ruleIdFromFilename, stripRulePrefix } from "./rule-id";
 
 // ── Domain Taxonomy ──
 
@@ -45,15 +46,7 @@ export function loadRuleDomains(path: string): RuleDomainsFile | null {
   }
 }
 
-const KNOWN_PREFIXES = ["feedback_", "success_", "project_", "reference_"];
-
-function normalizeId(id: string): string {
-  let s = id;
-  for (const pfx of KNOWN_PREFIXES) {
-    if (s.startsWith(pfx)) { s = s.slice(pfx.length); break; }
-  }
-  return s.replace(/-/g, "_");
-}
+const normalizeId = stripRulePrefix;
 
 function buildOverrideLookup(
   rules: Record<string, RuleDomainEntry>,
@@ -308,7 +301,7 @@ function discoverRuleFiles(rulesDir: string): MemoryFile[] {
     .map(filename => {
       const content = readFileSync(join(rulesDir, filename), "utf-8");
       const frontmatter = parseFrontmatter(content);
-      const id = filename.replace(/\.md$/, "");
+      const id = ruleIdFromFilename(filename);
       return { id, filename, content, frontmatter };
     });
 }

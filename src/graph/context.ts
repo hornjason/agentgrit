@@ -20,6 +20,7 @@ import type { DomainPattern } from "./generate-patterns";
 import { shouldEvict, loadEvictionAllowlist, appendEvictionLog, type EvictionTrigger } from "../promote/auto-eviction";
 import { getFilteredRuleIds, transitionRule } from "../promote/lifecycle";
 import { loadRuleStats, type RuleStats } from "../promote/rules";
+import { resolveGraphNode, resolveRuleText } from "./rule-text";
 
 // ── Default Domains ──
 
@@ -213,9 +214,14 @@ export function retrieveByEmbeddingSeed(
     const t = node.type;
     if (t && !ALLOWED_TYPES.has(t)) continue;
 
+    // Same rule as the keyword path: no body text means omit the candidate.
+    // Substituting the id here produced `- **some_rule:** some_rule`.
+    const text = resolveRuleText(entry.id, graph, index);
+    if (!text) continue;
+
     rules.push({
       id: entry.id,
-      text: sanitizeRuleText(node.description || node.name || entry.id),
+      text: sanitizeRuleText(text),
       tier: Tier.Graph,
       tags: node.domains || [],
       created: node.last_updated || new Date().toISOString(),
@@ -300,7 +306,7 @@ export async function getContextRules(
   // 2b. Per-domain diversity cap — prevent any single domain from taking all slots
   const domainSet = new Set<string>();
   for (const [id] of scored) {
-    const d = graph.nodes[id]?.domains[0];
+    const d = resolveGraphNode(id, graph)?.domains[0];
     if (d) domainSet.add(d);
   }
   const distinctDomains = Math.max(domainSet.size, 1);
@@ -310,7 +316,7 @@ export async function getContextRules(
   const domainSlots: Record<string, number> = {};
   for (const entry of scored) {
     if (ranked.length >= limit) break;
-    const d = graph.nodes[entry[0]]?.domains[0] || "_none";
+    const d = resolveGraphNode(entry[0], graph)?.domains[0] || "_none";
     const used = domainSlots[d] || 0;
     if (used >= perDomainCap) continue;
     domainSlots[d] = used + 1;
@@ -322,7 +328,7 @@ export async function getContextRules(
   const INDEX_NODE_PATTERN = /^(MEMORY|README|INDEX)$/i;
   const filtered = ranked.filter(([id]) => {
     if (INDEX_NODE_PATTERN.test(id)) return false;
-    const t = graph.nodes[id]?.type;
+    const t = resolveGraphNode(id, graph)?.type;
     if (!t) return true;
     return ALLOWED_TYPES.has(t);
   });
@@ -363,16 +369,25 @@ export async function getContextRules(
   }
 
   // 5. Build rule objects
+  //
+  // A candidate with no resolvable body text is omitted, never emitted with
+  // its own id as the body. Dropping it is the last resort, after the graph
+  // node and the source document have both been tried — dropping every
+  // candidate the graph is missing would hide the namespace split rather
+  // than fix it.
   const resultIds = new Set<string>();
   const rules: Rule[] = [];
 
   for (const [id, score] of afterEviction) {
+    const text = resolveRuleText(id, graph, index);
+    if (!text) continue;
+
     resultIds.add(id);
-    const node = graph.nodes[id];
+    const node = resolveGraphNode(id, graph);
 
     rules.push({
       id,
-      text: sanitizeRuleText(node?.description || node?.name || id),
+      text: sanitizeRuleText(text),
       tier: Tier.Graph,
       tags: node?.domains || [],
       created: node?.last_updated || new Date().toISOString(),
