@@ -5,7 +5,7 @@ import { detectFailurePatterns } from "../../src/detect/failures";
 import { minePatterns } from "../../src/detect/patterns";
 import { routeRule, type RouteResult } from "../../src/promote/router";
 import type { Pattern } from "../../src/adapters/types";
-import type { EvictionCandidate } from "../../src/daemon/daemon";
+import type { EvictionCandidate } from "../../src/promote/evict";
 
 export interface InboxItem {
   pattern: Pattern;
@@ -90,7 +90,7 @@ export async function inboxCommand(args: string[]): Promise<void> {
           console.log(`─── [EVICTION] Candidate ${i + 1} ───`);
           console.log(`  Rule:        ${e.ruleId}`);
           console.log(`  Correlation: ${e.avgCorrelatedRating.toFixed(1)}`);
-          console.log(`  Injections:  ${e.injectionCount}`);
+          console.log(`  Sessions:    ${e.sessionCount}`);
           console.log("");
         }
       }
