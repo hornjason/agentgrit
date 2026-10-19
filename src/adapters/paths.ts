@@ -5,6 +5,7 @@ import type { AgentGritConfig, AgentGritPaths } from "./types";
 
 const ENV_KEY = "AGENTGRIT_DIR";
 const HOST_ENV_KEY = "AGENTGRIT_HOST_DIR";
+const REPO_ENV_KEY = "AGENTGRIT_REPO_ROOT";
 
 export function expandPath(path: string): string {
   const home = homedir();
@@ -22,6 +23,58 @@ export function getBaseDir(): string {
 
 export function signalsDir(): string {
   return join(getBaseDir(), "signals");
+}
+
+/**
+ * Marker that identifies an AgentGrit checkout. Both files must be present:
+ * package.json alone matches any npm package, and a lone src/ directory
+ * matches half the repos on the machine.
+ */
+const REPO_MARKERS = ["package.json", join("src", "daemon", "daemon.ts")];
+
+function isRepoRoot(dir: string): boolean {
+  return REPO_MARKERS.every((marker) => existsSync(join(dir, marker)));
+}
+
+/**
+ * The AgentGrit checkout this code is running from.
+ *
+ * Derived from the module's own location, walking up until the checkout
+ * markers are found — so it is correct in a clone, a git worktree, or anywhere
+ * else the repo is placed. It is deliberately NOT derived from the home
+ * directory: issue #256 was `join(process.env.HOME, "agentgrit")`, a path that
+ * does not exist on a machine whose checkout lives in ~/Projects, and every
+ * command spawned there failed in a way the caller never saw.
+ *
+ * Throws when no checkout can be found, rather than returning a plausible
+ * directory. Callers spawn commands in this path; a wrong answer there is an
+ * unmeasured run reported as a measurement.
+ */
+export function agentgritRepoRoot(): string {
+  const override = process.env[REPO_ENV_KEY];
+  if (override) {
+    const resolved = resolve(expandPath(override));
+    if (!isRepoRoot(resolved)) {
+      throw new Error(
+        `${REPO_ENV_KEY}=${override} is not an AgentGrit checkout ` +
+          `(expected ${REPO_MARKERS.join(" and ")} under ${resolved})`,
+      );
+    }
+    return resolved;
+  }
+
+  let dir = resolve(import.meta.dir);
+  for (;;) {
+    if (isRepoRoot(dir)) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+
+  throw new Error(
+    `could not locate an AgentGrit checkout above ${import.meta.dir} ` +
+      `(looked for ${REPO_MARKERS.join(" and ")}); set ${REPO_ENV_KEY} to point at one`,
+  );
 }
 
 export function loadConfig(): AgentGritConfig {

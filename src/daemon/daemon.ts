@@ -53,6 +53,144 @@ export function isWeeklyDay(config: AgentGritConfig): boolean {
   return new Date().getDay() === targetDay;
 }
 
+// ─── Test cache ──────────────────────────────────────────────────────────────
+// Issue #256: this step used to spawn `bun test` in $HOME/agentgrit — a path
+// that does not exist — coalesce the resulting null output to "", match no
+// counts, and write {"pass":0,"fail":0} as though it were a measurement. A run
+// that did not happen and a run with zero passing tests looked identical, and
+// neither reached the daemon's error list. Three rules come out of that:
+//
+//   1. the repo root is resolved from this module's own location, never guessed
+//   2. a run that could not be measured is recorded as UNMEASURED with a
+//      reason, and carries no pass count at all
+//   3. a working directory that does not exist is an error raised to the
+//      caller, not a result written to disk
+
+export interface TestCacheMeasured {
+  status: "MEASURED";
+  pass: number;
+  fail: number;
+  cwd: string;
+  exitCode: number | null;
+  timestamp: string;
+}
+
+export interface TestCacheUnmeasured {
+  status: "UNMEASURED";
+  reason: string;
+  cwd: string;
+  timestamp: string;
+}
+
+export type TestCacheResult = TestCacheMeasured | TestCacheUnmeasured;
+
+export interface TestCacheOptions {
+  /** Directory to run the suite in. Defaults to the running checkout. */
+  cwd?: string;
+  /** Command to run. Defaults to the project's own suite. */
+  command?: string[];
+  /** Where the result is written. Defaults to state/test-results.json. */
+  outputPath?: string;
+  timeoutMs?: number;
+}
+
+const DEFAULT_TEST_COMMAND = ["bun", "test", "test/"];
+const TEST_CACHE_TIMEOUT_MS = 600_000;
+/** bun's summary can be large; the 1 MB default truncates and kills the child. */
+const TEST_CACHE_MAX_BUFFER = 32 * 1024 * 1024;
+
+function sumCounts(output: string, pattern: RegExp): { total: number; matched: boolean } {
+  let total = 0;
+  let matched = false;
+  for (const m of output.matchAll(pattern)) {
+    total += parseInt(m[1], 10);
+    matched = true;
+  }
+  return { total, matched };
+}
+
+/**
+ * Run the test suite and cache the result for the dashboard.
+ *
+ * Returns MEASURED only when the output actually carried counts. Anything else
+ * — a runner that would not start, a termination, a non-zero exit that
+ * reported no failures, output the counters cannot read — is UNMEASURED with
+ * the reason attached, so a broken run is visible instead of looking like a
+ * suite with nothing in it.
+ */
+export async function runTestCache(options: TestCacheOptions = {}): Promise<TestCacheResult> {
+  const { spawnSync } = await import("child_process");
+  const { existsSync, mkdirSync, statSync, writeFileSync } = await import("fs");
+  const { dirname } = await import("path");
+  const { agentgritRepoRoot, statePath } = await import("../adapters/paths");
+
+  const cwd = options.cwd ?? agentgritRepoRoot();
+  const outputPath = options.outputPath ?? statePath("test-results.json");
+  const command = options.command ?? DEFAULT_TEST_COMMAND;
+  const timestamp = new Date().toISOString();
+
+  // Raised, not recorded: there is nothing to measure and nothing to write, so
+  // the caller has to hear about it.
+  if (!existsSync(cwd)) {
+    throw new Error(`test-cache: working directory does not exist: ${cwd}`);
+  }
+  if (!statSync(cwd).isDirectory()) {
+    throw new Error(`test-cache: working directory is not a directory: ${cwd}`);
+  }
+
+  const finish = (result: TestCacheResult): TestCacheResult => {
+    mkdirSync(dirname(outputPath), { recursive: true });
+    writeFileSync(outputPath, JSON.stringify(result, null, 2), "utf-8");
+    return result;
+  };
+  const unmeasured = (reason: string): TestCacheResult =>
+    finish({ status: "UNMEASURED", reason, cwd, timestamp });
+
+  const run = spawnSync(command[0], command.slice(1), {
+    cwd,
+    timeout: options.timeoutMs ?? TEST_CACHE_TIMEOUT_MS,
+    encoding: "utf-8",
+    maxBuffer: TEST_CACHE_MAX_BUFFER,
+  });
+
+  if (run.error) {
+    return unmeasured(`runner could not be spawned in ${cwd}: ${run.error.message}`);
+  }
+  if (run.signal) {
+    return unmeasured(`runner was terminated by ${run.signal} (timeout or kill)`);
+  }
+  if (run.status === null) {
+    return unmeasured("runner exited without a status code");
+  }
+
+  const output = (run.stdout ?? "") + (run.stderr ?? "");
+  const passes = sumCounts(output, /(\d+)\s+pass/g);
+  const failures = sumCounts(output, /(\d+)\s+fail/g);
+
+  if (!passes.matched && !failures.matched) {
+    const sample = output.trim().slice(0, 200) || "<no output>";
+    return unmeasured(
+      `output carried no pass/fail counts (exit ${run.status}): ${sample}`,
+    );
+  }
+  // A real failing suite exits non-zero AND reports its failures. A non-zero
+  // exit with nothing failing is a crash wearing a measurement's clothes.
+  if (run.status !== 0 && failures.total === 0) {
+    return unmeasured(
+      `runner exited ${run.status} but reported no failures — counts are not trustworthy`,
+    );
+  }
+
+  return finish({
+    status: "MEASURED",
+    pass: passes.total,
+    fail: failures.total,
+    cwd,
+    exitCode: run.status,
+    timestamp,
+  });
+}
+
 export async function runDaemonCycle(
   config: AgentGritConfig,
 ): Promise<CycleResult> {
@@ -736,29 +874,18 @@ export async function runDaemonCycle(
     result.errors.push(`correlation: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // 8. Test cache — run tests and cache results for dashboard
-  try {
-    const { spawnSync } = await import("child_process");
-    const { writeFileSync } = await import("fs");
-    const { join } = await import("path");
-    const { stateDir: getState } = await import("../adapters/paths");
-    const agRoot = join(process.env.HOME ?? "", "agentgrit");
-    const testResult = spawnSync("bun", ["test", "test/"], {
-      cwd: agRoot,
-      timeout: 600_000,
-      encoding: "utf-8",
-    });
-    const output = (testResult.stdout ?? "") + (testResult.stderr ?? "");
-    let pass = 0, fail = 0;
-    for (const m of output.matchAll(/(\d+)\s+pass/g)) pass += parseInt(m[1], 10);
-    for (const m of output.matchAll(/(\d+)\s+fail/g)) fail += parseInt(m[1], 10);
-    writeFileSync(
-      join(getState(), "test-results.json"),
-      JSON.stringify({ pass, fail, timestamp: new Date().toISOString() }, null, 2),
-      "utf-8",
-    );
-  } catch (err) {
-    result.errors.push(`test-cache: ${err instanceof Error ? err.message : String(err)}`);
+  // 8. Test cache — run tests and cache results for dashboard.
+  // Skipped under `bun test` so a cycle exercised by the suite does not spawn
+  // the suite again from inside itself.
+  if (process.env.NODE_ENV !== "test") {
+    try {
+      const cached = await runTestCache();
+      if (cached.status === "UNMEASURED") {
+        result.errors.push(`test-cache: UNMEASURED — ${cached.reason}`);
+      }
+    } catch (err) {
+      result.errors.push(`test-cache: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   // Dashboard export — write comprehensive JSON for control plane
