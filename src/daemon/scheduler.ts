@@ -47,6 +47,11 @@ export interface SchedulerConfig {
    * UNVERIFIED rather than silently treating "not checked" as "fine" (#277).
    */
   verifyArgs?: string[];
+  /**
+   * PATH for the scheduled job. Defaults to the installing shell's PATH —
+   * launchd gives a job a minimal one that does not include homebrew (#285).
+   */
+  path?: string;
 }
 
 export interface SchedulerPaths {
@@ -239,6 +244,40 @@ function timerPath(label: string): string {
 
 // ──────────────────────────── macOS LaunchAgent ────────────────────────────
 
+/**
+ * The PATH the scheduled job runs with.
+ *
+ * launchd does not give a job the user's login PATH — it gets a minimal
+ * `/usr/bin:/bin:/usr/sbin:/sbin`, and `launchctl getenv PATH` is empty on a
+ * default install. The daemon's test-cache step shells out to `bun`, which
+ * lives in /opt/homebrew/bin on an Apple Silicon machine, so every scheduled
+ * cycle reported `spawnSync bun ENOENT` while the identical command worked
+ * from a terminal (#285).
+ *
+ * Captured at install time rather than hardcoded: the install is run from the
+ * user's shell, which is the one place that knows where their tools are. The
+ * fallback is the launchd default, so a caller passing nothing is no worse off
+ * than before.
+ */
+export function schedulerPath(explicit?: string): string {
+  const LAUNCHD_DEFAULT = "/usr/bin:/bin:/usr/sbin:/sbin";
+  const captured = explicit ?? process.env.PATH ?? "";
+  // One decider. An earlier version also had an `if (!captured ||
+  // captured.trim().length === 0) return LAUNCHD_DEFAULT` above this, and
+  // removing it was 0 red across the whole suite — the filter below already
+  // discards empty and whitespace entries, so the two always agreed and no
+  // test could tell them apart. Kept the one that does the work.
+  //
+  // The launchd default stays on the end so the job keeps working if the
+  // captured PATH goes stale (a homebrew prefix that moved, a version manager
+  // shim that was uninstalled), and so an empty capture degrades to what the
+  // job would have had anyway rather than to nothing.
+  const entries = [...captured.split(":"), ...LAUNCHD_DEFAULT.split(":")]
+    .map(p => p.trim())
+    .filter(p => p.length > 0);
+  return [...new Set(entries)].join(":");
+}
+
 function commandArgv(config: SchedulerConfig): string[] {
   if (config.args && config.args.length > 0) return [config.command, ...config.args];
   return config.command.split(" ").filter((p) => p.length > 0);
@@ -288,6 +327,11 @@ export function generatePlist(config: SchedulerConfig): string {
 ${argEntries}
     </array>
 ${triggerBlock}
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>${escapeXml(schedulerPath(config.path))}</string>
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
@@ -307,6 +351,7 @@ After=network.target
 
 [Service]
 Type=oneshot
+Environment=PATH=${schedulerPath(config.path)}
 ExecStart=${config.command}
 
 [Install]
