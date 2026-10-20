@@ -223,7 +223,7 @@ AgentGrit is imported at runtime via dynamic `import()`. If unavailable, PAI fal
 
 | Area | Status | Reference |
 |------|--------|-----------|
-| Signal capture | COMPLETE | 216 tests pass |
+| Signal capture | COMPLETE | 339 tests pass |
 | Pattern detection | COMPLETE | 52 tests pass |
 | Rule promotion | COMPLETE | 370 tests pass |
 | Graph + injection | SHIPPED (hybrid) | BM25 + vector + graph 3-way RRF (#97, #98). PRF query expansion (#213). sanitizeRuleText. |
