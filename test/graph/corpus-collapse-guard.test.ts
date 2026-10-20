@@ -26,6 +26,7 @@ import {
   writeGraphFile,
   detectCorpusCollapse,
   resetClassifyPatterns,
+  GraphCollapseError,
 } from "../../src/graph/builder";
 import type { Graph } from "../../src/graph/types";
 import type { GraphNode } from "../../src/adapters/types";
@@ -125,7 +126,11 @@ describe("corpus collapse guard", () => {
     writePriorGraph(PRIOR_NODES);
     writeRuleFixture(RULES_DIR, FIXTURE_RULES, "legacy-rule");
 
-    await expect(buildGraph(RULES_DIR, STATE_DIR, RD_PATH)).rejects.toThrow(/collapse/i);
+    // Assert the type, not just the wording. A regex on the message passes for
+    // any unrelated failure whose text happens to contain "collapse" — including
+    // an IO error from the fixture — so it cannot distinguish the guard firing
+    // from the build breaking for some other reason.
+    await expect(buildGraph(RULES_DIR, STATE_DIR, RD_PATH)).rejects.toThrow(GraphCollapseError);
 
     // The 600-node graph on disk must be untouched.
     const onDisk = readGraphFile();
