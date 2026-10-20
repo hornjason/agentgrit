@@ -35,7 +35,7 @@ describe("installScheduler refuses a command that cannot run (#277)", () => {
             label: "com.agentgrit.test.badpair",
           },
           {
-            launchAgentDir: join(root, "LaunchAgents"),
+            launchAgentDir: join(root, "LaunchAgents"), systemdDir: join(root, "systemd"),
             logDir: join(root, "logs"),
             label: "com.agentgrit.test.badpair",
             // Never touch the developer's real launchd. This is not belt and
@@ -83,7 +83,7 @@ describe("installScheduler refuses a command that cannot run (#277)", () => {
             label: "com.agentgrit.test.msg",
           },
           {
-            launchAgentDir: join(root, "LaunchAgents"),
+            launchAgentDir: join(root, "LaunchAgents"), systemdDir: join(root, "systemd"),
             logDir: join(root, "logs"),
             label: "com.agentgrit.test.msg",
             register: false, // see the note on the case above
@@ -119,7 +119,7 @@ describe("installScheduler refuses a command that cannot run (#277)", () => {
           label: "com.agentgrit.test.goodpair",
         },
         {
-          launchAgentDir: join(root, "LaunchAgents"),
+          launchAgentDir: join(root, "LaunchAgents"), systemdDir: join(root, "systemd"),
           logDir: join(root, "logs"),
           label: "com.agentgrit.test.goodpair",
           register: false,
@@ -149,7 +149,7 @@ describe("installScheduler refuses a command that cannot run (#277)", () => {
           label: "com.agentgrit.test.noverify",
         },
         {
-          launchAgentDir: join(root, "LaunchAgents"),
+          launchAgentDir: join(root, "LaunchAgents"), systemdDir: join(root, "systemd"),
           logDir: join(root, "logs"),
           label: "com.agentgrit.test.noverify",
           register: false,
