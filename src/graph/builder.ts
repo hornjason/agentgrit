@@ -155,7 +155,7 @@ function graphOutputPath(stateOutputDir?: string): string {
 }
 
 /** Read the graph at an explicit path, or null if there is nothing there. */
-export function readGraphAt(path: string): Graph | null {
+function readGraphAt(path: string): Graph | null {
   if (!existsSync(path)) return null;
   try {
     return JSON.parse(readFileSync(path, "utf-8")) as Graph;
@@ -170,13 +170,13 @@ export function readGraphAt(path: string): Graph | null {
  * A graph smaller than this is too small for a ratio to mean anything — a
  * three-rule fixture losing two rules is not an incident.
  */
-export const COLLAPSE_MIN_BASELINE = 20;
+const COLLAPSE_MIN_BASELINE = 20;
 
 /** Below this fraction of the previous node count, the build must explain itself. */
-export const COLLAPSE_RATIO = 0.5;
+const COLLAPSE_RATIO = 0.5;
 
 /** Set to "1" to write anyway. Named in the refusal message. */
-export const COLLAPSE_OVERRIDE_ENV = "AGENTGRIT_ALLOW_GRAPH_COLLAPSE";
+const COLLAPSE_OVERRIDE_ENV = "AGENTGRIT_ALLOW_GRAPH_COLLAPSE";
 
 export class GraphCollapseError extends Error {
   constructor(message: string) {
@@ -233,7 +233,7 @@ export function detectCorpusCollapse(
  * Throw if writing a graph with this shape to `outputPath` would collapse it.
  * Call this *before* any side effect of the build, not just at the write.
  */
-export function assertNoCorpusCollapse(
+function assertNoCorpusCollapse(
   outputPath: string,
   next: { nodeCount: number; builtFrom?: CorpusProvenance },
   previous?: Graph | null,
