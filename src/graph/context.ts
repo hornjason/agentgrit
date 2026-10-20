@@ -1051,37 +1051,100 @@ interface ParsedRule {
   text: string;
 }
 
+const RULE_HEADER = /^- \*\*([^*]+)\*\*/;
+
+/**
+ * The bullets of a rendered context file, bodies kept whole.
+ *
+ * The body is every line up to the next bullet or heading, not just the one
+ * after the header: a rule whose text contains a newline used to be truncated
+ * to its first line on every merge, and the loss compounded refresh on refresh.
+ */
 function parseRulesFromMarkdown(md: string): ParsedRule[] {
   const rules: ParsedRule[] = [];
   const lines = md.split("\n");
 
   for (let i = 0; i < lines.length; i++) {
-    const match = lines[i].match(/^- \*\*([^*]+)\*\*/);
-    if (match) {
-      const id = match[1];
-      const header = lines[i];
-      const textLine = i + 1 < lines.length ? lines[i + 1] : "";
-      rules.push({ id, header, text: textLine });
+    const match = lines[i].match(RULE_HEADER);
+    if (!match) continue;
+
+    const body: string[] = [];
+    for (let j = i + 1; j < lines.length; j++) {
+      if (RULE_HEADER.test(lines[j]) || /^#{1,6}\s/.test(lines[j])) break;
+      body.push(lines[j]);
     }
+    while (body.length > 0 && body[body.length - 1].trim() === "") body.pop();
+
+    rules.push({ id: match[1], header: lines[i], text: body.join("\n") });
   }
   return rules;
 }
 
+/** Ids are written `**rule_id**`, but a stale render spelled them `**rule_id:**`. */
+function normalizeRuleId(id: string): string {
+  return id.trim().replace(/:$/, "");
+}
+
+/**
+ * A body that is empty, or that is just the rule's own id, is the Silent
+ * Default Substitution defect — not a short rule. It must never be carried
+ * forward: `- **some_rule** [general] (score: 0.04)` / `  some_rule` reads as a
+ * rule, occupies budget and ranks, while saying nothing.
+ */
+function isDegenerateBody(id: string, text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+  return normalizeRuleId(trimmed) === normalizeRuleId(id);
+}
+
+function indentBody(text: string): string {
+  return text
+    .split("\n")
+    .map(line => (line.trim() ? `  ${line.trim()}` : ""))
+    .join("\n");
+}
+
+/**
+ * Merge the rendered context file with a freshly retrieved one.
+ *
+ * Two ordering facts matter and are both load-bearing:
+ *
+ * 1. Incoming rules are seated before carried-over ones, so `budgetCap`
+ *    truncates the stale tail. Seating existing first meant that once the file
+ *    held `budgetCap` entries no newly retrieved rule could ever enter it
+ *    again — measured on the live file as 0 of 2 fresh rules admitted while
+ *    15 of 15 stale slugs survived.
+ * 2. When a `graph` is supplied every surviving entry's text is re-resolved
+ *    from it, so a bad render is repaired on the next refresh instead of being
+ *    copied forward verbatim forever. Entries that resolve to nothing keep
+ *    their parsed body; entries whose body is degenerate are dropped outright.
+ */
 export function mergeGraphContextMarkdown(
   existing: string,
   incoming: string,
   budgetCap: number = 15,
+  graph?: Graph,
+  index?: BM25Index,
 ): string {
-  const existingRules = parseRulesFromMarkdown(existing);
-  const incomingRules = parseRulesFromMarkdown(incoming);
+  const refresh = (rule: ParsedRule): ParsedRule | null => {
+    let text = rule.text;
+    if (graph) {
+      const resolved = resolveRuleText(normalizeRuleId(rule.id), graph, index);
+      // No resolution is "this corpus does not carry the rule", not "the rule
+      // is empty" — fall back to what the file already had rather than losing it.
+      if (resolved) text = sanitizeRuleText(resolved);
+    }
+    if (isDegenerateBody(rule.id, text)) return null;
+    return { ...rule, text: indentBody(text) };
+  };
 
   const merged = new Map<string, ParsedRule>();
-
-  for (const rule of existingRules) {
-    merged.set(rule.id, rule);
-  }
-  for (const rule of incomingRules) {
-    merged.set(rule.id, rule);
+  // Incoming first: this is what reserves the budget for freshly retrieved rules.
+  for (const rule of [...parseRulesFromMarkdown(incoming), ...parseRulesFromMarkdown(existing)]) {
+    const id = normalizeRuleId(rule.id);
+    if (merged.has(id)) continue;
+    const refreshed = refresh(rule);
+    if (refreshed) merged.set(id, refreshed);
   }
 
   const allRules = [...merged.values()].slice(0, budgetCap);

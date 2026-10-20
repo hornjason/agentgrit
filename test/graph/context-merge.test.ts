@@ -13,6 +13,56 @@ afterEach(() => {
   if (existsSync(TEMP_DIR)) rmSync(TEMP_DIR, { recursive: true });
 });
 
+/** Ids of the bullets a merged file actually carries, in file order. */
+function ruleIds(markdown: string): string[] {
+  return markdown
+    .split("\n")
+    .map(l => l.match(/^- \*\*([^*]+)\*\*/))
+    .filter((m): m is RegExpMatchArray => m !== null)
+    .map(m => m[1]);
+}
+
+/** The body lines that follow a bullet, up to the next bullet. */
+function bodyOf(markdown: string, id: string): string {
+  const lines = markdown.split("\n");
+  const start = lines.findIndex(l => l.startsWith(`- **${id}**`));
+  if (start === -1) return "";
+  const body: string[] = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^- \*\*/.test(lines[i])) break;
+    body.push(lines[i]);
+  }
+  return body.join("\n").trim();
+}
+
+function graphWith(nodes: Record<string, string>) {
+  return {
+    version: "1",
+    builtAt: "2026-10-20T00:00:00Z",
+    nodeCount: Object.keys(nodes).length,
+    edgeCount: 0,
+    edges: [],
+    nodes: Object.fromEntries(
+      Object.entries(nodes).map(([id, description]) => [
+        id,
+        {
+          id,
+          file: `${id}.md`,
+          type: "feedback",
+          name: id,
+          description,
+          domains: ["testing"],
+          severity: 1,
+          occurrence_count: 1,
+          last_updated: "2026-10-20T00:00:00Z",
+          content_hash: id,
+          memoryType: "feedback",
+        },
+      ]),
+    ),
+  } as any;
+}
+
 describe("mergeGraphContextMarkdown", () => {
   test("merges new rules with existing, deduplicating by ID", async () => {
     const { mergeGraphContextMarkdown } = await import("../../src/graph/context");
@@ -58,7 +108,7 @@ describe("mergeGraphContextMarkdown", () => {
     expect(merged).not.toContain("Rule A text here");
   });
 
-  test("skips overwrite when incoming has fewer rules than existing", async () => {
+  test("carries existing rules forward when the merged set fits the budget", async () => {
     const { mergeGraphContextMarkdown } = await import("../../src/graph/context");
 
     const existing = [
@@ -90,18 +140,21 @@ describe("mergeGraphContextMarkdown", () => {
       "",
       "## Context Rules (correlation-ranked)",
       "",
-      "- **rule_1** [t] (score: 0.9)",
-      "  text 1",
+      "- **rule_5** [t] (score: 0.5)",
+      "  text 5",
       "",
     ].join("\n");
 
     const merged = mergeGraphContextMarkdown(existing, incoming, 15);
-    // All 5 existing rules should be preserved
+    // 5 unique ids under a cap of 15: nothing is displaced, so all survive.
     expect(merged).toContain("rule_1");
     expect(merged).toContain("rule_2");
     expect(merged).toContain("rule_3");
     expect(merged).toContain("rule_4");
     expect(merged).toContain("rule_5");
+    // Carrying existing forward is not the same as ignoring the incoming file:
+    // the freshly retrieved rule leads the budget.
+    expect(ruleIds(merged)[0]).toBe("rule_5");
   });
 
   test("respects budget cap", async () => {
@@ -160,5 +213,159 @@ describe("mergeGraphContextMarkdown", () => {
     const merged = mergeGraphContextMarkdown("", incoming, 15);
     expect(merged).toContain("rule_1");
     expect(merged).toContain("rule_2");
+  });
+
+  test("drops a carried-over entry whose body is its own id", async () => {
+    const { mergeGraphContextMarkdown } = await import("../../src/graph/context");
+
+    const existing = [
+      "# Graph Context — testing",
+      "*Generated: 2026-10-20T00:05:50Z | 3 context rules from [testing]*",
+      "",
+      "## Context Rules (correlation-ranked)",
+      "",
+      "- **merge291_slug_rule** [general] (score: 0.04)",
+      "  merge291_slug_rule",
+      "",
+      "- **merge291_blank_rule** [general] (score: 0.03)",
+      "  ",
+      "",
+      "- **merge291_real_rule** [testing] (score: 0.50)",
+      "  A rule with actual body text",
+      "",
+    ].join("\n");
+
+    const incoming = [
+      "# Graph Context — testing",
+      "*Generated: 2026-10-20T00:10:24Z | 1 context rules from [testing]*",
+      "",
+      "## Context Rules (correlation-ranked)",
+      "",
+      "- **merge291_fresh_rule** [testing] (score: 0.80)",
+      "  Freshly retrieved body text",
+      "",
+    ].join("\n");
+
+    const merged = mergeGraphContextMarkdown(existing, incoming, 15);
+    const ids = ruleIds(merged);
+    expect(ids).not.toContain("merge291_slug_rule");
+    expect(ids).not.toContain("merge291_blank_rule");
+    expect(ids).toContain("merge291_real_rule");
+    expect(ids).toContain("merge291_fresh_rule");
+    // The header count is a measurement of what the file carries.
+    expect(merged).toContain(`| ${ids.length} context rules`);
+  });
+
+  test("admits fresh rules when the existing file already fills the budget", async () => {
+    const { mergeGraphContextMarkdown } = await import("../../src/graph/context");
+
+    const existingLines: string[] = [
+      "# Graph Context — testing",
+      "*Generated: 2026-10-20T00:05:50Z | 15 context rules from [testing]*",
+      "",
+      "## Context Rules (correlation-ranked)",
+      "",
+    ];
+    for (let i = 1; i <= 15; i++) {
+      existingLines.push(`- **merge291_old_${i}** [t] (score: ${(0.5 - i * 0.01).toFixed(2)})`);
+      existingLines.push(`  old body text ${i}`);
+      existingLines.push("");
+    }
+
+    const incomingLines: string[] = [
+      "# Graph Context — testing",
+      "*Generated: 2026-10-20T00:10:24Z | 2 context rules from [testing]*",
+      "",
+      "## Context Rules (correlation-ranked)",
+      "",
+    ];
+    for (let i = 1; i <= 2; i++) {
+      incomingLines.push(`- **merge291_fresh_${i}** [t] (score: 0.9${i})`);
+      incomingLines.push(`  fresh body text ${i}`);
+      incomingLines.push("");
+    }
+
+    const merged = mergeGraphContextMarkdown(
+      existingLines.join("\n"),
+      incomingLines.join("\n"),
+      15,
+    );
+    const ids = ruleIds(merged);
+    expect(ids.length).toBe(15);
+    // Every freshly retrieved rule is admitted; the budget costs the oldest
+    // carried-over entries, not the new ones.
+    expect(ids).toContain("merge291_fresh_1");
+    expect(ids).toContain("merge291_fresh_2");
+    expect(ids.slice(0, 2)).toEqual(["merge291_fresh_1", "merge291_fresh_2"]);
+    expect(ids).not.toContain("merge291_old_15");
+  });
+
+  test("re-resolves a carried-over entry's text from the graph", async () => {
+    const { mergeGraphContextMarkdown } = await import("../../src/graph/context");
+
+    const existing = [
+      "# Graph Context — testing",
+      "*Generated: 2026-10-20T00:05:50Z | 1 context rules from [testing]*",
+      "",
+      "## Context Rules (correlation-ranked)",
+      "",
+      "- **merge291_stale_rule** [general] (score: 0.04)",
+      "  merge291_stale_rule",
+      "",
+    ].join("\n");
+
+    const incoming = [
+      "# Graph Context — testing",
+      "*Generated: 2026-10-20T00:10:24Z | 1 context rules from [testing]*",
+      "",
+      "## Context Rules (correlation-ranked)",
+      "",
+      "- **merge291_fresh_rule** [testing] (score: 0.80)",
+      "  Freshly retrieved body text",
+      "",
+    ].join("\n");
+
+    const graph = graphWith({
+      merge291_stale_rule: "The real body the graph holds for this rule",
+    });
+
+    const merged = mergeGraphContextMarkdown(existing, incoming, 15, graph);
+    expect(ruleIds(merged)).toContain("merge291_stale_rule");
+    expect(bodyOf(merged, "merge291_stale_rule")).toBe(
+      "The real body the graph holds for this rule",
+    );
+    expect(merged).not.toContain("\n  merge291_stale_rule\n");
+  });
+
+  test("keeps a multi-line rule body intact across a merge", async () => {
+    const { mergeGraphContextMarkdown } = await import("../../src/graph/context");
+
+    const existing = [
+      "# Graph Context — testing",
+      "*Generated: 2026-10-20T00:05:50Z | 1 context rules from [testing]*",
+      "",
+      "## Context Rules (correlation-ranked)",
+      "",
+      "- **merge291_multiline** [t] (score: 0.70)",
+      "  First line of the rule body",
+      "  Second line that must survive",
+      "",
+    ].join("\n");
+
+    const incoming = [
+      "# Graph Context — testing",
+      "*Generated: 2026-10-20T00:10:24Z | 1 context rules from [testing]*",
+      "",
+      "## Context Rules (correlation-ranked)",
+      "",
+      "- **merge291_fresh_rule** [t] (score: 0.80)",
+      "  Freshly retrieved body text",
+      "",
+    ].join("\n");
+
+    const merged = mergeGraphContextMarkdown(existing, incoming, 15);
+    expect(bodyOf(merged, "merge291_multiline")).toBe(
+      "First line of the rule body\n  Second line that must survive",
+    );
   });
 });

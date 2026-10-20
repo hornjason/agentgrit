@@ -8,15 +8,28 @@ export interface ReadOptions {
 }
 
 export async function appendSignal(file: string, signal: AnySignal): Promise<void> {
+  await appendSignals(file, [signal]);
+}
+
+/**
+ * Append many signals in one atomic rewrite.
+ *
+ * Every append here rewrites the whole file, so a bulk writer that loops over
+ * appendSignal is quadratic: the ratings backfill (#260) recovers ~800 records
+ * and would rewrite the file 800 times. One call, one rewrite.
+ */
+export async function appendSignals(file: string, signals: AnySignal[]): Promise<void> {
+  if (signals.length === 0) return;
+
   const dir = dirname(file);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
-  const line = JSON.stringify(signal) + "\n";
+  const lines = signals.map((s) => JSON.stringify(s) + "\n").join("");
   const tmpPath = file + ".tmp." + process.pid;
 
   writeFileSync(tmpPath, "");
   const existing = existsSync(file) ? readFileSync(file, "utf-8") : "";
-  writeFileSync(tmpPath, existing + line);
+  writeFileSync(tmpPath, existing + lines);
   try {
     renameSync(tmpPath, file);
   } catch {

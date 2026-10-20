@@ -175,9 +175,32 @@ WantedBy=timers.target
 
 ### Status Detection
 
-`getSchedulerStatus()` checks:
-- **macOS**: whether the plist file exists, and whether `daemon.log` was modified within the last hour
-- **Linux**: whether both the service and timer files exist
+`getSchedulerStatus()` reports `installed` from the filesystem and `registered`
+from the platform scheduler. The two are separate readings and are allowed to
+disagree — a unit or plist file on disk is not a scheduled job (#259, #275).
+
+- **macOS**: `installed` is "the plist exists"; `registered` is `launchctl list <label>`
+- **Linux**: `installed` is "both the `.service` and `.timer` exist";
+  `registered` is `systemctl --user is-enabled <label>.timer`
+
+`checkSchedulerRegistered()` names the disagreement:
+
+| State | Status |
+|---|---|
+| Nothing on disk, nothing registered | `missing-scheduler` |
+| Plist on disk, launchd has not loaded it | `plist-not-loaded` |
+| Unit files on disk, timer not enabled | `timer-not-enabled` |
+| Registered, but the log has gone stale | `stale` |
+| The registry could not be reached at all | `probe-failed` |
+
+`probe-failed` is what a container with no systemd user session gets: the
+probe reads the state word `systemctl is-enabled` prints, and a D-Bus failure
+prints none, so "cannot tell" is reported as a failure rather than guessed
+either way. `agentgrit daemon status` exits non-zero there, deliberately.
+
+Paths are overridable per call (`launchAgentDir`, `systemdDir`, `logDir`,
+`label`); under `NODE_ENV=test` every one left at its real value is refused,
+because each reaches the host on its own.
 
 ## Session Cleanup
 

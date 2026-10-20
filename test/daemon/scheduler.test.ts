@@ -100,7 +100,7 @@ describe("install/uninstall/status", () => {
     // result is a fact about the host is not a test of this function.
     const root = mkdtempSync(join(tmpdir(), "agentgrit-status-"));
     const status = await getSchedulerStatus({
-      launchAgentDir: join(root, "LaunchAgents"),
+      launchAgentDir: join(root, "LaunchAgents"), systemdDir: join(root, "systemd"),
       logDir: join(root, "logs"),
       label: "com.agentgrit.test.status",
     });
@@ -133,7 +133,7 @@ describe("install/uninstall/status", () => {
     try {
       await expect(
         uninstallScheduler({
-          launchAgentDir: join(root, "LaunchAgents"),
+          launchAgentDir: join(root, "LaunchAgents"), systemdDir: join(root, "systemd"),
           logDir: join(root, "logs"),
           label: "com.agentgrit.test.uninstall-noop",
         }),

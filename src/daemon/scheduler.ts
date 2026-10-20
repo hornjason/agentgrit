@@ -56,6 +56,13 @@ export interface SchedulerConfig {
 
 export interface SchedulerPaths {
   launchAgentDir: string;
+  /**
+   * Where the systemd user units live. Overridable for the same reason
+   * `launchAgentDir` is: without it a test that wants a `.timer` on disk has
+   * to write one into the developer's real ~/.config/systemd/user, so the
+   * state #275 is about could not be set up at all (#275).
+   */
+  systemdDir: string;
   logDir: string;
   label: string;
 }
@@ -133,6 +140,10 @@ function defaultLaunchAgentDir(): string {
   return join(homedir(), "Library", "LaunchAgents");
 }
 
+function defaultSystemdDir(): string {
+  return join(homedir(), ".config", "systemd", "user");
+}
+
 /**
  * Refuse to let a test reach the developer's real scheduler.
  *
@@ -195,6 +206,13 @@ export function hostSchedulerEscape(
   if (samePath(opts.launchAgentDir ?? defaultLaunchAgentDir(), defaultLaunchAgentDir())) {
     offenders.push(`launchAgentDir ${defaultLaunchAgentDir()}`);
   }
+  // systemdDir is refused on the same terms, and on every platform, exactly as
+  // launchAgentDir is. On linux `installScheduler` writes two unit files there
+  // and `uninstallScheduler` unlinks them, so an unscoped test deletes the
+  // user's real units — #281 with a different filename (#275).
+  if (samePath(opts.systemdDir ?? defaultSystemdDir(), defaultSystemdDir())) {
+    offenders.push(`systemdDir ${defaultSystemdDir()}`);
+  }
   if (samePath(opts.logDir ?? defaultLogDir(), defaultLogDir())) {
     offenders.push(`logDir ${defaultLogDir()}`);
   }
@@ -202,9 +220,9 @@ export function hostSchedulerEscape(
 
   return (
     `Refusing to touch the real scheduler from a test run — ` +
-    `${offenders.join("; ")}. Scope label, launchAgentDir and logDir to a ` +
-    `temp directory; any one left real is refused, because each reaches the ` +
-    `host on its own (#281, #283).`
+    `${offenders.join("; ")}. Scope label, launchAgentDir, systemdDir and ` +
+    `logDir to a temp directory; any one left real is refused, because each ` +
+    `reaches the host on its own (#281, #283, #275).`
   );
 }
 
@@ -213,6 +231,7 @@ function resolvePaths(opts: SchedulerOptions = {}): SchedulerPaths {
   if (escape) throw new Error(escape);
   return {
     launchAgentDir: opts.launchAgentDir ?? defaultLaunchAgentDir(),
+    systemdDir: opts.systemdDir ?? defaultSystemdDir(),
     logDir: opts.logDir ?? defaultLogDir(),
     label: opts.label ?? DEFAULT_LABEL,
   };
@@ -230,16 +249,17 @@ function stderrPath(logDir: string): string {
   return join(logDir, "daemon.err.log");
 }
 
-function systemdDir(): string {
-  return join(homedir(), ".config", "systemd", "user");
+function servicePath(paths: SchedulerPaths): string {
+  return join(paths.systemdDir, `${paths.label}.service`);
 }
 
-function servicePath(label: string): string {
-  return join(systemdDir(), `${label}.service`);
+function timerPath(paths: SchedulerPaths): string {
+  return join(paths.systemdDir, `${paths.label}.timer`);
 }
 
-function timerPath(label: string): string {
-  return join(systemdDir(), `${label}.timer`);
+/** True when both unit files are on disk. Says nothing about enablement. */
+function unitFilesPresent(paths: SchedulerPaths): boolean {
+  return existsSync(timerPath(paths)) && existsSync(servicePath(paths));
 }
 
 // ──────────────────────────── macOS LaunchAgent ────────────────────────────
@@ -406,6 +426,12 @@ function serviceTarget(label: string): string {
  * never be reported as a clean answer in either direction.
  */
 export async function isSchedulerRegistered(label: string = DEFAULT_LABEL): Promise<boolean> {
+  // NOT routed through querySystemd on linux, deliberately. `return false`
+  // here is the same confident wrong answer #275 is about, but this function
+  // takes no injection seam, so a linux case for it would have to run the
+  // host's real systemctl — a test whose result is a fact about the machine,
+  // which is the #249 shape. Left alone rather than changed untested; the
+  // single caller is darwin-gated. See the follow-up noted on #275.
   if (process.platform !== "darwin") return false;
   return queryLaunchd(label);
 }
@@ -423,19 +449,94 @@ function queryLaunchd(label: string): boolean {
   }
 }
 
+// ────────────────────────────── systemd registry ──────────────────────────────
+
+/** States `systemctl is-enabled` prints when it has actually reached systemd. */
+const SYSTEMD_ENABLEMENT_STATES = new Set([
+  "enabled",
+  "enabled-runtime",
+  "linked",
+  "linked-runtime",
+  "alias",
+  "masked",
+  "masked-runtime",
+  "static",
+  "indirect",
+  "disabled",
+  "generated",
+  "transient",
+  "not-found",
+  "bad",
+]);
+
+/** Injectable runner so the probe's contract is testable off linux. */
+export type SystemdRunner = (file: string, args: string[]) => string;
+
+function runSystemctl(file: string, args: string[]): string {
+  return execFileSync(file, args, { stdio: ["ignore", "pipe", "pipe"] }).toString();
+}
+
+/**
+ * Ask systemd whether a timer is enabled. The linux mirror of queryLaunchd.
+ *
+ * `existsSync(timer) && existsSync(service)` was the old reading, and it is
+ * the exact conflation #259 was filed about: a `.timer` written but never
+ * `systemctl --user enable`d sat on disk while systemd had never heard of it
+ * and nothing ever fired (#275).
+ *
+ * Deliberately NOT fail-open, and deliberately NOT a bare exit-status mirror
+ * of queryLaunchd either. `systemctl --user is-enabled` exits non-zero for two
+ * unrelated reasons:
+ *
+ *   - systemd answered, and the answer was "disabled" / "not-found". That is a
+ *     legitimate false, and the answer word is on stdout.
+ *   - systemctl never reached systemd at all — no D-Bus session, which is what
+ *     a CI container gives you. Exit status is still 1 and stdout is empty.
+ *
+ * Treating the second as "not registered" would be a guess dressed as an
+ * answer, so the status word on stdout is what decides and anything else
+ * throws. That is why this reads stdout rather than the exit code: the exit
+ * code's view of the input silently shrinks to "something went wrong", which
+ * is the shape .claude/rules/checks-must-be-able-to-fail.md calls a detector
+ * narrower than what it detects.
+ *
+ * The no-D-Bus container therefore surfaces as `probe-failed`, never as `ok`
+ * and never as a confident `missing-scheduler`.
+ */
+export function querySystemd(label: string, run: SystemdRunner = runSystemctl): boolean {
+  let out: string;
+  try {
+    out = run("systemctl", ["--user", "is-enabled", `${label}.timer`]);
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException & { status?: number | null; stdout?: Buffer | string };
+    const word = (e.stdout?.toString() ?? "").trim().split(/\s+/)[0] ?? "";
+    if (typeof e.status === "number" && SYSTEMD_ENABLEMENT_STATES.has(word)) {
+      // systemd answered. "disabled", "not-found", "static" — all mean the
+      // timer is not going to fire on its own.
+      return word === "enabled" || word === "enabled-runtime";
+    }
+    // Could not reach systemd (no systemctl, no D-Bus session, no user
+    // manager). We do not know. Do not guess.
+    throw new Error(
+      `could not query systemd for ${label}: ${e.message.trim()}` +
+        ` (a container with no systemd user session cannot answer this;` +
+        ` that is reported as probe-failed, not as "not registered")`,
+    );
+  }
+  const word = out.trim().split(/\s+/)[0] ?? "";
+  return word === "enabled" || word === "enabled-runtime";
+}
+
 /**
  * The registry reading for this platform, used when no probe is injected.
  *
- * NOTE the asymmetry, which this function makes visible rather than fixes.
- * On darwin we ask launchd whether the job is loaded. On linux we only check
- * that the unit files exist on disk — which is the same "a file is not a
- * scheduled job" conflation #259 was filed about, still in place for systemd.
- * Preserved exactly as it was so this refactor changes no behaviour; see the
- * follow-up issue for making the linux side ask systemd.
+ * Both arms now ask the platform scheduler rather than the filesystem: launchd
+ * on darwin, systemd on linux. The asymmetry this function used to document —
+ * darwin asking launchd while linux asked existsSync — was #275.
  */
 function defaultRegistryProbe(): (label: string) => boolean {
   if (process.platform === "darwin") return queryLaunchd;
-  return (label: string) => existsSync(timerPath(label)) && existsSync(servicePath(label));
+  return (label: string) => querySystemd(label);
 }
 
 /**
@@ -546,9 +647,9 @@ export async function installScheduler(
   }
 
   if (process.platform === "linux") {
-    mkdirSync(systemdDir(), { recursive: true });
-    writeFileSync(servicePath(paths.label), generateSystemdService(config));
-    writeFileSync(timerPath(paths.label), generateSystemdTimer(config));
+    mkdirSync(paths.systemdDir, { recursive: true });
+    writeFileSync(servicePath(paths), generateSystemdService(config));
+    writeFileSync(timerPath(paths), generateSystemdTimer(config));
 
     if (!register) return;
     try {
@@ -583,8 +684,8 @@ export async function uninstallScheduler(opts: SchedulerOptions = {}): Promise<v
     } catch {
       // Not enabled.
     }
-    const sPath = servicePath(paths.label);
-    const tPath = timerPath(paths.label);
+    const sPath = servicePath(paths);
+    const tPath = timerPath(paths);
     if (existsSync(sPath)) unlinkSync(sPath);
     if (existsSync(tPath)) unlinkSync(tPath);
   }
@@ -592,7 +693,10 @@ export async function uninstallScheduler(opts: SchedulerOptions = {}): Promise<v
 
 export async function getSchedulerStatus(opts: SchedulerOptions = {}): Promise<SchedulerStatus> {
   const paths = resolvePaths(opts);
-  const probe = opts.probe ?? queryLaunchd;
+  // defaultRegistryProbe(), not queryLaunchd: this defaulted to the launchd
+  // query on every platform and then never consulted it off darwin, so an
+  // injected probe was silently discarded on linux (#275).
+  const probe = opts.probe ?? defaultRegistryProbe();
 
   const status: SchedulerStatus = {
     installed: false,
@@ -602,16 +706,18 @@ export async function getSchedulerStatus(opts: SchedulerOptions = {}): Promise<S
     label: paths.label,
   };
 
-  if (process.platform === "darwin") {
-    status.installed = existsSync(plistPath(paths));
+  if (process.platform === "darwin" || process.platform === "linux") {
+    status.installed =
+      process.platform === "darwin" ? existsSync(plistPath(paths)) : unitFilesPresent(paths);
+    // `status.registered = status.installed` is what the linux arm used to
+    // say. That is the line `agentgrit daemon status` prints as
+    // "Registered: yes", so two unit files on disk and a timer systemd had
+    // never enabled were reported as a running scheduler (#275).
     try {
       status.registered = probe(paths.label);
     } catch {
       status.registered = false;
     }
-  } else if (process.platform === "linux") {
-    status.installed = existsSync(timerPath(paths.label)) && existsSync(servicePath(paths.label));
-    status.registered = status.installed;
   }
 
   const logPath = stdoutPath(paths.logDir);
@@ -633,6 +739,13 @@ export type SchedulerCheckStatus =
   | "not-configured"
   | "missing-scheduler"
   | "plist-not-loaded"
+  /**
+   * The linux sibling of `plist-not-loaded`: unit files on disk, timer not
+   * enabled. A separate name rather than a rename, because the two messages
+   * name different commands and `plist-not-loaded` is already matched on by
+   * the darwin case (#275).
+   */
+  | "timer-not-enabled"
   | "stale"
   | "unsupported-platform"
   | "probe-failed";
@@ -661,14 +774,20 @@ export interface SchedulerCheckConfig {
  * Fail when daemon.interval is configured but no scheduler is actually
  * registered with the platform.
  *
- * This is the check #259 lacked. It distinguishes the three states the old
- * existsSync() test collapsed into one:
- *   - no plist at all              -> missing-scheduler
- *   - plist on disk, launchd blind -> plist-not-loaded  (the #259 silent mode)
- *   - registered but not firing    -> stale
+ * This is the check #259 lacked. It distinguishes the states the old
+ * existsSync() test collapsed into one, on BOTH platforms (#275):
+ *   - no unit/plist at all            -> missing-scheduler
+ *   - plist on disk, launchd blind    -> plist-not-loaded    (the #259 mode)
+ *   - units on disk, timer not enabled-> timer-not-enabled   (its linux twin)
+ *   - registered but not firing       -> stale
+ *   - registry unreachable            -> probe-failed
  *
- * Intended to be called from doctor. Not fail-open: if the registry probe
- * cannot answer, that is reported as a failure, never as "ok".
+ * Called from `agentgrit daemon status` (bin/commands/daemon.ts) — an earlier
+ * version of this comment said "doctor", which has never called it. Not
+ * fail-open: if the registry probe cannot answer, that is reported as a
+ * failure, never as "ok". On a CI container with no systemd user session that
+ * means `probe-failed` and a non-zero exit from `daemon status`, which is the
+ * deliberate choice recorded in #275 — "cannot tell" must not read as "fine".
  */
 export async function checkSchedulerRegistered(
   config: SchedulerCheckConfig,
@@ -721,9 +840,7 @@ export async function checkSchedulerRegistered(
   }
 
   detail.plistPresent =
-    process.platform === "darwin"
-      ? existsSync(plistPath(paths))
-      : existsSync(timerPath(paths.label)) && existsSync(servicePath(paths.label));
+    process.platform === "darwin" ? existsSync(plistPath(paths)) : unitFilesPresent(paths);
 
   // The probe is consulted on every supported platform, not just darwin. It
   // used to sit inside `if (platform === "darwin")`, with the else branch
@@ -749,6 +866,17 @@ export async function checkSchedulerRegistered(
   }
 
   if (!detail.registered) {
+    if (detail.plistPresent && process.platform === "linux") {
+      return {
+        ok: false,
+        status: "timer-not-enabled",
+        message:
+          `${timerPath(paths)} and its .service exist but systemd has not enabled ` +
+          `${paths.label}.timer. A unit file is not a scheduled job. ` +
+          `Run 'agentgrit daemon start' to enable it.`,
+        detail,
+      };
+    }
     if (detail.plistPresent) {
       return {
         ok: false,
