@@ -82,12 +82,16 @@ describe("CAPTURE section", () => {
 });
 
 describe("SCORING section", () => {
-  test("warns when no judge API key", async () => {
+  test("reports an unconfigured judge as info, not a fault (#288)", async () => {
     const report = await runDoctor(makeConfig());
     const scoring = report.sections.find((s) => s.name === "SCORING")!;
     const keyCheck = scoring.checks.find((c) => c.name === "judge-api-key")!;
 
-    expect(keyCheck.status).toBe("warning");
+    // Still detected and still reported — an optional feature nobody enabled
+    // is a reading, not something the operator is being asked to fix.
+    expect(keyCheck.status).toBe("info");
+    expect(keyCheck.message).toContain("LLM scoring disabled");
+    expect(scoring.status).not.toBe("warning");
   });
 
   test("reports ok when judge configured", async () => {
@@ -132,7 +136,7 @@ describe("RULES section", () => {
     expect(rules.status).toBe("ok");
   });
 
-  test("warns when global rules near budget", async () => {
+  test("reports global rules near budget as info (#288)", async () => {
     mkdirSync(RULES_DIR, { recursive: true });
     for (let i = 0; i < 22; i++) {
       writeFileSync(join(RULES_DIR, `rule-${i}.md`), `---\ntype: global\n---\nRule ${i}`);
@@ -143,7 +147,10 @@ describe("RULES section", () => {
     const rules = report.sections.find((s) => s.name === "RULES")!;
     const globalCheck = rules.checks.find((c) => c.name === "global-rules")!;
 
-    expect(globalCheck.status).toBe("warning");
+    // Approaching a cap asks the operator to do nothing — eviction runs on its
+    // own schedule. Exceeding it is still an error; see the test below.
+    expect(globalCheck.status).toBe("info");
+    expect(globalCheck.message).toBe("22 / 25 global rules");
   });
 
   test("errors when global rules over budget", async () => {
@@ -172,8 +179,10 @@ describe("RULES section", () => {
     const learnedCheck = rules.checks.find((c) => c.name === "learned-rules")!;
     const globalCheck = rules.checks.find((c) => c.name === "global-rules")!;
 
-    // 47 learned rules within budget of 50 but near warning threshold (50-5=45)
-    expect(learnedCheck.status).toBe("warning");
+    // 47 learned rules within budget of 50 but near the threshold (50-5=45).
+    // Reported, but as info — this is the exact line that made `doctor` show a
+    // standing warning on a healthy install (#288).
+    expect(learnedCheck.status).toBe("info");
     expect(learnedCheck.message).toContain("47");
     expect(learnedCheck.message).toContain("50");
     // 0 global rules — ok

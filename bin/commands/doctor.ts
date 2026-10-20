@@ -145,12 +145,13 @@ export async function doctorCommand(_args: string[]): Promise<void> {
   if (!config.daemon) config.daemon = { interval: "30m", weeklyDay: "sunday" };
   const report = await runDoctorSrc(config);
 
+  const icon = (status: string): string =>
+    status === "ok" ? "✓" : status === "info" ? "ℹ" : status === "warning" ? "⚠" : "✗";
+
   for (const section of report.sections) {
-    const sIcon = section.status === "ok" ? "✓" : section.status === "warning" ? "⚠" : "✗";
-    console.log(`  ${sIcon} ${section.name}`);
+    console.log(`  ${icon(section.status)} ${section.name}`);
     for (const check of section.checks) {
-      const cIcon = check.status === "ok" ? "✓" : check.status === "warning" ? "⚠" : "✗";
-      console.log(`    ${cIcon} ${check.message}`);
+      console.log(`    ${icon(check.status)} ${check.message}`);
     }
   }
 
