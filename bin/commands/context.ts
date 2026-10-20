@@ -198,7 +198,9 @@ async function doRefresh(args: string[]): Promise<void> {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
   const existing = existsSync(GRAPH_CONTEXT_PATH) ? readFileSync(GRAPH_CONTEXT_PATH, "utf-8") : "";
-  const merged = mergeGraphContextMarkdown(existing, markdown, 15);
+  // graph + index: carried-over entries get their text re-resolved, so a bad
+  // render is repaired on the next refresh instead of being sticky forever.
+  const merged = mergeGraphContextMarkdown(existing, markdown, 15, graph, index);
   const filtered = filterContradictions(merged);
   writeFileSync(GRAPH_CONTEXT_PATH, filtered, "utf-8");
 
