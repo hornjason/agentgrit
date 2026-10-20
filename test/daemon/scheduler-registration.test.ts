@@ -332,6 +332,12 @@ describe("isSchedulerRegistered", () => {
   darwinOnly("returns false for a label launchd has never heard of", async () => {
     expect(await isSchedulerRegistered(testLabel("neverexisted"))).toBe(false);
   });
+
+  test("still returns false on a platform with no scheduler at all", async () => {
+    await withPlatform("win32", async () => {
+      expect(await isSchedulerRegistered(testLabel("nowhere"))).toBe(false);
+    });
+  });
 });
 
 // ───────────────────── install actually registers (AC2) ─────────────────────

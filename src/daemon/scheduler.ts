@@ -426,11 +426,14 @@ function serviceTarget(label: string): string {
  * never be reported as a clean answer in either direction.
  */
 export async function isSchedulerRegistered(label: string = DEFAULT_LABEL): Promise<boolean> {
-  if (process.platform === "darwin") return queryLaunchd(label);
-  // `return false` for every non-darwin platform was a confident wrong answer
-  // on the one platform that has a scheduler to ask (#275).
-  if (process.platform === "linux") return querySystemd(label);
-  return false;
+  // NOT routed through querySystemd on linux, deliberately. `return false`
+  // here is the same confident wrong answer #275 is about, but this function
+  // takes no injection seam, so a linux case for it would have to run the
+  // host's real systemctl — a test whose result is a fact about the machine,
+  // which is the #249 shape. Left alone rather than changed untested; the
+  // single caller is darwin-gated. See the follow-up noted on #275.
+  if (process.platform !== "darwin") return false;
+  return queryLaunchd(label);
 }
 
 function queryLaunchd(label: string): boolean {
