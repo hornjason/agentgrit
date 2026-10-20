@@ -17,6 +17,7 @@ import { join } from "path";
 import { hostSchedulerEscape } from "../../src/daemon/scheduler";
 
 const REAL_DIR = join(homedir(), "Library", "LaunchAgents");
+const REAL_SYSTEMD_DIR = join(homedir(), ".config", "systemd", "user");
 
 describe("tests cannot reach the real scheduler (#281)", () => {
   test("the no-argument call — the one that caused this — is refused", () => {
@@ -55,11 +56,47 @@ describe("tests cannot reach the real scheduler (#281)", () => {
 
   test("a real logDir is refused on its own", () => {
     const escape = hostSchedulerEscape(
-      { label: "com.agentgrit.test.scoped", launchAgentDir: "/tmp/agentgrit-scoped" },
+      {
+        label: "com.agentgrit.test.scoped",
+        launchAgentDir: "/tmp/agentgrit-scoped",
+        systemdDir: "/tmp/agentgrit-scoped/systemd",
+      },
       "test",
     );
     expect(escape).not.toBeNull();
     expect(escape).toContain("logDir");
+  });
+
+  // #275. `systemdDir` was not overridable at all, so on linux every one of
+  // these tests wrote into — and `uninstallScheduler` unlinked from — the
+  // developer's real ~/.config/systemd/user. That is #281 with a different
+  // filename, and it was invisible because the whole suite runs on a Mac
+  // locally where the systemd path is never touched.
+  test("a real systemdDir is refused on its own", () => {
+    const escape = hostSchedulerEscape(
+      {
+        label: "com.agentgrit.test.scoped",
+        launchAgentDir: "/tmp/agentgrit-scoped",
+        logDir: "/tmp/agentgrit-scoped/logs",
+      },
+      "test",
+    );
+    expect(escape).not.toBeNull();
+    expect(escape).toContain(REAL_SYSTEMD_DIR);
+  });
+
+  test("the real systemd directory spelled differently is still the real one", () => {
+    const escape = hostSchedulerEscape(
+      {
+        label: "com.agentgrit.test.scoped",
+        launchAgentDir: "/tmp/agentgrit-scoped",
+        logDir: "/tmp/agentgrit-scoped/logs",
+        systemdDir: `${REAL_SYSTEMD_DIR}/../user`,
+      },
+      "test",
+    );
+    expect(escape).not.toBeNull();
+    expect(escape).toContain(REAL_SYSTEMD_DIR);
   });
 
   test("the real directory spelled differently is still the real directory", () => {
@@ -77,12 +114,13 @@ describe("tests cannot reach the real scheduler (#281)", () => {
     expect(escape).toContain(REAL_DIR);
   });
 
-  test("all three scoped is allowed — the guard is not simply a refusal", () => {
+  test("all four scoped is allowed — the guard is not simply a refusal", () => {
     expect(
       hostSchedulerEscape(
         {
           label: "com.agentgrit.test.scoped",
           launchAgentDir: "/tmp/agentgrit-scoped",
+          systemdDir: "/tmp/agentgrit-scoped/systemd",
           logDir: "/tmp/agentgrit-scoped/logs",
         },
         "test",

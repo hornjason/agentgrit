@@ -34,6 +34,41 @@ import {
 const isDarwin = process.platform === "darwin";
 const darwinOnly = isDarwin ? test : test.skip;
 
+/**
+ * Run a body with `process.platform` forced to a value (#275).
+ *
+ * The linux reading is the one CI exercises (every workflow is
+ * `runs-on: ubuntu-latest`) and the one a developer on a Mac can never reach.
+ * Gating the linux cases behind `linuxOnly` would mean each half of this
+ * module is only ever checked on the platform where the other half is the
+ * live code — and the darwin half would stop being checked at all once it
+ * mattered. Forcing the branch instead means both readings are exercised on
+ * every run, everywhere.
+ *
+ * This stubs the branch selector only. Anything that actually shells out to
+ * `systemctl` still behaves like the host, which is why the default-probe case
+ * below asserts "not ok" rather than a single status.
+ */
+const REAL_PLATFORM = process.platform;
+
+function setPlatform(value: string): void {
+  Object.defineProperty(process, "platform", {
+    value,
+    configurable: true,
+    writable: true,
+    enumerable: true,
+  });
+}
+
+async function withPlatform<T>(value: string, body: () => Promise<T>): Promise<T> {
+  setPlatform(value);
+  try {
+    return await body();
+  } finally {
+    setPlatform(REAL_PLATFORM);
+  }
+}
+
 const scratch: string[] = [];
 const bootstrapped: string[] = [];
 
@@ -153,7 +188,7 @@ describe("installScheduler rejects what it cannot schedule", () => {
     await expect(
       installScheduler(
         { interval: "fortnightly", command: "/bin/true" },
-        { launchAgentDir: join(root, "LaunchAgents"), logDir: join(root, "logs"), label: testLabel("badinterval"), register: false },
+        { launchAgentDir: join(root, "LaunchAgents"), systemdDir: join(root, "systemd"), logDir: join(root, "logs"), label: testLabel("badinterval"), register: false },
       ),
     ).rejects.toThrow(/fortnightly/);
   });
@@ -166,7 +201,7 @@ describe("checkSchedulerRegistered", () => {
     const root = tempRoot();
     const result = await checkSchedulerRegistered(
       { daemon: { interval: "daily", weeklyDay: "sunday" } },
-      { launchAgentDir: join(root, "LaunchAgents"), logDir: join(root, "logs"), label: testLabel("absent") },
+      { launchAgentDir: join(root, "LaunchAgents"), systemdDir: join(root, "systemd"), logDir: join(root, "logs"), label: testLabel("absent") },
     );
 
     expect(result.ok).toBe(false);
@@ -192,7 +227,7 @@ describe("checkSchedulerRegistered", () => {
 
     const result = await checkSchedulerRegistered(
       { daemon: { interval: "daily", weeklyDay: "sunday" } },
-      { launchAgentDir: agentDir, logDir: join(root, "logs"), label },
+      { launchAgentDir: agentDir, systemdDir: join(root, "systemd"), logDir: join(root, "logs"), label },
     );
 
     expect(result.ok).toBe(false);
@@ -213,13 +248,13 @@ describe("checkSchedulerRegistered", () => {
 
     await installScheduler(
       { interval: "60s", command: "/bin/echo registered-probe", label },
-      { launchAgentDir: agentDir, logDir, label, register: true },
+      { launchAgentDir: agentDir, systemdDir: join(root, "systemd"), logDir, label, register: true },
     );
     bootstrapped.push(label);
 
     const result = await checkSchedulerRegistered(
       { daemon: { interval: "60s", weeklyDay: "sunday" } },
-      { launchAgentDir: agentDir, logDir, label },
+      { launchAgentDir: agentDir, systemdDir: join(root, "systemd"), logDir, label },
     );
 
     expect(result.detail.registered).toBe(true);
@@ -232,7 +267,7 @@ describe("checkSchedulerRegistered", () => {
     const root = tempRoot();
     const result = await checkSchedulerRegistered(
       { daemon: { interval: "", weeklyDay: "sunday" } },
-      { launchAgentDir: join(root, "LaunchAgents"), logDir: join(root, "logs"), label: testLabel("noconfig") },
+      { launchAgentDir: join(root, "LaunchAgents"), systemdDir: join(root, "systemd"), logDir: join(root, "logs"), label: testLabel("noconfig") },
     );
     expect(result.status).toBe("not-configured");
     expect(result.ok).toBe(true);
@@ -245,7 +280,7 @@ describe("checkSchedulerRegistered", () => {
     const result = await checkSchedulerRegistered(
       { daemon: { interval: "daily", weeklyDay: "sunday" } },
       {
-        launchAgentDir: join(root, "LaunchAgents"),
+        launchAgentDir: join(root, "LaunchAgents"), systemdDir: join(root, "systemd"),
         logDir: join(root, "logs"),
         label: testLabel("probeboom"),
         probe: () => {
@@ -277,14 +312,14 @@ describe("installScheduler registers with launchd, not just the filesystem", () 
 
     await installScheduler(
       { interval: "60s", command: "/bin/echo install-probe", label },
-      { launchAgentDir: agentDir, logDir, label, register: true },
+      { launchAgentDir: agentDir, systemdDir: join(root, "systemd"), logDir, label, register: true },
     );
     bootstrapped.push(label);
 
     expect(existsSync(join(agentDir, `${label}.plist`))).toBe(true);
     expect(await isSchedulerRegistered(label)).toBe(true);
 
-    const status = await getSchedulerStatus({ launchAgentDir: agentDir, logDir, label });
+    const status = await getSchedulerStatus({ launchAgentDir: agentDir, systemdDir: join(root, "systemd"), logDir, label });
     expect(status.installed).toBe(true);
     expect(status.registered).toBe(true);
   });
@@ -297,14 +332,58 @@ describe("installScheduler registers with launchd, not just the filesystem", () 
 
     await installScheduler(
       { interval: "60s", command: "/bin/echo uninstall-probe", label },
-      { launchAgentDir: agentDir, logDir, label, register: true },
+      { launchAgentDir: agentDir, systemdDir: join(root, "systemd"), logDir, label, register: true },
     );
     expect(await isSchedulerRegistered(label)).toBe(true);
 
-    await uninstallScheduler({ launchAgentDir: agentDir, logDir, label });
+    await uninstallScheduler({ launchAgentDir: agentDir, systemdDir: join(root, "systemd"), logDir, label });
 
     expect(existsSync(join(agentDir, `${label}.plist`))).toBe(false);
     expect(await isSchedulerRegistered(label)).toBe(false);
+  });
+});
+
+// ───────── the systemd reading asks systemd, not the filesystem (#275) ─────────
+//
+// #259 was "a plist file is not a scheduled job". The same conflation survived
+// on the systemd side: a `.timer` and a `.service` written but never
+// `systemctl --user enable`d read as registered, and the daemon silently never
+// ran. `plistPresent` and `registered` were computed from the same two
+// existsSync calls, so no input could make them differ and any test asserting
+// the distinction passed vacuously.
+
+describe("getSchedulerStatus consults the registry on linux (#275)", () => {
+  test("an injected probe decides `registered`, overriding what is on disk", async () => {
+    await withPlatform("linux", async () => {
+      const root = tempRoot();
+      const status = await getSchedulerStatus({
+        launchAgentDir: join(root, "LaunchAgents"), systemdDir: join(root, "systemd"),
+        logDir: join(root, "logs"),
+        label: testLabel("statusprobe"),
+        probe: () => true,
+      });
+
+      // No unit files exist for this label, so `installed` is false. Before
+      // #275 the linux branch assigned `registered = installed` outright and
+      // never looked at the probe, which made this false too.
+      expect(status.installed).toBe(false);
+      expect(status.registered).toBe(true);
+    });
+  });
+
+  test("a probe saying no beats unit files saying yes", async () => {
+    await withPlatform("linux", async () => {
+      const root = tempRoot();
+      const status = await getSchedulerStatus({
+        launchAgentDir: join(root, "LaunchAgents"), systemdDir: join(root, "systemd"),
+        logDir: join(root, "logs"),
+        label: testLabel("statusprobeno"),
+        probe: () => false,
+      });
+
+      expect(status.registered).toBe(false);
+      expect(status.running).toBe(false);
+    });
   });
 });
 
@@ -331,7 +410,7 @@ describe("scheduled execution", () => {
           command: "/bin/date +scheduled-tick-%Y-%m-%dT%H:%M:%S",
           label,
         },
-        { launchAgentDir: agentDir, logDir, label, register: true, runAtLoad: false },
+        { launchAgentDir: agentDir, systemdDir: join(root, "systemd"), logDir, label, register: true, runAtLoad: false },
       );
       bootstrapped.push(label);
 
