@@ -1,0 +1,108 @@
+# Hand-written, not scaffolded. ci.yml, gates.yml and ai-review.yml carry a
+# "Managed by rungate" header and are regenerated from .claude/rungate/config.json;
+# this file and publish.yml do not and are owned by this repo. rungate's scaffold
+# writes the files it knows about and does not prune the directory, so a
+# re-scaffold leaves this alone.
+name: Doc staleness check
+
+# `pull_request`, deliberately not `pull_request_target`. `pull_request_target`
+# would hand a write-scoped token to a job running against untrusted fork
+# content, which is the standard way this workflow shape turns into a repo
+# takeover. The cost is that on a fork the GITHUB_TOKEN stays read-only no
+# matter what `permissions:` asks for, so the comment step is skipped there and
+# the report goes to the job summary and an annotation instead — both of which
+# a fork contributor and a reviewer can read.
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  doc-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The report diffs against the PR base sha, which a shallow clone does not have.
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "latest"
+
+      - run: bun install
+
+      - name: Build the doc staleness report
+        id: build
+        # Advisory only: a doc that has fallen behind must never stop a merge.
+        continue-on-error: true
+        env:
+          DOC_CHECK_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: bun run scripts/doc-check.ts
+
+      - name: Publish the report to the job summary
+        if: always()
+        run: |
+          if [ -s doc-check-report.md ]; then
+            cat doc-check-report.md >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning title=Doc staleness::Docs may need updating — see the job summary for this run."
+          elif [ -f doc-check-report.md ]; then
+            echo "Doc staleness check: nothing to report." >> "$GITHUB_STEP_SUMMARY"
+          else
+            # The script did not get as far as writing a report. Say so rather
+            # than letting a silent step read as a clean one.
+            echo "::warning title=Doc staleness UNMEASURED::scripts/doc-check.ts produced no report, so this pull request has not been checked for doc drift."
+            echo "Doc staleness check: UNMEASURED — the script produced no report." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Comment on the pull request
+        # Skipped on forks: see the note on the trigger above.
+        if: always() && github.event.pull_request.head.repo.fork == false
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const MARKER = "<!-- agentgrit-doc-check -->";
+            const report = fs.existsSync("doc-check-report.md")
+              ? fs.readFileSync("doc-check-report.md", "utf8").trim()
+              : "";
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const existing = comments.find((c) => c.body && c.body.includes(MARKER));
+
+            if (!report) {
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existing.id,
+                  body: `## Doc staleness check\n\nNothing to report — the docs this PR touches are in step.\n\n${MARKER}`,
+                });
+              }
+              return;
+            }
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: report,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: report,
+              });
+            }
