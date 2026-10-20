@@ -293,11 +293,27 @@ interface MemoryFile {
   frontmatter: Record<string, string>;
 }
 
+/**
+ * Whether the graph builder will index a file of this name.
+ *
+ * Exported so doctor can report graph coverage against the same population the
+ * builder actually walks. Two copies of this predicate would be two deciders
+ * that agree until one is edited, and the disagreement would show up as a
+ * coverage gap nobody can reproduce.
+ */
+export function isIndexableRuleFile(filename: string): boolean {
+  return (
+    filename.endsWith(".md") &&
+    !filename.startsWith("MEMORY") &&
+    !filename.startsWith("README")
+  );
+}
+
 function discoverRuleFiles(rulesDir: string): MemoryFile[] {
   if (!existsSync(rulesDir)) return [];
 
   return readdirSync(rulesDir)
-    .filter(f => f.endsWith(".md") && !f.startsWith("MEMORY") && !f.startsWith("README"))
+    .filter(isIndexableRuleFile)
     .map(filename => {
       const content = readFileSync(join(rulesDir, filename), "utf-8");
       const frontmatter = parseFrontmatter(content);

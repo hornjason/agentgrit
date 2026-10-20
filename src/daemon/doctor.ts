@@ -3,9 +3,18 @@ import { join, resolve } from "path";
 import { resolveSignalFile, resolveSignalDir, resolveMemoryDir, getBaseDir } from "../adapters/paths";
 import type { AgentGritConfig } from "../adapters/types";
 import { checkBudget, checkLearnedBudget } from "../promote/budget";
+import { isIndexableRuleFile } from "../graph/builder";
 import { Tier } from "../adapters/types";
 
-export type CheckStatus = "ok" | "warning" | "error";
+/**
+ * `info` is a reading the operator may want but cannot act on: a disabled
+ * optional feature, a budget that has not been reached, a population that is
+ * not a fault. It never escalates a section.
+ *
+ * The distinction exists because a report whose warnings are mostly
+ * unactionable trains the reader to skim past the one that isn't.
+ */
+export type CheckStatus = "ok" | "info" | "warning" | "error";
 
 export interface CheckResult {
   name: string;
@@ -30,6 +39,27 @@ function worstStatus(statuses: CheckStatus[]): CheckStatus {
   if (statuses.includes("error")) return "error";
   if (statuses.includes("warning")) return "warning";
   return "ok";
+}
+
+/**
+ * Known-orphan baseline: a ratchet, not an exemption list.
+ *
+ * A missing or unreadable file yields an empty baseline, which makes every
+ * orphan new and the check louder. Fail-open here would be a guard bypass —
+ * one unparseable byte would silence the whole WIRING section.
+ */
+const ORPHAN_BASELINE_FILE = "orphan-exports-baseline.json";
+
+function readOrphanBaseline(projectRoot: string): Set<string> {
+  const path = join(projectRoot, ORPHAN_BASELINE_FILE);
+  if (!existsSync(path)) return new Set();
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf-8"));
+    if (!Array.isArray(parsed.orphans)) return new Set();
+    return new Set(parsed.orphans.filter((o: unknown): o is string => typeof o === "string"));
+  } catch {
+    return new Set();
+  }
 }
 
 function fileAge(filePath: string): { exists: boolean; ageMs: number; lastModified?: string } {
@@ -95,45 +125,54 @@ function checkCapture(config: AgentGritConfig): DoctorSection {
   };
 }
 
-function checkScoring(config: AgentGritConfig): DoctorSection {
+export function checkScoring(config: AgentGritConfig): DoctorSection {
   const checks: CheckResult[] = [];
 
-  if (!config.judge?.apiKey) {
+  const judgeConfigured = Boolean(config.judge?.apiKey);
+
+  if (!judgeConfigured) {
     checks.push({
       name: "judge-api-key",
-      status: "warning",
+      status: "info",
       message: "No judge API key configured — LLM scoring disabled",
     });
   } else {
     checks.push({
       name: "judge-api-key",
       status: "ok",
-      message: `Judge configured: ${config.judge.provider}/${config.judge.model}`,
+      message: `Judge configured: ${config.judge?.provider}/${config.judge?.model}`,
     });
   }
 
   const scoresPath = resolveSignalFile(config.signalDir, "scores.jsonl");
-  const info = fileAge(scoresPath);
+  const scoresAge = fileAge(scoresPath);
 
-  if (!info.exists) {
+  // Without a judge credential, scoring cannot run at all, so missing or stale
+  // scores are a consequence of the line above rather than a second fault.
+  // Reporting them as a warning asks the operator to fix something that is
+  // already explained and that no action short of adding a key would change.
+  const stalenessStatus: CheckStatus = judgeConfigured ? "warning" : "info";
+  const becauseNoKey = judgeConfigured ? "" : " (scoring disabled — no judge API key)";
+
+  if (!scoresAge.exists) {
     checks.push({
       name: "scores",
-      status: "warning",
-      message: "No scores file found — daemon may not have run yet",
+      status: stalenessStatus,
+      message: `No scores file found — daemon may not have run yet${becauseNoKey}`,
     });
-  } else if (info.ageMs > 2 * MS_PER_HOUR) {
+  } else if (scoresAge.ageMs > 2 * MS_PER_HOUR) {
     checks.push({
       name: "scores",
-      status: "warning",
-      message: `scores.jsonl last modified ${Math.floor(info.ageMs / MS_PER_HOUR)}h ago`,
-      lastActivity: info.lastModified,
+      status: stalenessStatus,
+      message: `scores.jsonl last modified ${Math.floor(scoresAge.ageMs / MS_PER_HOUR)}h ago${becauseNoKey}`,
+      lastActivity: scoresAge.lastModified,
     });
   } else {
     checks.push({
       name: "scores",
       status: "ok",
       message: "Scores recently updated",
-      lastActivity: info.lastModified,
+      lastActivity: scoresAge.lastModified,
     });
   }
 
@@ -226,7 +265,7 @@ function checkRules(config: AgentGritConfig): DoctorSection {
     const globalStatus = checkBudget(Tier.Global, globalCount, config.rules.globalBudget);
     const globalCheckStatus: CheckStatus =
       globalStatus.level === "OVER_BUDGET" ? "error" :
-      globalStatus.level === "WARNING" ? "warning" : "ok";
+      globalStatus.level === "WARNING" ? "info" : "ok";
     checks.push({
       name: "global-rules",
       status: globalCheckStatus,
@@ -235,10 +274,12 @@ function checkRules(config: AgentGritConfig): DoctorSection {
 
     // Learned tier check
     const learnedBudget = config.rules.learnedBudget ?? 50;
+    // Approaching a cap is a reading; exceeding one is a fault. Eviction runs
+    // on its own schedule, so "47 / 50" asks the operator to do nothing.
     const learnedStatus = checkLearnedBudget(learnedCount, learnedBudget);
     const learnedCheckStatus: CheckStatus =
       learnedStatus.level === "OVER_BUDGET" ? "error" :
-      learnedStatus.level === "WARNING" ? "warning" : "ok";
+      learnedStatus.level === "WARNING" ? "info" : "ok";
     checks.push({
       name: "learned-rules",
       status: learnedCheckStatus,
@@ -360,7 +401,7 @@ function checkConfig(config: AgentGritConfig): DoctorSection {
 
 // ── Integrity: Cross-reference validation ──
 
-function checkCrossReferences(config: AgentGritConfig): DoctorSection {
+export function checkCrossReferences(config: AgentGritConfig): DoctorSection {
   const checks: CheckResult[] = [];
   const stateBase = join(config.signalDir, "..", "state");
   const graphPath = join(stateBase, "knowledge-graph.json");
@@ -372,23 +413,39 @@ function checkCrossReferences(config: AgentGritConfig): DoctorSection {
       const graph = JSON.parse(readFileSync(graphPath, "utf-8"));
       const graphNodeIds = new Set(Object.keys(graph.nodes || {}));
 
-      // Collect file IDs from BOTH directories
-      const allFileIds = new Set<string>();
+      // These are two populations with different contracts, and unioning them
+      // made the one real number unreadable.
+      //
+      //   memoryDir — the graph corpus. Every buildGraph() call in src/ and
+      //     bin/ passes resolveMemoryDir(), and promotion writes new rules
+      //     here (daemon.ts writeRuleFile). A file here that is not a node is
+      //     a genuine indexing gap.
+      //
+      //   rulesDir  — a legacy store. Nothing in the daemon writes to it; it
+      //     is read only as an eviction candidate pool and as a filename
+      //     fallback in rule-text.ts. It is not an input to the graph, so a
+      //     file here that is not a node is the expected state, not a gap.
+      //
+      // Reported together they produced "597 rule files not yet in graph",
+      // a number that stayed alarming no matter how complete indexing was.
+      const indexableIds = (dir: string): Set<string> =>
+        new Set(
+          readdirSync(dir)
+            .filter(isIndexableRuleFile)
+            .map((f) => f.replace(/\.md$/, "")),
+        );
 
-      // 1. Check rulesBase (if exists)
-      if (existsSync(rulesBase)) {
-        const ruleFiles = readdirSync(rulesBase).filter((f) => f.endsWith(".md"));
-        ruleFiles.forEach((f) => allFileIds.add(f.replace(/\.md$/, "")));
-      }
+      const memoryDir = config.memoryDir;
+      const corpusIds =
+        memoryDir && existsSync(memoryDir) ? indexableIds(memoryDir) : new Set<string>();
+      const legacyIds = existsSync(rulesBase) ? indexableIds(rulesBase) : new Set<string>();
 
-      // 2. Check memoryDir (if configured) — this is where the graph is built from
-      if (config.memoryDir && existsSync(config.memoryDir)) {
-        const memoryFiles = readdirSync(config.memoryDir).filter((f) => f.endsWith(".md"));
-        memoryFiles.forEach((f) => allFileIds.add(f.replace(/\.md$/, "")));
-      }
-
-      const orphanedNodes = [...graphNodeIds].filter((id) => !allFileIds.has(id));
-      const unindexedRules = [...allFileIds].filter((id) => !graphNodeIds.has(id));
+      const backedIds = new Set([...corpusIds, ...legacyIds]);
+      const orphanedNodes = [...graphNodeIds].filter((id) => !backedIds.has(id));
+      const unindexedCorpus = [...corpusIds].filter((id) => !graphNodeIds.has(id));
+      const unindexedLegacy = [...legacyIds].filter(
+        (id) => !graphNodeIds.has(id) && !corpusIds.has(id),
+      );
 
       if (orphanedNodes.length > 0) {
         checks.push({
@@ -398,19 +455,29 @@ function checkCrossReferences(config: AgentGritConfig): DoctorSection {
         });
       }
 
-      if (unindexedRules.length > 0) {
+      if (unindexedCorpus.length > 0) {
         checks.push({
-          name: "unindexed-rules",
+          name: "unindexed-corpus",
           status: "warning",
-          message: `${unindexedRules.length} rule files not yet in graph`,
+          message:
+            `${unindexedCorpus.length} of ${corpusIds.size} memoryDir rules not in graph ` +
+            `— the graph is built from this directory, so these are unreachable`,
+        });
+      } else {
+        checks.push({
+          name: "unindexed-corpus",
+          status: "ok",
+          message: `All ${corpusIds.size} memoryDir rules are in the graph`,
         });
       }
 
-      if (orphanedNodes.length === 0 && unindexedRules.length === 0) {
+      if (unindexedLegacy.length > 0) {
         checks.push({
-          name: "graph-rules-sync",
-          status: "ok",
-          message: `Graph and rule files in sync (${graphNodeIds.size} nodes)`,
+          name: "legacy-rules-store",
+          status: "info",
+          message:
+            `${unindexedLegacy.length} of ${legacyIds.size} files in ${rulesBase} are not graph ` +
+            `nodes — that directory is not a graph input (eviction pool and filename fallback only)`,
         });
       }
     } catch (err) {
@@ -500,9 +567,11 @@ function extractExports(filePath: string, content: string): ExportEntry[] {
   return exports;
 }
 
-function checkWiring(_config: AgentGritConfig): DoctorSection {
+export function checkWiring(
+  _config: AgentGritConfig,
+  projectRoot: string = process.cwd(),
+): DoctorSection {
   const checks: CheckResult[] = [];
-  const projectRoot = process.cwd();
   const srcDir = join(projectRoot, "src");
   const binDir = join(projectRoot, "bin");
 
@@ -556,20 +625,43 @@ function checkWiring(_config: AgentGritConfig): DoctorSection {
       status: "ok",
       message: `All ${allExports.length} exports are wired`,
     });
-  } else {
+    return { name: "WIRING", status: worstStatus(checks.map((c) => c.status)), checks };
+  }
+
+  // Ratchet, not an exemption list. The baseline is what the tree already owes;
+  // anything outside it is a new orphan and warns. The baseline can only be
+  // lowered, and doctor says by how much, so the number stays interpretable.
+  const baseline = readOrphanBaseline(projectRoot);
+  const key = (o: ExportEntry) => `${o.file.replace(projectRoot + "/", "")}:${o.name}`;
+  const newOrphans = orphans.filter((o) => !baseline.has(key(o)));
+  const fixed = [...baseline].filter((b) => !orphans.some((o) => key(o) === b));
+
+  if (newOrphans.length > 0) {
     checks.push({
       name: "orphan-summary",
       status: "warning",
-      message: `${orphans.length} orphan export(s) found out of ${allExports.length} total`,
+      message:
+        `${newOrphans.length} new orphan export(s) beyond the baseline of ${baseline.size} ` +
+        `(${orphans.length} of ${allExports.length} total)`,
     });
-    for (const orphan of orphans) {
-      const relPath = orphan.file.replace(projectRoot + "/", "");
+    for (const orphan of newOrphans) {
       checks.push({
         name: `orphan:${orphan.name}`,
         status: "warning",
-        message: `${orphan.name} (${orphan.kind}) in ${relPath} — exported but never imported`,
+        message: `${orphan.name} (${orphan.kind}) in ${orphan.file.replace(projectRoot + "/", "")} — exported but never imported`,
       });
     }
+  } else {
+    checks.push({
+      name: "orphan-summary",
+      status: "info",
+      message:
+        `${orphans.length} known orphan export(s) of ${allExports.length}, all in the ` +
+        `baseline — no new ones` +
+        (fixed.length > 0
+          ? `. ${fixed.length} baseline entr${fixed.length === 1 ? "y is" : "ies are"} now wired; lower the baseline to ${orphans.length}`
+          : ""),
+    });
   }
 
   return {
