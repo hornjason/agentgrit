@@ -28,3 +28,6 @@ build/
 credentials.json
 service-account*
 .secret*
+
+# scripts/doc-check.ts report artifact — regenerated per run
+doc-check-report.md
