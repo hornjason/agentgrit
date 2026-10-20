@@ -225,3 +225,5 @@ export function diagnoseBM25(index: BM25Index, query: string): BM25Diagnostic {
     rootCauseEvidence,
   };
 }
+
+// scratch: proving doc-check can fail in CI (reverted in the next commit)
