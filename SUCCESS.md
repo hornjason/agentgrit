@@ -58,9 +58,18 @@ same handful of rules and nobody notices because the fallback looks like an
 answer.
 
 **How to measure it:** `agentgrit doctor` reports 0 rule files missing from
-the graph, and `~/.agentgrit/context/GRAPH-CONTEXT.md` carries domain-matched
-rules with the current date — not the `# Graph Context — unavailable` banner,
-which is the failure state rendered as prose.
+the graph *corpus* — `memoryDir`, the directory every `buildGraph()` call
+passes, not the legacy `~/.agentgrit/rules` store that nothing writes to — and
+`~/.agentgrit/context/GRAPH-CONTEXT.md` carries domain-matched rules with the
+current date and **real body text**, not the `# Graph Context — unavailable`
+banner, which is the failure state rendered as prose.
+
+Read the bodies, not the count. On 2026-10-20 the file carried 15 ranked rules
+of which 9 rendered as nothing but their own id, because `mergeGraphContext`
+re-emits parsed markdown instead of re-resolving from the graph and pads to the
+budget cap with whatever the last run left behind (#291). A slug is
+indistinguishable from a short rule, and fifteen slugs look exactly like a
+working retrieval system.
 
 ### Claim 3 — The loop runs without being asked
 
@@ -93,14 +102,44 @@ indistinguishable from success; `UNMEASURED` is not.
 | Claim | Standing | Measured |
 |---|---|---|
 | 1 — corrections reach the detector | **passing** | 2026-10-19 21:47 — `detect-failures` no longer appears in the daemon's error list and `Patterns` went 4 → 43 across the same log. #254 |
-| 2 — learned rules reach the session | **passing** | 2026-10-19 — `GRAPH-CONTEXT.md` regenerated 16:17 with 15 ranked rules carrying real text; doctor reports 47 graph nodes against 47 learned rules. #258 |
+| 2 — learned rules reach the session | **passing** | 2026-10-20 00:12 — doctor reports `All 600 memoryDir rules are in the graph`; `GRAPH-CONTEXT.md` regenerated with 6 domain-matched rules, every one carrying real body text. #258, #288 |
 | 3 — the loop runs unasked | **passing** | 2026-10-19 — `com.agentgrit.daemon` registered with launchd at last exit status 0, and `daemon.log` written by a scheduled run rather than by hand. #259, #277 |
 | 4 — a step that did not run says so | **passing** | 2026-10-19 — `test-results.json` reads `{"status":"MEASURED","pass":1860,"fail":9}` and names the cwd it measured, where it previously read `{"pass":0,"fail":0}`. #256 |
 
-Measured on Jason's machine against `main` at `7b3aacd`, through the installed
+Measured on Jason's machine against `main` at `d2a781e`, through the installed
 `agentgrit` binary rather than from source — the two were two weeks apart until
 #264, and reading one while claiming the other is the failure mode this table
 exists to prevent.
+
+**Claim 2's first reading recorded the defect as the success.** It was banked as
+"doctor reports 47 graph nodes against 47 learned rules", and 47 against 47 was
+read as complete coverage. It was the opposite. The graph had been built from
+`~/.agentgrit/rules` — a legacy store nothing writes to — instead of from
+`memoryDir`, which is the corpus every `buildGraph()` call in the codebase
+actually passes. All 600 rules the graph exists to serve were unreachable, and
+retrieval was ranking over 47 stale files. Doctor was saying so the whole time,
+in the one line that got waved through as noise:
+
+```
+⚠ 597 rule files not yet in graph
+```
+
+All 597 were `memoryDir` files. The warning was true. What made it ignorable was
+that it merged two populations with different contracts, so the real gap was
+indistinguishable from the legacy store's expected state and the number looked
+like permanent background. Split in #288; the same broken state now reads
+`596 of 600 memoryDir rules not in graph — the graph is built from this
+directory, so these are unreachable`, which names the cause. How the graph
+reached that state is still unexplained and tracked in #290.
+
+Two lessons worth keeping, because both are cheap to repeat:
+
+- **A reading that matches on both sides is not evidence of coverage.** 47
+  against 47 agreed because both numbers came from the wrong directory. The
+  check that would have caught it is the one this file already demands — name
+  an input on which the correct and incorrect systems differ, and read that.
+- **An unactionable warning is a place to hide a real one.** The count was
+  right for two weeks. Nobody could act on it, so nobody read it.
 
 **Claim 3 was passing once before and did not hold.** It was installed, then
 removed by the suite itself: `uninstallScheduler()` with no arguments reaches
