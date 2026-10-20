@@ -9,6 +9,23 @@ updated: 2026-08-07
 
 ## [Unreleased]
 
+### Added
+- **`agentgrit backfill-ratings` — recover ratings from host transcripts (#260)** — walks the host
+  transcript root for `*.jsonl`, filters typed user prompts by a `--since`/`--until` window on the
+  entry timestamp, and runs each through the same four parsers the live capture hook uses. The
+  transcript entry uuid is carried onto the written record as `source_uuid` and is the idempotency
+  key, so re-running writes nothing. `--dry-run` reports the counts and writes nothing.
+  `RatingSignal` gains `provenance` (`"backfill"`; absent means live) and `source_uuid`.
+  Timestamps come from the transcript entry, never from `Date.now()` — `captureRating` is
+  deliberately not reused for exactly that reason.
+  Measured on the real transcript tree: 1,639,545 entries, 28,253 typed user prompts, 23 recoverable
+  ratings across all retained history and **1** inside the #257 outage window. The issue's premise
+  that ~18 days of ratings were recoverable does not survive measurement — see the PR for #260.
+  Mined records carry no `rule_ids`, so rule attribution is not recoverable, only rating history.
+- **`appendSignals`** in `src/adapters/jsonl.ts` — one atomic rewrite for a batch of signals;
+  `appendSignal` now delegates to it. Looping the single-signal append over a bulk import is
+  quadratic.
+
 ### Fixes
 - **`graph context` no longer emits a rule id as its own body (#258)** — `src/graph/context.ts` fell open to
   `node?.description || node?.name || id` on a missed graph-node lookup, so every candidate the graph was
