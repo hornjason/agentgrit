@@ -29,6 +29,9 @@ import {
   getSchedulerStatus,
   checkSchedulerRegistered,
   isSchedulerRegistered,
+  querySystemd,
+  generateSystemdService,
+  generateSystemdTimer,
 } from "../../src/daemon/scheduler";
 
 const isDarwin = process.platform === "darwin";
@@ -81,6 +84,36 @@ function tempRoot(): string {
 /** A label unique to this process so parallel agents cannot collide in launchd. */
 function testLabel(suffix: string): string {
   return `com.agentgrit.test.${process.pid}.${suffix}`;
+}
+
+/**
+ * Write a `.timer` and `.service` pair into a scoped systemd dir and return it.
+ *
+ * This is the state #275 is about: both unit files on disk, nothing enabled.
+ * It could not be set up at all before `systemdDir` became overridable —
+ * the path was hardcoded to ~/.config/systemd/user, so the only way to write
+ * these files was into the developer's real systemd directory.
+ */
+function writeUnits(root: string, label: string): string {
+  const unitDir = join(root, "systemd");
+  mkdirSync(unitDir, { recursive: true });
+  const config = { interval: "daily", command: "/bin/true", label };
+  writeFileSync(join(unitDir, `${label}.service`), generateSystemdService(config));
+  writeFileSync(join(unitDir, `${label}.timer`), generateSystemdTimer(config));
+  return unitDir;
+}
+
+/** An execFileSync-shaped failure: numeric exit status plus captured stdout. */
+function execFailure(status: number, stdout: string, stderr = ""): Error {
+  const e = new Error(`Command failed: systemctl`) as Error & {
+    status: number;
+    stdout: Buffer;
+    stderr: Buffer;
+  };
+  e.status = status;
+  e.stdout = Buffer.from(stdout);
+  e.stderr = Buffer.from(stderr);
+  return e;
 }
 
 function bootout(label: string): void {
@@ -374,15 +407,173 @@ describe("getSchedulerStatus consults the registry on linux (#275)", () => {
   test("a probe saying no beats unit files saying yes", async () => {
     await withPlatform("linux", async () => {
       const root = tempRoot();
+      const label = testLabel("statusprobeno");
+      const unitDir = writeUnits(root, label);
+
       const status = await getSchedulerStatus({
-        launchAgentDir: join(root, "LaunchAgents"), systemdDir: join(root, "systemd"),
+        launchAgentDir: join(root, "LaunchAgents"),
+        systemdDir: unitDir,
         logDir: join(root, "logs"),
-        label: testLabel("statusprobeno"),
+        label,
         probe: () => false,
       });
 
+      // Both unit files are on disk. `installed` says so; `registered` must
+      // not. `status.registered = status.installed` — the line this replaced
+      // — makes both of these true, which is what `agentgrit daemon status`
+      // printed as "Registered: yes" for a timer systemd had never enabled.
+      expect(status.installed).toBe(true);
       expect(status.registered).toBe(false);
       expect(status.running).toBe(false);
+    });
+  });
+});
+
+describe("querySystemd mirrors queryLaunchd's contract (#275)", () => {
+  test("exit 0 with 'enabled' on stdout is registered", () => {
+    expect(querySystemd("x", () => "enabled\n")).toBe(true);
+  });
+
+  test("'disabled' is a real answer from systemd, so it is a plain false", () => {
+    expect(
+      querySystemd("x", () => {
+        throw execFailure(1, "disabled\n");
+      }),
+    ).toBe(false);
+  });
+
+  test("'static' and 'not-found' are answers too — not-enabled, not undetermined", () => {
+    for (const word of ["static", "not-found", "masked", "indirect"]) {
+      expect(
+        querySystemd("x", () => {
+          throw execFailure(1, `${word}\n`);
+        }),
+      ).toBe(false);
+    }
+  });
+
+  // The CI question #275 asks to decide deliberately. Every workflow in
+  // .github/workflows is `runs-on: ubuntu-latest`, so this path runs on every
+  // push. `systemctl --user` in a container with no D-Bus session exits 1 with
+  // NOTHING on stdout — indistinguishable, by exit code alone, from a genuine
+  // "disabled". Mirroring launchd's exit-status contract literally would have
+  // turned that into a confident "not registered".
+  test("a non-zero exit with no status word — the no-D-Bus container — THROWS", () => {
+    expect(() =>
+      querySystemd("x", () => {
+        throw execFailure(1, "", "Failed to connect to bus: No medium found");
+      }),
+    ).toThrow(/could not query systemd/);
+  });
+
+  test("systemctl missing entirely throws rather than reporting not-registered", () => {
+    expect(() =>
+      querySystemd("x", () => {
+        const e = new Error('Executable not found in $PATH: "systemctl"') as NodeJS.ErrnoException;
+        e.code = "ENOENT";
+        throw e;
+      }),
+    ).toThrow(/could not query systemd/);
+  });
+});
+
+describe("checkSchedulerRegistered on linux (#275)", () => {
+  // The linux twin of "the plist exists on disk but was never bootstrapped".
+  // Before #275 this state reported ok: the default probe was the same two
+  // existsSync calls that set plistPresent, so the two could not disagree.
+  test("FAILS when the unit files exist but the timer was never enabled", async () => {
+    await withPlatform("linux", async () => {
+      const root = tempRoot();
+      const label = testLabel("unitsnotenabled");
+      const unitDir = writeUnits(root, label);
+
+      const result = await checkSchedulerRegistered(
+        { daemon: { interval: "daily", weeklyDay: "sunday" } },
+        {
+          launchAgentDir: join(root, "LaunchAgents"),
+          systemdDir: unitDir,
+          logDir: join(root, "logs"),
+          label,
+          probe: () => false,
+        },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.status).toBe("timer-not-enabled");
+      expect(result.detail.plistPresent).toBe(true);
+      expect(result.detail.registered).toBe(false);
+      expect(result.message).toMatch(/not enabled/i);
+    });
+  });
+
+  // The other direction of the same disagreement. plistPresent false while
+  // registered is true proves the two readings are genuinely independent
+  // rather than one being an alias of the other.
+  test("units absent but the timer enabled is ok — the readings are independent", async () => {
+    await withPlatform("linux", async () => {
+      const root = tempRoot();
+      const result = await checkSchedulerRegistered(
+        { daemon: { interval: "daily", weeklyDay: "sunday" } },
+        {
+          launchAgentDir: join(root, "LaunchAgents"),
+          systemdDir: join(root, "systemd"),
+          logDir: join(root, "logs"),
+          label: testLabel("enabledonly"),
+          probe: () => true,
+        },
+      );
+
+      expect(result.detail.plistPresent).toBe(false);
+      expect(result.detail.registered).toBe(true);
+      expect(result.status).toBe("ok");
+    });
+  });
+
+  test("FAILS with missing-scheduler when there are no units and nothing enabled", async () => {
+    await withPlatform("linux", async () => {
+      const root = tempRoot();
+      const result = await checkSchedulerRegistered(
+        { daemon: { interval: "daily", weeklyDay: "sunday" } },
+        {
+          launchAgentDir: join(root, "LaunchAgents"),
+          systemdDir: join(root, "systemd"),
+          logDir: join(root, "logs"),
+          label: testLabel("linuxabsent"),
+          probe: () => false,
+        },
+      );
+
+      expect(result.status).toBe("missing-scheduler");
+    });
+  });
+
+  // The cases above inject a probe, so none of them would notice the default
+  // probe being reverted to `existsSync(timer) && existsSync(service)`. This
+  // one injects nothing. Two unit files are on disk under a label systemd has
+  // never heard of, so the old default answers "registered" and the whole
+  // check reports ok. The real `systemctl` cannot say "enabled" here on any
+  // host: absent on darwin (ENOENT -> probe-failed), and on Linux CI either
+  // no D-Bus (probe-failed) or "not-found" (timer-not-enabled). What it must
+  // never be is ok.
+  test("the DEFAULT probe does not accept unit files on disk as registration", async () => {
+    await withPlatform("linux", async () => {
+      const root = tempRoot();
+      const label = testLabel("defaultprobe");
+      const unitDir = writeUnits(root, label);
+
+      const result = await checkSchedulerRegistered(
+        { daemon: { interval: "daily", weeklyDay: "sunday" } },
+        {
+          launchAgentDir: join(root, "LaunchAgents"),
+          systemdDir: unitDir,
+          logDir: join(root, "logs"),
+          label,
+        },
+      );
+
+      expect(result.detail.plistPresent).toBe(true);
+      expect(result.ok).toBe(false);
+      expect(["probe-failed", "timer-not-enabled"]).toContain(result.status);
     });
   });
 });
