@@ -2,6 +2,7 @@
 export {};
 
 import { backfillCommand } from "./commands/backfill";
+import { backfillRatingsCommand } from "./commands/backfill-ratings";
 import { baselineCommand } from "./commands/baseline";
 import { captureCommand } from "./commands/capture";
 import { contextCommand } from "./commands/context";
@@ -37,6 +38,7 @@ const VERSION: string = pkg.version;
 
 const HANDLERS: Record<string, (args: string[]) => Promise<void>> = {
   backfill: backfillCommand,
+  "backfill-ratings": backfillRatingsCommand,
   baseline: baselineCommand,
   capture: captureCommand,
   context: contextCommand,
@@ -66,6 +68,7 @@ const HANDLERS: Record<string, (args: string[]) => Promise<void>> = {
 
 const DESCRIPTIONS: Record<string, string> = {
   backfill: "Run full pipeline on existing data",
+  "backfill-ratings": "Recover ratings from host transcripts",
   baseline: "Capture or show baseline measurement snapshot",
   capture: "Capture signals from Claude Code hooks",
   context: "Refresh session context from task text",

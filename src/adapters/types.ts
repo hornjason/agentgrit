@@ -17,6 +17,15 @@ export interface Signal {
   schemaVersion?: number;
 }
 
+/**
+ * How a rating record reached the signal log.
+ *
+ * Absent means "live": every record written before #260 came from the capture
+ * hook, so a missing field is the live case rather than an unknown one. Only
+ * the transcript miner sets this explicitly, and it always sets "backfill".
+ */
+export type RatingProvenance = "live" | "backfill";
+
 export interface RatingSignal extends Signal {
   type: "rating";
   rating: number;
@@ -28,6 +37,13 @@ export interface RatingSignal extends Signal {
   rule_ids?: string[];
   scorer_version?: string;
   source_weight?: number;
+  provenance?: RatingProvenance;
+  /**
+   * The host transcript entry this record was mined from. Set only on
+   * backfilled records, where it is the idempotency key: a re-run skips any
+   * transcript entry whose uuid is already in the log.
+   */
+  source_uuid?: string;
 }
 
 export interface CorrectionSignal extends Signal {
