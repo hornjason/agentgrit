@@ -2,6 +2,21 @@ import type { GraphNode, GraphEdge, Rule } from "../adapters/types";
 
 // ── Graph Container ──
 
+/**
+ * Which corpus a graph was built from.
+ *
+ * Without this a wrong-directory build is indistinguishable from a correct
+ * one: both produce a graph that answers every query. Issue #290 — a 47-node
+ * graph sat in place of a 600-node corpus and nothing in the file said which
+ * directory had been walked.
+ */
+export interface CorpusProvenance {
+  /** Absolute path of the directory `discoverRuleFiles()` walked. */
+  dir: string;
+  /** How many indexable rule files that directory held at build time. */
+  fileCount: number;
+}
+
 export interface Graph {
   version: string;
   builtAt: string;
@@ -9,6 +24,8 @@ export interface Graph {
   edgeCount: number;
   nodes: Record<string, GraphNode>;
   edges: GraphEdge[];
+  /** Optional: graphs written before this field existed do not carry it. */
+  builtFrom?: CorpusProvenance;
 }
 
 // ── Query Results ──

@@ -1,10 +1,10 @@
 import { existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, resolve } from "path";
 import { homedir } from "os";
 import { createHash } from "crypto";
 import { getBaseDir, stateDir, ruleDomainsFile } from "../adapters/paths";
 import type { GraphNode, GraphEdge, Rule } from "../adapters/types";
-import type { Graph } from "./types";
+import type { CorpusProvenance, Graph } from "./types";
 import { propagateDomains } from "./domain-propagation";
 import { loadPatterns } from "./generate-patterns";
 import { ruleIdFromFilename, stripRulePrefix } from "./rule-id";
@@ -144,16 +144,133 @@ export function readGraph(): Graph {
   return JSON.parse(readFileSync(path, "utf-8")) as Graph;
 }
 
-export function writeGraphFile(graph: Graph): void {
-  const path = graphPath();
-  const dir = dirname(path);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+/**
+ * Where a build will actually land. `buildGraph(dir, stateDir())` and
+ * `buildGraph(dir)` write the same file for every live caller; this makes the
+ * two branches resolve through one expression so a guard cannot be added to
+ * only one of them.
+ */
+function graphOutputPath(stateOutputDir?: string): string {
+  return stateOutputDir ? join(stateOutputDir, "knowledge-graph.json") : graphPath();
+}
 
+/** Read the graph at an explicit path, or null if there is nothing there. */
+function readGraphAt(path: string): Graph | null {
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, "utf-8")) as Graph;
+  } catch {
+    return null;
+  }
+}
+
+// ── Corpus Collapse Guard ──
+
+/**
+ * A graph smaller than this is too small for a ratio to mean anything — a
+ * three-rule fixture losing two rules is not an incident.
+ */
+const COLLAPSE_MIN_BASELINE = 20;
+
+/** Below this fraction of the previous node count, the build must explain itself. */
+const COLLAPSE_RATIO = 0.5;
+
+/** Set to "1" to write anyway. Named in the refusal message. */
+const COLLAPSE_OVERRIDE_ENV = "AGENTGRIT_ALLOW_GRAPH_COLLAPSE";
+
+export class GraphCollapseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GraphCollapseError";
+  }
+}
+
+/**
+ * Decide whether writing `next` over `previous` would silently destroy the
+ * corpus, and return the reason if so.
+ *
+ * The discriminator is not the node count on its own — a corpus genuinely can
+ * shrink. It is the *directory*. A collapse is explained only when the new
+ * build walked the same directory the previous graph was built from, and that
+ * directory really does hold that few rule files now. A build from a
+ * different directory, or a same-directory build that walked 600 files and
+ * produced 47 nodes, is refused.
+ *
+ * A previous graph with no provenance cannot explain anything, so any collapse
+ * against it is refused; the override env var is the way through.
+ */
+export function detectCorpusCollapse(
+  previous: Graph | null,
+  next: { nodeCount: number; builtFrom?: CorpusProvenance },
+): string | null {
+  if (!previous) return null;
+
+  const prevCount = previous.nodeCount ?? Object.keys(previous.nodes ?? {}).length;
+  if (prevCount < COLLAPSE_MIN_BASELINE) return null;
+  if (next.nodeCount >= prevCount * COLLAPSE_RATIO) return null;
+
+  const prevDir = previous.builtFrom?.dir;
+  const nextDir = next.builtFrom?.dir;
+  const sameCorpus = Boolean(prevDir && nextDir && prevDir === nextDir);
+  const corpusReallyShrank =
+    next.builtFrom !== undefined && next.builtFrom.fileCount < prevCount * COLLAPSE_RATIO;
+
+  if (sameCorpus && corpusReallyShrank) return null;
+
+  const from = nextDir ?? "(unrecorded)";
+  const was = prevDir ?? "(unrecorded — graph predates corpus provenance)";
+  const walked = next.builtFrom ? `${next.builtFrom.fileCount} rule file(s)` : "an unrecorded corpus";
+
+  return (
+    `refusing to write knowledge graph: node count collapse ${prevCount} -> ${next.nodeCount}. ` +
+    `This build walked ${from} and found ${walked}; the graph on disk was built from ${was}. ` +
+    `A graph built from the wrong directory still answers every query, so this is refused rather than warned about (issue #290). ` +
+    `If the corpus really did shrink, rebuild once with ${COLLAPSE_OVERRIDE_ENV}=1 to record the new provenance.`
+  );
+}
+
+/**
+ * Throw if writing a graph with this shape to `outputPath` would collapse it.
+ * Call this *before* any side effect of the build, not just at the write.
+ */
+function assertNoCorpusCollapse(
+  outputPath: string,
+  next: { nodeCount: number; builtFrom?: CorpusProvenance },
+  previous?: Graph | null,
+): void {
+  if (process.env[COLLAPSE_OVERRIDE_ENV] === "1") return;
+  const prior = previous !== undefined ? previous : readGraphAt(outputPath);
+  const refusal = detectCorpusCollapse(prior, next);
+  if (refusal) throw new GraphCollapseError(refusal);
+}
+
+/**
+ * The single write path for the knowledge graph. Every site that puts a graph
+ * on disk goes through here, because a guard on one of three write sites is a
+ * guard on none — `buildGraph()` reaches `writeGraphFile()` only when
+ * `stateOutputDir` is undefined, and no live caller leaves it undefined.
+ */
+function persistGraph(graph: Graph, outputPath: string): void {
+  const previous = readGraphAt(outputPath);
+
+  // Keep provenance sticky through read-modify-write callers (attribution.ts,
+  // classify-isolated.ts) that never set it — otherwise the guard erases its
+  // own evidence on the first such write.
+  if (!graph.builtFrom && previous?.builtFrom) graph.builtFrom = previous.builtFrom;
+
+  assertNoCorpusCollapse(outputPath, graph, previous);
+
+  const dir = dirname(outputPath);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  writeFileSync(outputPath, JSON.stringify(graph, null, 2), "utf-8");
+}
+
+export function writeGraphFile(graph: Graph): void {
   graph.nodeCount = Object.keys(graph.nodes).length;
   graph.edgeCount = graph.edges.length;
   graph.builtAt = new Date().toISOString();
 
-  writeFileSync(path, JSON.stringify(graph, null, 2), "utf-8");
+  persistGraph(graph, graphPath());
 }
 
 // ── Frontmatter Parser ──
@@ -509,6 +626,16 @@ export async function buildGraph(rulesDir: string, stateOutputDir?: string, rule
     }
   }
 
+  const provenance: CorpusProvenance = { dir: resolve(rulesDir), fileCount: files.length };
+
+  // Check before edge building, because syncRuleDomains() below prunes
+  // rule-domains.json against this node set. A refused build must leave no
+  // trace, not prune the real file and then decline to write the graph.
+  assertNoCorpusCollapse(graphOutputPath(stateOutputDir), {
+    nodeCount: Object.keys(nodes).length,
+    builtFrom: provenance,
+  });
+
   const allEdges: GraphEdge[] = [];
   const edgeSeen = new Set<string>();
 
@@ -570,16 +697,10 @@ export async function buildGraph(rulesDir: string, stateOutputDir?: string, rule
     edgeCount: allEdges.length,
     nodes,
     edges: allEdges,
+    builtFrom: provenance,
   };
 
-  if (stateOutputDir) {
-    const outputPath = join(stateOutputDir, "knowledge-graph.json");
-    const dir = dirname(outputPath);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(outputPath, JSON.stringify(graph, null, 2), "utf-8");
-  } else {
-    writeGraphFile(graph);
-  }
+  persistGraph(graph, graphOutputPath(stateOutputDir));
 
   return graph;
 }
@@ -648,6 +769,14 @@ export async function buildGraphWithAI(
     }
   }
 
+  const provenance: CorpusProvenance = { dir: resolve(rulesDir), fileCount: files.length };
+
+  // Same ordering reason as buildGraph(): refuse before syncRuleDomains().
+  assertNoCorpusCollapse(graphOutputPath(stateOutputDir), {
+    nodeCount: Object.keys(nodes).length,
+    builtFrom: provenance,
+  });
+
   const allEdges: GraphEdge[] = [];
   const edgeSeen = new Set<string>();
 
@@ -709,16 +838,10 @@ export async function buildGraphWithAI(
     edgeCount: allEdges.length,
     nodes,
     edges: allEdges,
+    builtFrom: provenance,
   };
 
-  if (stateOutputDir) {
-    const outputPath = join(stateOutputDir, "knowledge-graph.json");
-    const dir = dirname(outputPath);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(outputPath, JSON.stringify(graph, null, 2), "utf-8");
-  } else {
-    writeGraphFile(graph);
-  }
+  persistGraph(graph, graphOutputPath(stateOutputDir));
 
   return graph;
 }

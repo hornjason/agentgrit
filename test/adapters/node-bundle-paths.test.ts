@@ -12,7 +12,25 @@
  * node-target bundle, executed by node.
  *
  * That makes these tests slower than their neighbours (a bundle build plus a
- * node spawn, ~1s). The alternative is a check that cannot fail.
+ * node spawn). The alternative is a check that cannot fail.
+ *
+ * And slower by a margin that is not a property of this repo. Measured
+ * 2026-10-20: the whole file is 382ms locally and the first case alone took
+ * 5032ms on a GitHub-hosted runner — 13x, against bun's 5000ms default, which
+ * it missed by 32ms and took PR #294 red with it. A cold runner has no warm
+ * bun build cache and no warm node, so the duration is the RUNNER's and the
+ * default timeout is the thing that is wrong here, not the work.
+ *
+ * So every case declares BUNDLE_TIMEOUT_MS. Note what this does NOT weaken:
+ * the assertions are unchanged, `runUnderNode` keeps its own 60s cap on the
+ * node process, and a genuine throw still prints `THREW:` and fails the case
+ * at whatever clock it happens on. A real hang hits the 60s cap and is still
+ * a failure. The only thing bought is headroom for honest work.
+ *
+ * The cheapest wrong fix, named so the next reader can tell it apart: mark
+ * these `test.skip` on CI, or wrap them in a retry. Either makes the red go
+ * away and leaves the ONLY instrument that can see #279 switched off on the
+ * one machine where it matters.
  */
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "child_process";
@@ -21,6 +39,14 @@ import { tmpdir } from "os";
 import { join } from "path";
 
 const repoRoot = join(import.meta.dir, "..", "..");
+
+/**
+ * Per-case clock budget. 60s matches `runUnderNode`'s own cap on the node
+ * process, so the case cannot time out while the subprocess it is waiting on
+ * is still inside its allowance — two deadlines where the outer one fires
+ * first is a failure that names the wrong thing.
+ */
+const BUNDLE_TIMEOUT_MS = 60_000;
 
 /** Build the node-target bundle of an arbitrary entry into a temp dir. */
 function bundleForNode(entrySource: string, dir: string): string {
@@ -77,7 +103,7 @@ describe("the node-target bundle runs under node (#279)", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, BUNDLE_TIMEOUT_MS);
 
   test("no shipped source reaches the bundle carrying a bun-only import.meta.dir", () => {
     const dir = mkdtempSync(join(tmpdir(), "agentgrit-node-bundle-scan-"));
@@ -90,7 +116,7 @@ describe("the node-target bundle runs under node (#279)", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, BUNDLE_TIMEOUT_MS);
 
   test("the probe can actually observe a throw", () => {
     // Control. Both assertions above are "absence" assertions, and an absence
@@ -118,5 +144,5 @@ try {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, BUNDLE_TIMEOUT_MS);
 });
