@@ -10,6 +10,34 @@ updated: 2026-08-07
 ## [Unreleased]
 
 ### Added
+- **Reflection-driven optimization without an LLM (#250)** — `algorithm-reflections.jsonl` used to
+  be written only by PAI's Algorithm LEARN phase, so every consumer of it — skill-synthesizer,
+  skill-forge, hill-climb, eval — was dead for a standalone install. Two halves close that:
+  - **LLM-free reflection generation.** `src/daemon/auto-reflection.ts` composes one reflection per
+    scored session out of signals already on disk and `runDaemonCycle` appends them, counting the
+    new entries on `CycleResult.reflectionsGenerated`. `implied_sentiment` is the measured mean of
+    the session's `rating` values, not a self-assessment, and the module imports no inference
+    adapter and makes no network call — it runs with no API key set. The session id is the
+    idempotency key, so a second cycle over the same ratings writes nothing.
+  - **`recommendSkills` in `src/optimize/skill-synthesizer.ts`** — skill recommendations from a
+    `Reflection[]` with no `inference()` call anywhere in the path. Clustering is a greedy term
+    cover over `task_description`: the term shared by the most still-uncovered reflections takes
+    them, so each reflection backs at most one recommendation and the output is deterministic.
+    Every recommendation reports `reflectionCount`, the `terms` it clustered on, the backing
+    `taskDescriptions`, and `meanSentiment` — the mean `implied_sentiment` of the entries behind
+    it, or `null` when none of them carried one, never a substituted default. A term carried by
+    one reflection alone is not a cluster.
+
+  Measured end to end in `test/optimize/skill-synthesizer-auto-reflections.test.ts`: ten synthetic
+  scored sessions driven through `runDaemonCycle` with `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and
+  `GEMINI_API_KEY` deleted produce ten entries in `algorithm-reflections.jsonl`, and those entries
+  produce two recommendations whose reported means (5.5 and 6.5) are recomputed from the entries
+  backing them rather than read back off the recommendation.
+
+  Proven by breaking it, over that file's 5 cases: making `meanSentiment` fall back to `5` instead
+  of `null` is 1 red; dropping the `minSupport` floor to 1 is 1 red; leaving covered reflections in
+  the pool so clusters overlap is 1 red; adding an `inference()` call inside `recommendSkills` is
+  1 red. None is left in the tree — the source was restored and confirmed identical by checksum.
 - **`agentgrit backfill-ratings` — recover ratings from host transcripts (#260)** — walks the host
   transcript root for `*.jsonl`, filters typed user prompts by a `--since`/`--until` window on the
   entry timestamp, and runs each through the same four parsers the live capture hook uses. The

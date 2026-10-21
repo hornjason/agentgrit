@@ -26,6 +26,12 @@ export interface CycleResult {
   feedbackGenerated: number;
   successGenerated: number;
   workInsightsGenerated: number;
+  /**
+   * Reflection entries this cycle appended to `algorithm-reflections.jsonl`.
+   * Sessions already present in that file are not re-written, so a cycle that
+   * sees nothing new reports 0 rather than re-counting the whole backlog.
+   */
+  reflectionsGenerated: number;
   cleanup: CleanupStats;
   correlationStats: CorrelationStats;
   errors: string[];
@@ -242,6 +248,7 @@ export async function runDaemonCycle(
     feedbackGenerated: 0,
     successGenerated: 0,
     workInsightsGenerated: 0,
+    reflectionsGenerated: 0,
     cleanup: {
       staleFilesRemoved: 0,
       sessionStatesCleared: 0,
@@ -350,6 +357,54 @@ export async function runDaemonCycle(
     }
   } catch (err) {
     result.errors.push(`auto-feedback: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // 3a. Auto-reflection — compose reflection entries from scored sessions.
+  //
+  // Runs before the optimize step on purpose: that step reads
+  // `algorithm-reflections.jsonl` for traces, so entries written here are
+  // available to it in the same cycle. No LLM is involved — the module is
+  // pure composition over signals already on disk, which is why this works
+  // with no API key set.
+  try {
+    const { generateAutoReflection, appendReflections } = await import("./auto-reflection");
+    const { readSignals } = await import("../adapters/jsonl");
+    const { resolveSignalFile } = await import("../adapters/paths");
+    const { existsSync, readFileSync } = await import("fs");
+    const { join } = await import("path");
+
+    const allSignals = await readSignals(join(config.signalDir, "ratings.jsonl"));
+    const ratingSignals = allSignals.filter(
+      (s): s is import("../adapters/types").RatingSignal => "type" in s && s.type === "rating",
+    );
+
+    const reflFile = resolveSignalFile(config.signalDir, "algorithm-reflections.jsonl");
+
+    // Idempotency key is the session: a session that already has an entry —
+    // written by an earlier cycle or by an external LEARN phase — is skipped,
+    // so re-running the cycle over the same ratings.jsonl adds nothing.
+    const alreadyReflected = new Set<string>();
+    if (existsSync(reflFile)) {
+      for (const line of readFileSync(reflFile, "utf-8").split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const entry = JSON.parse(line) as { session_id?: unknown };
+          if (typeof entry.session_id === "string" && entry.session_id) {
+            alreadyReflected.add(entry.session_id);
+          }
+        } catch {
+          // A line we cannot parse names no session, so it blocks nothing.
+        }
+      }
+    }
+
+    const fresh = generateAutoReflection(ratingSignals).filter(
+      (r) => !alreadyReflected.has(r.session_id),
+    );
+    appendReflections(reflFile, fresh);
+    result.reflectionsGenerated = fresh.length;
+  } catch (err) {
+    result.errors.push(`auto-reflection: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // 3b. Work insights — enrich work completion learnings via LLM

@@ -237,7 +237,7 @@ AgentGrit is imported at runtime via dynamic `import()`. If unavailable, PAI fal
 | Embedding support | SHIPPED | transformers.js optional peerDep, vector-cache.json, EmbeddingProvider interface (#98) |
 | Feedback loop | CLOSED | Core loop (#99) + daemon refactor + session context enrichment + decay observability (#163). All 7 SCs verified. |
 | Eval regression gate | SHIPPED | Blocks buildGraph on precision drop >= 0.05 (#99) |
-| Skill optimization | COMPLETE | 84 tests pass |
+| Skill optimization | COMPLETE | 89 tests pass |
 | Track 1 ports (#63-74) | ALL CLOSED | 12/12 verified 2026-07-08 |
 | Track 1 cutover (#75) | OPEN | Prerequisites met |
 | LLM isolated node classification | SHIPPED | `classifyIsolatedNodes()` + daemon step 3c + CLI `graph classify` |
