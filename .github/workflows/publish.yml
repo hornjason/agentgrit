@@ -30,7 +30,20 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
 
+      # Runs before npm is asked to do anything (#317). Every version up to
+      # 0.2.0 reached npm by hand, so the realistic failure here is a release
+      # cut against a package.json whose version is already published — which
+      # is what killed run 31038878645 after it had already signed provenance.
+      # That case is now a green skip; a tag that disagrees with package.json
+      # is a hard fail.
+      - name: Preflight — tag agreement and registry collision
+        id: preflight
+        run: bun scripts/publish-preflight.ts
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+
       - name: Publish to npm with provenance
+        if: steps.preflight.outputs.should_publish == 'true'
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
