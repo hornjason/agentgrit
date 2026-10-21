@@ -5,7 +5,12 @@ import { createHash } from "crypto";
 import { getBaseDir, stateDir, ruleDomainsFile } from "../adapters/paths";
 import type { GraphNode, GraphEdge, Rule } from "../adapters/types";
 import type { CorpusProvenance, Graph } from "./types";
+// Banked cycle (#261): domain-propagation.ts imports DOMAINS back from this
+// module. Counted in fallow-baseline.json; remove the marker when the cycle is.
+// fallow-ignore-next-line circular-dependency
 import { propagateDomains } from "./domain-propagation";
+// Banked cycle (#261): generate-patterns.ts imports back from this module.
+// fallow-ignore-next-line circular-dependency
 import { loadPatterns } from "./generate-patterns";
 import { ruleIdFromFilename, stripRulePrefix } from "./rule-id";
 
