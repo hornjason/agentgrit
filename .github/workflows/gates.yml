@@ -1,4 +1,4 @@
-# generated-sha: 80a1f5f167e3279f
+# generated-sha: 844a220c8cbfc4d7
 # Managed by rungate — do not edit. Customize the ci section of .claude/rungate/config.json.
 name: Gates
 
@@ -30,9 +30,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          # From ci.bunVersion in .claude/rungate/config.json — this project declares no
-          # .bun-version. Add one and re-scaffold to let CI read the declaration directly.
-          bun-version: "latest"
+          # Pinned by .bun-version — the project's single declaration (#622).
+          # setup-bun reads that file, so there is no version spelled here to drift from it.
+          bun-version-file: ".bun-version"
       - run: bun install
       - name: Conformity + spec drift
         run: bun test test/scaffold-conformity.test.ts

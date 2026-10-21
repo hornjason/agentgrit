@@ -25,7 +25,7 @@
   "envVars": [],
   "ci": {
     "runner": "ubuntu-latest",
-    "bunVersion": "latest",
+    "bunVersion": "1.3.14",
     "branches": [
       "main"
     ],
