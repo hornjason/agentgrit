@@ -5,6 +5,11 @@
   "project": "@agentgrit/core",
   "repo": "hornjason/agentgrit",
   "issueRepo": "hornjason/agentgrit",
+  "ship": {
+    "mode": "direct",
+    "since": "2026-10-19",
+    "reason": "stabilising RunGate and clearing the backlogs, until we get RunGate under control"
+  },
   "dev": {
     "start": "bun run dev",
     "apiBase": null,
