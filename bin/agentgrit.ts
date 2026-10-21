@@ -17,6 +17,7 @@ import { graphCommand } from "./commands/graph";
 import { healthCommand } from "./commands/health";
 import { inboxCommand } from "./commands/inbox";
 import { initCommand } from "./commands/init";
+import { learnCommand } from "./commands/learn";
 import { memoryCommand } from "./commands/memory";
 import { optimizeCommand } from "./commands/optimize";
 import { patternsCommand } from "./commands/patterns";
@@ -53,6 +54,7 @@ const HANDLERS: Record<string, (args: string[]) => Promise<void>> = {
   health: healthCommand,
   inbox: inboxCommand,
   init: initCommand,
+  learn: learnCommand,
   memory: memoryCommand,
   optimize: optimizeCommand,
   patterns: patternsCommand,
@@ -83,6 +85,7 @@ const DESCRIPTIONS: Record<string, string> = {
   health: "Context health — rules, budget, lifecycle, doctor",
   inbox: "Review and approve pending rule candidates",
   init: "Interactive setup wizard",
+  learn: "Record an iteration-loop learning and shadow-route it",
   memory: "MEMORY.md lifecycle — staleness detection",
   optimize: "Hill-climb optimize prompts or skills",
   patterns: "Generate or show domain keyword patterns",
