@@ -205,6 +205,22 @@ export interface FallowWarmup {
   outcome: FallowOutcome["kind"];
   /** The runner's own sentence when the warm-up did not get a reading. */
   detail: string | null;
+  /**
+   * The process spawn counter read immediately AFTER the warm-up's own spawn,
+   * so `1` means the warm-up was the first fallow invocation in this process
+   * and `0` means it declined to spawn at all.
+   *
+   * Recorded here rather than read live from `fallowSpawnCount()` at the point
+   * of judgement, because the live counter keeps moving: bun runs many test
+   * files in one process, `test/fallow-baseline.test.ts` spawns twice, and
+   * whether those two land before or after `test/fallow-timeout.test.ts` is
+   * imported is bun's scheduling decision, not a fact about the warm-up.
+   * Measured 2026-10-21: the live count at that import is 1 under bun 1.3.14
+   * and 3 under the 1.4.3 that `bun-version: latest` resolved to on CI, so the
+   * live reading made AC-1 a test of the runner's version. This number does
+   * not move once written.
+   */
+  spawnIndex: number;
 }
 
 let warmup: FallowWarmup | null = null;
@@ -232,6 +248,8 @@ export function warmFallow(root: string): FallowWarmup {
     elapsedMs: Date.now() - started,
     outcome: outcome.kind,
     detail: outcome.kind === "ok" ? null : outcome.message,
+    // Read after the call, so it counts the warm-up's own spawn and nothing later.
+    spawnIndex: spawnCount,
   };
   return warmup;
 }

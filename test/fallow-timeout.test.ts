@@ -106,7 +106,6 @@ const ROOT = join(import.meta.dir, "..");
  * whole claim of AC-1 is that no graded check is the one paying the cold cost.
  */
 const WARMUP_AT_IMPORT = fallowWarmup();
-const SPAWNS_AT_IMPORT = fallowSpawnCount();
 
 /** bun's own per-test default. The number the 5010ms and 5105ms readings are. */
 const BUN_DEFAULT_TIMEOUT_MS = 5_000;
@@ -199,14 +198,23 @@ describe("the fallow budget is one number on both clocks (#311)", () => {
       if (fallowInstalledLocally(ROOT)) {
         expect(WARMUP_AT_IMPORT.outcome).toBe("ok");
         expect(WARMUP_AT_IMPORT.elapsedMs).toBeGreaterThan(0);
-        expect(SPAWNS_AT_IMPORT).toBe(1);
+        // FIRST, which is the claim — not "nothing has spawned since", which is
+        // what the live counter answers. `spawnIndex` is frozen at the warm-up's
+        // own spawn, so it stays 1 however bun later interleaves the files that
+        // spawn fallow. Reading `SPAWNS_AT_IMPORT` here instead made this case a
+        // test of bun's scheduling: 1 locally on 1.3.14, 3 on CI's 1.4.3.
+        expect(WARMUP_AT_IMPORT.spawnIndex).toBe(1);
       }
 
       // ONCE per process, which is the other half of AC-1: a warm-up that
       // re-spawned per test file would pay the cost it exists to amortise.
+      // Bracketed around the call rather than compared to the import-time
+      // reading, for the same reason as above — anything bun ran in between is
+      // not this call's doing.
+      const before = fallowSpawnCount();
       const again = warmFallow(ROOT);
       expect(again).toBe(WARMUP_AT_IMPORT);
-      expect(fallowSpawnCount()).toBe(SPAWNS_AT_IMPORT);
+      expect(fallowSpawnCount()).toBe(before);
     },
   );
 
@@ -264,11 +272,29 @@ describe("the fallow budget is one number on both clocks (#311)", () => {
 
       // …and in those same files nothing registers a case on bun's default
       // clock. `test(` and `beforeAll(` inherit 5000ms; the wrappers do not.
+      //
+      // The population is files that can REACH fallow — ones that spawn it
+      // directly, or that import the runner which does. NOT every file whose
+      // text contains the word, which is what this filter asked first and
+      // which swept in `test/fallow-baseline-census.test.ts` (#312): that file
+      // only reads `fallow-baseline.test.ts` as TEXT and never invokes
+      // anything, so bun's 5000ms default is the right clock for it and
+      // forcing it onto a 180s budget would hide a real hang there. A case
+      // that cannot invoke fallow cannot be killed by fallow's cold start,
+      // which is the only thing this guard is about.
       const bareRegistrations: string[] = [];
+      const REACHES_FALLOW = /Bun\.spawnSync\([^)]*fallow|from\s+["'][^"']*setup\/fallow-(?:run|test)["']/;
       const fallowFiles = sources.filter(
-        f => /fallow/i.test(readFileSync(f, "utf-8")) && f.endsWith(".test.ts"),
+        f => f.endsWith(".test.ts") && REACHES_FALLOW.test(readFileSync(f, "utf-8")),
       );
       expect(fallowFiles.length).toBeGreaterThanOrEqual(2);
+      // …and the narrowing did not quietly drop the two files this is about.
+      // A filter that excluded them would leave `bareRegistrations` empty for
+      // the same reason a clean tree does. Membership, not an exact list: a
+      // third file that reaches fallow should join the population, not go red.
+      const fallowFileNames = fallowFiles.map(f => relative(ROOT, f));
+      expect(fallowFileNames).toContain("test/fallow-baseline.test.ts");
+      expect(fallowFileNames).toContain("test/fallow-timeout.test.ts");
       for (const file of fallowFiles) {
         const src = readFileSync(file, "utf-8");
         for (const form of ["test", "it", "beforeAll", "beforeEach"]) {

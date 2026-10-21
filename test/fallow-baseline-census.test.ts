@@ -44,11 +44,26 @@ const RECONCILIATION_FILE = join(import.meta.dir, "fallow-baseline.test.ts");
  */
 const MINIMUM_CASES = 15;
 
-/** `test(` / `it(` at the start of a line, with no modifier attached. */
-const LIVE_CASE_RE = /^[ \t]*(?:test|it)\s*\(/gm;
+/**
+ * The registration forms that put a case in the run.
+ *
+ * `fallowTest` is in the list because #311 moved every case in the counted
+ * file onto it: the wrapper is `test(name, body, FALLOW_BUDGET_MS)` and
+ * nothing else, so a case registered through it is as live as a bare one.
+ * Without it this census read zero live cases in a file that had lost none,
+ * and the ratchet below would have blocked the fix for the very timeout it
+ * was written alongside.
+ */
+const REGISTRATION_FORMS = "fallowTest|test|it";
+
+/** A registration at the start of a line, with no modifier attached. */
+const LIVE_CASE_RE = new RegExp(String.raw`^[ \t]*(?:${REGISTRATION_FORMS})\s*\(`, "gm");
 
 /** Anything that leaves the line in the file and the case out of the run. */
-const INERT_CASE_RE = /^[ \t]*(?:test|it)\s*\.\s*(?:skip|todo|failing|skipIf)\b/gm;
+const INERT_CASE_RE = new RegExp(
+  String.raw`^[ \t]*(?:${REGISTRATION_FORMS})\s*\.\s*(?:skip|todo|failing|skipIf)\b`,
+  "gm",
+);
 
 /** `describe(` at column zero — the file's top-level questions. */
 const TOP_LEVEL_DESCRIBE_RE = /^describe\s*\(\s*["'`]([^"'`]+)["'`]/gm;
@@ -93,13 +108,17 @@ describe("the #261 reconciliation file was not thinned to make #311 green (#312 
     const sample = [
       "  test(\"live one\", () => {});",
       "  it(\"live two\", () => {});",
+      "  fallowTest(\"live three — the budgeted wrapper is still a case\", () => {});",
       "  test.skip(\"inert\", () => {});",
       "  it.todo(\"also inert\");",
       "    test . failing (\"spaced inert\", () => {});",
+      "  fallowTest.skip(\"inert wrapper\", () => {});",
       "  // test(\"commented out\", () => {});",
+      // Not a case: the hook form registers no case and never counted as one.
+      "  fallowBeforeAll(() => {});",
     ].join("\n");
 
-    expect(countMatches(sample, LIVE_CASE_RE)).toBe(2);
-    expect(countMatches(sample, INERT_CASE_RE)).toBe(3);
+    expect(countMatches(sample, LIVE_CASE_RE)).toBe(3);
+    expect(countMatches(sample, INERT_CASE_RE)).toBe(4);
   });
 });
