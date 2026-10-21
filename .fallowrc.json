@@ -38,6 +38,7 @@
         "captureFailure",
         "detectCorrection",
         "extractWorkLearnings",
+        "captureIterationLearning",
         "captureSkillInvocation",
         "classifyOutcome",
         "analyzeSkillSequence",

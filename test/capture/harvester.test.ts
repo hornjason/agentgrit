@@ -191,6 +191,30 @@ describe("formatLearningFile", () => {
     expect(md).toContain("algorithm");
     expect(md).toContain("key learning here");
   });
+
+  test("renders a shadow routing section only when one was recorded (#253)", () => {
+    const learning: HarvestedLearning = {
+      sessionId: "sess-shadow",
+      timestamp: "2026-01-01T10:00:00Z",
+      category: "algorithm",
+      type: "insight",
+      context: "previous message",
+      content: "key learning here",
+      source: "iteration-learn",
+    };
+
+    // Absent by default — every existing caller writes no shadow field, and a
+    // section claiming a tier nobody computed would be a fabricated reading.
+    expect(formatLearningFile(learning)).not.toContain("Shadow Routing");
+
+    const routed = formatLearningFile({
+      ...learning,
+      shadow: { tier: "global", rationale: "multi-project behavioural pattern" },
+    });
+    expect(routed).toContain("## Shadow Routing");
+    expect(routed).toContain("**Tier:** global");
+    expect(routed).toContain("multi-project behavioural pattern");
+  });
 });
 
 describe("harvest (integration)", () => {

@@ -1,184 +1,168 @@
 /**
- * The iteration LEARN step hands its gap/root-cause/fix to AgentGrit (#253).
+ * #253 — the iteration loop's LEARN step and this package's learning router
+ * were two systems that never touched: the step produced prose, and
+ * `routeRule`/`writeLearnings` sat live and uncalled next to it.
  *
- * Two questions are asked here, and they are different questions:
+ * `captureIterationLearning` is the join. These cases hold the two properties
+ * that make it a join rather than a third implementation of the same thing:
  *
- *   1. Does `captureIterationLearning` DELEGATE — i.e. is the tier it returns
- *      the tier `routeRule` gives for the same input when this test calls it
- *      directly, and is the learning file the one `writeLearnings` writes? A
- *      reimplementation that happened to agree on one input would pass a
- *      weaker test; the direct call is the control.
- *   2. Is the routing SHADOW — recorded in the artifact for calibration while
- *      the rules store is left exactly as it was? Asserted by reading the
- *      pending-rules and learned-rules files before and after.
+ *  1. the category of the written artifact comes from `extractWorkLearnings`
+ *     and the tier comes from `routeRule` — both read back from the artifact
+ *     the real `writeLearnings` put on disk, not from the return value alone;
+ *  2. routing is SHADOW — recorded for calibration, applied to nothing.
  *
- * Both run against a sandboxed base dir and host dir. Nothing here may touch
- * the real `~/.agentgrit` or the real host config.
+ * WHAT WAS BROKEN to make each go red, run rather than asserted:
+ *
+ *  - delegation: hardcoding `category: "algorithm"` in the adapter instead of
+ *    mapping the one `extractWorkLearnings` returns puts the tooling-flavoured
+ *    call's artifact under `algorithm/` and the case fails on the path. The
+ *    two calls differ only in the gap text, so a constant cannot satisfy both.
+ *  - tier: returning a literal `Tier.Project` passes the single-project call
+ *    and fails here, where the same text routed through `routeRule` by the
+ *    test itself comes back Global.
+ *  - shadow: appending the candidate rule to the pending-rules file — the
+ *    obvious "while we're here" next step — fails the byte comparison.
  */
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
-import { join } from "path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "fs";
+import { dirname, join } from "path";
+import { captureIterationLearning } from "../../src/capture/iteration-learning";
 import { routeRule } from "../../src/promote/router";
-import { extractWorkLearnings } from "../../src/capture/corrections";
-import { Tier, type Pattern } from "../../src/adapters/types";
-import {
-  captureIterationLearning,
-  type IterationLearningInput,
-} from "../../src/capture/iteration-learning";
 import { learnedRulesFile, pendingRulesFile } from "../../src/adapters/paths";
+import { Tier, type Pattern } from "../../src/adapters/types";
 
-const TEST_DIR = join(import.meta.dir, ".tmp-iteration-learning-test");
-const HOST_DIR = join(TEST_DIR, "host");
+const TEST_DIR = join(import.meta.dir, ".tmp-iteration-learning");
+const LEARNING_DIR = join(TEST_DIR, "learning");
 
-const PREV = {
-  base: process.env.AGENTGRIT_DIR,
-  host: process.env.AGENTGRIT_HOST_DIR,
-};
-
-/** A multi-project, unmistakably behavioural fix — routes Global via routeRule. */
-const BEHAVIOURAL_FIX =
-  "Always verify and validate the evidence before asserting; read and check first.";
-
-function input(over: Partial<IterationLearningInput> = {}): IterationLearningInput {
-  return {
-    gap: "LEARN step produced text nobody routed",
-    rootCause: "The iteration loop never called the learning router",
-    mechanicalFix: BEHAVIOURAL_FIX,
-    artifactType: "iteration-loop",
-    sessionId: "sess-253",
-    projectHistory: ["proj-a", "proj-b"],
-    ...over,
-  };
-}
-
-/** What the file says, or null when it does not exist. Both are state. */
-function snapshot(path: string): string | null {
-  return existsSync(path) ? readFileSync(path, "utf-8") : null;
-}
+let savedHostDir: string | undefined;
 
 beforeEach(() => {
   if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
   mkdirSync(join(TEST_DIR, "signals"), { recursive: true });
-  mkdirSync(join(TEST_DIR, "state"), { recursive: true });
-  mkdirSync(HOST_DIR, { recursive: true });
+  mkdirSync(join(TEST_DIR, "host"), { recursive: true });
+  savedHostDir = process.env.AGENTGRIT_HOST_DIR;
   process.env.AGENTGRIT_DIR = TEST_DIR;
-  process.env.AGENTGRIT_HOST_DIR = HOST_DIR;
+  process.env.AGENTGRIT_HOST_DIR = join(TEST_DIR, "host");
 });
 
 afterEach(() => {
   if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
-  process.env.AGENTGRIT_DIR = PREV.base ?? "";
-  process.env.AGENTGRIT_HOST_DIR = PREV.host ?? "";
+  process.env.AGENTGRIT_DIR = process.env.AGENTGRIT_TEST_BASE ?? "";
+  if (savedHostDir === undefined) delete process.env.AGENTGRIT_HOST_DIR;
+  else process.env.AGENTGRIT_HOST_DIR = savedHostDir;
 });
 
-describe("captureIterationLearning", () => {
+/** The pattern `routeRule` consumes, built here so the test routes for itself. */
+function patternFor(mechanicalFix: string, projects: string[]): Pattern {
+  return {
+    id: "p-iteration",
+    type: "iteration-gap",
+    frequency: 1,
+    sessions: projects,
+    severity: 5,
+    candidateRule: mechanicalFix,
+  };
+}
+
+describe("captureIterationLearning (#253)", () => {
   test("delegates to extractWorkLearnings, routeRule and writeLearnings", () => {
-    const opts = input();
-    const result = captureIterationLearning(opts);
-    expect(result).not.toBeNull();
-
-    // ── routeRule, called directly on the same input ────────────────────────
-    const pattern: Pattern = {
-      id: "control",
-      type: "iteration-gap",
-      frequency: 1,
-      sessions: opts.projectHistory!,
-      severity: 5,
-      candidateRule: opts.mechanicalFix,
+    const projects = ["agentgrit", "rungate"];
+    const input = {
+      gap: "the LEARN step produced prose that no router ever saw",
+      rootCause: "two live systems were never connected to each other",
+      mechanicalFix:
+        "always verify the router was called before reporting a learning captured",
+      artifactType: "workflow",
+      sessionId: "sess-delegation",
+      projects,
     };
-    const control = routeRule(pattern, opts.projectHistory!);
-    expect(control.tier).toBe(Tier.Global);
-    expect(result!.tier).toBe(control.tier);
-    expect(result!.rationale).toBe(control.rationale);
 
-    // ── extractWorkLearnings, called directly on the same input ─────────────
-    const controlLearning = extractWorkLearnings({
-      title: opts.gap,
-      filesChanged: [opts.artifactType],
-      toolsUsed: [],
-      agentsSpawned: [],
-      sessionId: opts.sessionId!,
+    const result = captureIterationLearning(input);
+
+    // ── writeLearnings did the writing: a real file, on disk, in the
+    // per-category subdirectory that function owns.
+    expect(result.files).toHaveLength(1);
+    const artifact = result.files[0]!;
+    expect(existsSync(artifact)).toBe(true);
+    expect(result.learningDir).toBe(LEARNING_DIR);
+
+    // ── extractWorkLearnings did the classifying. This gap is neither an
+    // approach nor a tooling phrase, so it comes back "general" → algorithm/.
+    expect(result.learning.title).toBe(input.gap);
+    expect(result.learning.filesChanged).toBe(1);
+    expect(result.learning.category).toBe("general");
+    expect(artifact.startsWith(join(LEARNING_DIR, "algorithm"))).toBe(true);
+
+    // ── routeRule did the routing. The test routes the same inputs itself and
+    // demands the same answer, rather than accepting whatever came back.
+    const direct = routeRule(patternFor(input.mechanicalFix, projects), projects);
+    expect(result.route).toEqual(direct);
+    expect(result.route.tier).toBe(Tier.Global);
+
+    const body = readFileSync(artifact, "utf-8");
+    for (const field of [input.gap, input.rootCause, input.mechanicalFix, input.artifactType]) {
+      expect(body).toContain(field);
+    }
+
+    // ── A second call whose gap names a tooling concern must land somewhere
+    // else. A hardcoded category satisfies one of these two calls, never both.
+    const tooling = captureIterationLearning({
+      gap: "the deploy config path was wrong in the generated hook",
+      rootCause: "the generator and the template disagreed",
+      mechanicalFix: "read the generated file before shipping the generator",
+      artifactType: "hook",
+      sessionId: "sess-tooling",
+      projects,
     });
-    expect(controlLearning).not.toBeNull();
-    expect(result!.learning.category).toBe(controlLearning!.category);
-    expect(result!.learning.title).toBe(controlLearning!.title);
-    expect(result!.learning.filesChanged).toBe(controlLearning!.filesChanged);
-
-    // ── writeLearnings: a real file, in the category subdirectory ───────────
-    expect(result!.files.length).toBe(1);
-    const written = result!.files[0];
-    expect(existsSync(written)).toBe(true);
-    expect(written.startsWith(TEST_DIR)).toBe(true);
-
-    const body = readFileSync(written, "utf-8");
-    expect(body).toContain(opts.gap);
-    expect(body).toContain(opts.rootCause);
-    expect(body).toContain(opts.mechanicalFix);
-    expect(body).toContain(opts.artifactType);
+    expect(tooling.learning.category).toBe("tooling");
+    expect(tooling.files[0]!.startsWith(join(LEARNING_DIR, "system"))).toBe(true);
   });
 
-  test("returns the Project tier routeRule gives for a single-project history", () => {
-    const opts = input({ projectHistory: ["only-one"] });
-    const result = captureIterationLearning(opts);
-    const control = routeRule(
-      {
-        id: "control",
-        type: "iteration-gap",
-        frequency: 1,
-        sessions: opts.projectHistory!,
-        severity: 5,
-        candidateRule: opts.mechanicalFix,
-      },
-      opts.projectHistory!,
-    );
-    expect(result!.tier).toBe(Tier.Project);
-    expect(result!.tier).toBe(control.tier);
-  });
-
-  test("shadow mode records the route in the artifact and leaves the rules store untouched", () => {
+  test("shadow mode records tier and rationale but leaves the rules store untouched", () => {
     const pending = pendingRulesFile();
     const learned = learnedRulesFile();
+    mkdirSync(dirname(pending), { recursive: true });
+    mkdirSync(dirname(learned), { recursive: true });
+    writeFileSync(pending, "# Pending\n\n- an existing candidate\n");
+    writeFileSync(learned, "# Learned\n\n- an existing rule\n");
 
-    // Seed both so "unchanged" is a comparison of content, not of absence —
-    // two missing files compare equal no matter what the code did in between.
-    mkdirSync(join(TEST_DIR), { recursive: true });
-    writeFileSync(pending, "# Pending\n\n- pre-existing pending rule\n");
-    writeFileSync(learned, "# Learned\n\n- pre-existing learned rule\n");
+    const beforePending = readFileSync(pending, "utf-8");
+    const beforeLearned = readFileSync(learned, "utf-8");
 
-    const before = { pending: snapshot(pending), learned: snapshot(learned) };
-    expect(before.pending).not.toBeNull();
-    expect(before.learned).not.toBeNull();
+    const result = captureIterationLearning({
+      gap: "the routed tier was never written down anywhere",
+      rootCause: "calibration needs the decision, not just the outcome",
+      mechanicalFix: "record the tier in the artifact and apply nothing",
+      artifactType: "skill",
+      sessionId: "sess-shadow",
+      projects: ["agentgrit"],
+    });
 
-    const result = captureIterationLearning(input());
-    expect(result).not.toBeNull();
+    // Vacuity guard: "nothing changed" is also true of a call that did nothing.
+    expect(result.files).toHaveLength(1);
+    expect(result.applied).toBe(false);
 
-    const after = { pending: snapshot(pending), learned: snapshot(learned) };
-    expect(after.pending).toBe(before.pending!);
-    expect(after.learned).toBe(before.learned!);
+    const body = readFileSync(result.files[0]!, "utf-8");
+    expect(result.route.tier).toBe(Tier.Project);
+    expect(body).toContain(`**Tier:** ${Tier.Project}`);
+    expect(body).toContain(result.route.rationale);
 
-    // …and the route is recorded where calibration can read it.
-    expect(result!.shadow).toBe(true);
-    const body = readFileSync(result!.files[0], "utf-8");
-    expect(body).toContain(result!.tier);
-    expect(body).toContain(result!.rationale);
-    expect(body.toLowerCase()).toContain("shadow");
+    expect(readFileSync(pending, "utf-8")).toBe(beforePending);
+    expect(readFileSync(learned, "utf-8")).toBe(beforeLearned);
   });
 
-  test("shadow mode writes no rules file when the rules store does not exist yet", () => {
-    const pending = pendingRulesFile();
-    const learned = learnedRulesFile();
-    expect(existsSync(pending)).toBe(false);
-    expect(existsSync(learned)).toBe(false);
+  test("the artifact is the only thing written under the base dir", () => {
+    const result = captureIterationLearning({
+      gap: "a learning capture that also wrote signals would be a side effect",
+      rootCause: "shadow mode must be observable and inert",
+      mechanicalFix: "write one artifact and nothing else",
+      artifactType: "workflow",
+      sessionId: "sess-inert",
+      projects: ["agentgrit"],
+    });
 
-    captureIterationLearning(input());
-
-    expect(existsSync(pending)).toBe(false);
-    expect(existsSync(learned)).toBe(false);
-  });
-
-  test("returns null when there is nothing to learn from", () => {
-    expect(
-      captureIterationLearning(input({ gap: "", artifactType: "" })),
-    ).toBeNull();
+    expect(result.files).toHaveLength(1);
+    // The signals directory existed before the call and is still empty after.
+    expect(readdirSync(join(TEST_DIR, "signals"))).toEqual([]);
   });
 });

@@ -1,123 +1,107 @@
 /**
- * iteration-learning.ts — the LEARN step of an iteration loop, routed (#253).
+ * iteration-learning.ts — the LEARN step of an iteration loop, wired into the
+ * learning router (#253).
  *
- * An iteration loop ends by naming three things: the GAP it hit, the ROOT
- * CAUSE underneath it, and the MECHANICAL FIX that would stop it recurring.
- * Until this module existed that triple was prose — written down, read once,
- * and never seen by the router that decides whether a lesson belongs to one
- * project or to every project. AgentGrit already had every piece needed to
- * place it; nothing called them in sequence.
+ * An iteration loop ends by naming three things: the GAP between what was
+ * asked for and what was produced, the ROOT CAUSE underneath it, and the
+ * MECHANICAL FIX that would have prevented it. Until this file existed those
+ * three were prose. Meanwhile `extractWorkLearnings`, `routeRule` and
+ * `writeLearnings` were live, tested and called by nothing on that path — two
+ * systems that should have been connected and were not.
  *
- * This is that sequence, and deliberately nothing more:
+ * This module is the join and deliberately nothing else. Every decision it
+ * reports is made somewhere else:
  *
- *   extractWorkLearnings()  →  what kind of learning is this
- *   routeRule()             →  which tier would it belong to
- *   writeLearnings()        →  put it on disk where calibration can read it
+ *   gap/artifact  → extractWorkLearnings()  → category + insights
+ *   mechanical fix → routeRule()            → tier + rationale
+ *   the two above  → writeLearnings()       → the artifact on disk
  *
- * Each step is the existing implementation, called. Reimplementing any of the
- * three here would give the LEARN step a second opinion that drifts from the
- * one the rest of the system uses, which is the failure this issue exists to
- * remove — so `test/capture/iteration-learning.test.ts` calls `routeRule` and
- * `extractWorkLearnings` directly on the same input and compares.
+ * It re-implements none of them, because a second copy of the classifier is a
+ * second answer to one question, and the day the two disagree the artifact and
+ * the inbox describe different learnings.
  *
- * ── Shadow mode ─────────────────────────────────────────────────────────────
- * The tier is RECORDED, not APPLIED. Nothing here writes to the pending-rules
- * or learned-rules files; the only output is a learning artifact carrying the
- * tier and the router's rationale. That is on purpose and it is the whole
- * point of the first pass: a router that silently started promoting rules off
- * an uncalibrated signal would be discovered by its damage. Logged decisions
- * can be read against outcomes first, and the switch to applying them is a
- * later, separate, evidenced change.
+ * SHADOW MODE. The tier is recorded in the artifact and applied to nothing:
+ * no pending rule, no learned rule, no signal. Routing an iteration gap
+ * straight into the rules store would be a promotion nobody reviewed, and the
+ * recorded decisions are what a later calibration pass needs in order to say
+ * whether the routing is any good before it is allowed to act.
  */
 
+import { basename, resolve } from "path";
 import { randomUUID } from "crypto";
-import { join } from "path";
 import { resolveSignalDir } from "../adapters/paths";
-import type { Pattern, Tier } from "../adapters/types";
-import { routeRule } from "../promote/router";
+import type { Pattern } from "../adapters/types";
+import { routeRule, type RouteResult } from "../promote/router";
 import { extractWorkLearnings, type WorkLearning } from "./corrections";
 import { writeLearnings, type HarvestedLearning } from "./harvester";
 
-/** What an iteration loop knows when its LEARN step runs. */
+/**
+ * Severity carried on the synthesised pattern. `routeRule` does not read it,
+ * but `Pattern` requires it and a later consumer might, so it is a stated
+ * mid-scale default rather than an implied zero.
+ */
+const ITERATION_SEVERITY = 5;
+
+/** The pattern type an iteration gap is recorded under. */
+const ITERATION_PATTERN_TYPE = "iteration-gap";
+
 export interface IterationLearningInput {
-  /** What was missing or went wrong. Becomes the learning's title. */
+  /** What was asked for versus what was produced. */
   gap: string;
-  /** Why it happened — the layer beneath the symptom. */
+  /** Why the gap happened — the cause, not the symptom. */
   rootCause: string;
-  /** The change that stops it recurring. This is the text the router reads. */
+  /** The change that would have prevented it. Routed as the candidate rule. */
   mechanicalFix: string;
-  /** What the loop was producing: a spec, a workflow, a review, a doc… */
+  /** What was being produced when the gap appeared: skill, hook, workflow… */
   artifactType: string;
-  /** Session this came from. Defaults to a fresh id so artifacts never collide. */
+  /** Session this came from. A fresh id when the caller has none. */
   sessionId?: string;
-  /**
-   * Projects this gap has been seen in. The router needs more than one to
-   * consider anything beyond the project tier, so an empty or single-entry
-   * history is a Project-tier answer by construction, not by accident.
-   */
-  projectHistory?: string[];
-  /** Override the learning directory. Defaults alongside the signal dir. */
+  /** Projects the gap has been seen in — what `routeRule` scopes the tier by. */
+  projects?: string[];
+  /** Override the learning directory. Tests and callers with their own layout. */
   learningDir?: string;
 }
 
 export interface IterationLearningResult {
-  /** The tier `routeRule` returned. Recorded, not applied — see `shadow`. */
-  tier: Tier;
-  /** The router's own words for why. Carried into the artifact verbatim. */
-  rationale: string;
-  /** What `extractWorkLearnings` made of the input. */
+  /** Exactly what `extractWorkLearnings` returned. */
   learning: WorkLearning;
-  /** Files `writeLearnings` wrote. Empty when an identical artifact exists. */
+  /** Exactly what `routeRule` returned. */
+  route: RouteResult;
+  /** Artifact paths `writeLearnings` wrote. Empty if one already existed. */
   files: string[];
+  /** The directory written to, resolved through the path authority. */
+  learningDir: string;
   /**
-   * Always true while routing is being calibrated. It is a field rather than
-   * a comment so a caller — and the test — can assert on it, and so the day
-   * routing starts applying, every consumer sees the value change.
+   * Shadow mode: always false. Typed as the literal so a future change that
+   * starts applying rules has to come through the type and be read by every
+   * caller, rather than flipping a boolean nobody notices.
    */
-  shadow: true;
-}
-
-/** Where learning artifacts go, matching `capture harvest`'s own resolution. */
-function defaultLearningDir(): string {
-  return join(resolveSignalDir(), "..", "learning");
+  applied: false;
 }
 
 /**
- * `WorkLearning` splits work three ways; `HarvestedLearning` splits it two.
- * Tooling gaps are system problems; approach and general gaps are reasoning
- * problems, which is what "algorithm" means in the harvester's vocabulary.
+ * Where learnings live. Same directory `agentgrit capture harvest` writes to,
+ * resolved from the path authority so a caller in any working directory —
+ * which is every real caller — lands in the configured install rather than in
+ * whatever it happened to be `cd`'d into.
  */
-function toHarvestCategory(category: WorkLearning["category"]): HarvestedLearning["category"] {
+function learningDirectory(): string {
+  return resolve(resolveSignalDir(), "..", "learning");
+}
+
+/**
+ * `WorkLearning.category` and `HarvestedLearning.category` are two different
+ * vocabularies, so somebody has to map. Tooling problems are system problems;
+ * approach and general problems are how the work was reasoned about.
+ */
+function toHarvestedCategory(
+  category: WorkLearning["category"],
+): HarvestedLearning["category"] {
   return category === "tooling" ? "system" : "algorithm";
 }
 
-/**
- * The pattern the router is asked about.
- *
- * `candidateRule` is the mechanical fix and nothing else: the router scores
- * that text for behavioural versus procedural keywords, so folding the gap or
- * the root cause in here would score the description of the problem rather
- * than the rule being proposed.
- */
-function buildPattern(input: IterationLearningInput, projects: string[]): Pattern {
-  return {
-    id: `iteration-${randomUUID()}`,
-    type: "iteration-gap",
-    frequency: Math.max(1, projects.length),
-    sessions: projects,
-    severity: 5,
-    candidateRule: input.mechanicalFix,
-    firstSeen: new Date().toISOString(),
-    lastSeen: new Date().toISOString(),
-  };
-}
-
-/** The artifact body: the triple, the insights, and the shadow route. */
-function buildContent(
-  input: IterationLearningInput,
-  learning: WorkLearning,
-  route: { tier: Tier; rationale: string },
-): string {
+/** The learning body: the loop's three fields plus what the extractor added. */
+function formatBody(input: IterationLearningInput, learning: WorkLearning): string {
   const lines = [
     `**Gap:** ${input.gap}`,
     "",
@@ -126,60 +110,75 @@ function buildContent(
     `**Mechanical fix:** ${input.mechanicalFix}`,
     "",
     `**Artifact type:** ${input.artifactType}`,
-    "",
-    "### Shadow routing (recorded for calibration, NOT applied)",
-    "",
-    `- **Routed tier:** ${route.tier}`,
-    `- **Rationale:** ${route.rationale}`,
-    "- **Rules store:** untouched — no rule was promoted, pended or evicted by this capture.",
+    `**Work category:** ${learning.category}`,
   ];
 
   if (learning.insights.length > 0) {
-    lines.push("", "### Insights", "");
-    for (const insight of learning.insights) lines.push(`- ${insight}`);
+    lines.push("", "**Insights:**", ...learning.insights.map((i) => `- ${i}`));
   }
 
   return lines.join("\n");
 }
 
 /**
- * Capture one iteration-loop learning: classify it, route it, write it down.
+ * Record one iteration-loop learning: classify it, route it in shadow mode,
+ * and write the artifact.
  *
- * Returns null when there is nothing to learn from — `extractWorkLearnings`
- * owns that judgement too, so an empty gap with no artifact is dropped by the
- * same rule that drops an empty work session, not by a second one here.
+ * Throws rather than returning null when the extractor declines the input —
+ * `artifactType` is always passed as a changed file, so a null here means the
+ * extractor's contract changed underneath this adapter, and a silent empty
+ * result would look exactly like a learning that was captured.
  */
 export function captureIterationLearning(
   input: IterationLearningInput,
-): IterationLearningResult | null {
-  const sessionId = input.sessionId ?? `iteration-${randomUUID()}`;
-  const projects = input.projectHistory ?? [];
+): IterationLearningResult {
+  const sessionId = input.sessionId ?? randomUUID();
+  const projects =
+    input.projects && input.projects.length > 0
+      ? input.projects
+      : [basename(process.cwd())];
 
   const learning = extractWorkLearnings({
     title: input.gap,
-    filesChanged: input.artifactType ? [input.artifactType] : [],
+    filesChanged: [input.artifactType],
     toolsUsed: [],
     agentsSpawned: [],
     sessionId,
   });
-  if (!learning) return null;
 
-  const route = routeRule(buildPattern(input, projects), projects);
+  if (!learning) {
+    throw new Error(
+      "extractWorkLearnings returned no learning for an iteration gap that " +
+        `names an artifact (${input.artifactType}). Its significance test has ` +
+        "changed; this adapter must be updated rather than writing nothing.",
+    );
+  }
+
+  const pattern: Pattern = {
+    id: learning.id,
+    type: ITERATION_PATTERN_TYPE,
+    frequency: 1,
+    sessions: projects,
+    severity: ITERATION_SEVERITY,
+    candidateRule: input.mechanicalFix,
+    firstSeen: learning.timestamp,
+    lastSeen: learning.timestamp,
+  };
+  const route = routeRule(pattern, projects);
 
   const harvested: HarvestedLearning = {
-    // A fresh id per capture: `writeLearnings` keys the filename off the
-    // session and the minute, so two captures sharing a session id in the
-    // same minute would write one file and silently drop the second.
-    sessionId: `${sessionId}-${learning.id.slice(0, 8)}`,
+    sessionId,
     timestamp: learning.timestamp,
-    category: toHarvestCategory(learning.category),
+    category: toHarvestedCategory(learning.category),
     type: "insight",
-    context: `Iteration LEARN step — ${input.artifactType || "unspecified artifact"}`,
-    content: buildContent(input, learning, route),
-    source: "iteration-learn",
+    context: input.rootCause,
+    content: formatBody(input, learning),
+    source: `${ITERATION_PATTERN_TYPE}:${input.artifactType}`,
+    shadow: { tier: route.tier, rationale: route.rationale },
   };
 
-  const files = writeLearnings([harvested], input.learningDir ?? defaultLearningDir());
+  const learningDir = input.learningDir ?? learningDirectory();
+  const files = writeLearnings([harvested], learningDir);
 
-  return { tier: route.tier, rationale: route.rationale, learning, files, shadow: true };
+  return { learning, route, files, learningDir, applied: false };
 }
