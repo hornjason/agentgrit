@@ -1,14 +1,27 @@
-# generated-sha: 713b26a517a683b5
+# generated-sha: 1225822c41de1f03
 # Managed by rungate — do not edit. Customize the ci section of .claude/rungate/config.json.
 name: CI
 
 on:
+  # See the sharded body above: no branches: filter, and its absence hangs a
+  # merge queue silently rather than failing it.
+  merge_group:
   push:
     branches:
-      - main
+      - "main"
   pull_request:
     branches:
-      - main
+      - "main"
+
+permissions:
+  # Least privilege, and it matters most on the consumers. A workflow with
+  # no permissions: block inherits the REPOSITORY default, which is a setting
+  # the harness does not control and cannot read at generation time. Measured
+  # 2026-10-20 across the consumers this harness serves: the default is
+  # read-only on some and WRITE on others, so a generated job that declares
+  # nothing holds a push-capable GITHUB_TOKEN wherever the default is write.
+  # Neither job needs it: both check out, install and run tests.
+  contents: read
 
 jobs:
   test:
@@ -41,13 +54,3 @@ jobs:
           fi
       - run: bun test
       - run: bun run typecheck
-
-permissions:
-  # Least privilege, and it matters most on the consumers. A workflow with
-  # no permissions: block inherits the REPOSITORY default, which is a setting
-  # the harness does not control and cannot read at generation time. Measured
-  # 2026-10-20 across the consumers this harness serves: the default is
-  # read-only on some and WRITE on others, so a generated job that declares
-  # nothing holds a push-capable GITHUB_TOKEN wherever the default is write.
-  # Neither job needs it: both check out, install and run tests.
-  contents: read
