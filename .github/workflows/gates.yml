@@ -1,20 +1,34 @@
+# generated-sha: 80a1f5f167e3279f
 # Managed by rungate — do not edit. Customize the ci section of .claude/rungate/config.json.
 name: Gates
 
 on:
+  # See ci.yml above: a merge queue builds a ref no branch list matches, so
+  # this trigger carries no filter and its absence hangs the queue silently.
+  merge_group:
   push:
     branches:
-      - main
+      - "main"
   pull_request:
     branches:
-      - main
+      - "main"
+
+permissions:
+  # Least privilege, and it matters most on the consumers. A workflow with
+  # no permissions: block inherits the REPOSITORY default, which is a setting
+  # the harness does not control and cannot read at generation time. Measured
+  # 2026-10-20 across the consumers this harness serves: the default is
+  # read-only on some and WRITE on others, so a generated job that declares
+  # nothing holds a push-capable GITHUB_TOKEN wherever the default is write.
+  # Neither job needs it: both check out, install and run tests.
+  contents: read
 
 jobs:
   gates:
     runs-on: "ubuntu-latest"
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           # From ci.bunVersion in .claude/rungate/config.json — this project declares no
           # .bun-version. Add one and re-scaffold to let CI read the declaration directly.
@@ -35,7 +49,10 @@ jobs:
           # CLAIM parity while CI carried 3 patterns and the hook carried 8 —
           # CI missed gho_, ghs_, github_pat_, sk-ant- and PEM private keys
           # entirely. Asserted now in test/unit/secret-patterns.test.ts.
-          if git grep -I -lE '(ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|ghs_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9]{22}_[A-Za-z0-9]{59}|AKIA[A-Z0-9]{16}|sk-[A-Za-z0-9]{20,}|sk-ant-[A-Za-z0-9-]{90,}|-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----)' -- .; then
+          # Tier 1 also owns the signed JWT, because it is the one unquoted
+          # credential whose shape is a dotted identifier path and so is
+          # excused by the tier-2 exclusion below (#863).
+          if git grep -I -lE '(ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|ghs_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9]{22}_[A-Za-z0-9]{59}|AKIA[A-Z0-9]{16}|sk-[A-Za-z0-9]{20,}|sk-ant-[A-Za-z0-9-]{90,}|-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----|eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{43,})' -- .; then
             echo "::error::Potential secrets detected in tracked files"
             exit 1
           fi
@@ -46,8 +63,14 @@ jobs:
           # NOTE: do NOT append "|| true" to the assignment below. It makes the
           # assignment itself succeed, so $? is always 0 and the error branch
           # becomes dead code — the scan would fail open on a git error.
+          # -i on tier 2 only, never on the tier-1 scan above: tier 1 matches
+          # anchored key FORMATS whose case is part of the format, and it has
+          # no allowlist to absorb a false positive. The flag is interpolated
+          # from lib/secret-patterns.ts rather than typed here, because four
+          # hand-written flags are four things that can disagree about what
+          # counts as a secret (#844).
           set +e
-          tier2=$(git grep -I -hoE '(password|passwd|api[_-]?key|secret)[[:space:]]*[:=][[:space:]]*[A-Za-z0-9/+=_.-]{12,}' -- .)
+          tier2=$(git grep -I -hoE -i '(password|passwd|api[_-]?key|secret)[[:space:]]*[:=][[:space:]]*[A-Za-z0-9/+_.-][A-Za-z0-9/+=_.-]{11,}' -- .)
           rc=$?
           set -e
           # git grep: 0 = match, 1 = no match, >1 = real error.
@@ -58,8 +81,53 @@ jobs:
           # Exclusion applies to the extracted VALUE, not the whole line.
           # Matching anywhere on the line let a trailing "# placeholder"
           # launder a real secret past the check.
-          if printf '%s\n' "$tier2" | grep -qvE '^$|[:=][[:space:]]*(process\.env|os\.environ|Deno\.env|getenv|REDACTED|CHANGEME|placeholder)'; then
+          # It reads case the same way the capture does, for a reason
+          # recorded in lib/secret-patterns.ts: the population the capture
+          # newly sees is mostly .env.example, where a non-value is spelled
+          # CHANGEME and PLACEHOLDER (#844).
+          # The last alternative excuses a DOTTED IDENTIFIER PATH, anchored at
+          # both ends so the whole value must be one. The value charset has no
+          # quote characters, so in source tier 2 only ever sees an unquoted
+          # value, and an unquoted value is an expression: apiKey:
+          # config.judge.apiKey is a property reference, not a credential
+          # (#863). A JWT has the same shape and is a credential, which is why
+          # the tier-1 scan above carries it.
+          # The optional dash after the separator is the shell-default
+          # separator, so the placeholder vocabulary can reach the value of a
+          # NAME:-default form. That vocabulary is a closed list of documented
+          # non-values, not a judgement that a value looks harmless: a 32-char
+          # random default carries none of its words and is still reported.
+          if printf '%s\n' "$tier2" | grep -qvE -i '^$|^(password|passwd|api[_-]?key|secret)[[:space:]]*[:=][[:space:]]*-?getenv([A-Za-z_][A-Za-z0-9_]*)?(\.[A-Za-z_][A-Za-z0-9_]*)*$|^(password|passwd|api[_-]?key|secret)[[:space:]]*[:=][[:space:]]*-?((REDACTED|CHANGEME|placeholder)([_-][A-Za-z][A-Za-z_-]*)?|your[_-][A-Za-z][A-Za-z_-]*|example[_-][A-Za-z][A-Za-z_-]*)$|^(password|passwd|api[_-]?key|secret)[[:space:]]*[:=][[:space:]]*-?(process|os|Deno|globalThis|module|exports|this|self|config|conf|cfg|settings|options|opts|env|deps|current|ctx|context|params|args|argv|input|data|state|store|creds|credentials|auth|secrets|vars)(\.[A-Za-z_][A-Za-z0-9_]*)+$'; then
             echo "::error::Potential credential assignment in tracked files"
+            exit 1
+          fi
+          # Tier 3 — a credential written as a shell default, caught by SHAPE
+          # rather than by a name. Tier 2 can only see one whose variable name
+          # carries credential vocabulary; a variable named for what it holds
+          # is invisible to it, and every neighbouring line in such a block
+          # genuinely is a default, so the one that is not sits in a list of
+          # things that look alike (#848).
+          #
+          # Captured first for the same reason tier 2 is: piping git straight
+          # into the filter turns an error into empty input, which reads as
+          # clean. No "|| true" on the assignment — see the note above.
+          #
+          # No -i here, and that is not an oversight: tier 3 has no vocabulary
+          # to spell in the wrong case. Its classes already cover both cases,
+          # and the flag would only widen the value class.
+          set +e
+          tier3=$(git grep -I -hoE '[$][{][A-Za-z_][A-Za-z0-9_]*:-[A-Za-z0-9][A-Za-z0-9/+=_.-]{11,}' -- .)
+          rc=$?
+          set -e
+          if [ "$rc" -gt 1 ]; then
+            echo "::error::git grep failed (exit $rc) — refusing to report a clean scan"
+            exit 1
+          fi
+          # The exclusion is the discriminator, not the length floor: a value
+          # with no digit or no letter is a path, a container name or a port,
+          # and those are what this shape is full of.
+          if printf '%s\n' "$tier3" | grep -qvE '^$|:-[^0-9]*$|:-[^A-Za-z]*$'; then
+            echo "::error::Potential credential in a shell default in tracked files"
             exit 1
           fi
           echo "Secret scan clean"

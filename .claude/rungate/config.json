@@ -23,7 +23,13 @@
     "bunVersion": "latest",
     "branches": [
       "main"
-    ]
+    ],
+    "vertex": {
+      "project": "jhorn-pai",
+      "workloadIdentityProvider": "projects/939083080179/locations/global/workloadIdentityPools/github/providers/github-actions",
+      "region": "global",
+      "model": "claude-sonnet-5"
+    }
   },
   "contextDocs": {},
   "test": {

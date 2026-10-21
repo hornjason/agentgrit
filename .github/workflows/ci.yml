@@ -1,13 +1,27 @@
+# generated-sha: 1225822c41de1f03
 # Managed by rungate — do not edit. Customize the ci section of .claude/rungate/config.json.
 name: CI
 
 on:
+  # See the sharded body above: no branches: filter, and its absence hangs a
+  # merge queue silently rather than failing it.
+  merge_group:
   push:
     branches:
-      - main
+      - "main"
   pull_request:
     branches:
-      - main
+      - "main"
+
+permissions:
+  # Least privilege, and it matters most on the consumers. A workflow with
+  # no permissions: block inherits the REPOSITORY default, which is a setting
+  # the harness does not control and cannot read at generation time. Measured
+  # 2026-10-20 across the consumers this harness serves: the default is
+  # read-only on some and WRITE on others, so a generated job that declares
+  # nothing holds a push-capable GITHUB_TOKEN wherever the default is write.
+  # Neither job needs it: both check out, install and run tests.
+  contents: read
 
 jobs:
   test:
@@ -18,12 +32,25 @@ jobs:
         run: |
           git fetch --no-tags --depth=200 origin '+refs/heads/main:refs/remotes/origin/main' \
             || echo "WARN: could not fetch main; the conformity allowlist growth check will report UNMEASURED."
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           # From ci.bunVersion in .claude/rungate/config.json — this project declares no
           # .bun-version. Add one and re-scaffold to let CI read the declaration directly.
           bun-version: "latest"
       - run: bun install
       # No global tools installed: the config declares no ci.globalTools.
+      - name: Consumer setup (scripts/ci-setup.sh, optional)
+        run: |
+          # rungate's one extension point inside this managed job (#529).
+          # The script is yours; this file is not. Re-scaffolding rewrites the
+          # YAML around this step and never touches scripts/ci-setup.sh.
+          # Both branches print: a step that is silent when the file is absent
+          # cannot be told from one that ran and did nothing.
+          if [ -f scripts/ci-setup.sh ]; then
+            echo "rungate: running scripts/ci-setup.sh before the suite (#529)"
+            bash scripts/ci-setup.sh
+          else
+            echo "rungate: no scripts/ci-setup.sh in this tree, so no consumer setup ran (#529)"
+          fi
       - run: bun test
       - run: bun run typecheck
