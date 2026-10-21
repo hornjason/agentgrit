@@ -25,6 +25,28 @@ export interface Reflection {
   [key: string]: unknown;
 }
 
+/**
+ * One cluster of reflections that looks like a skill worth writing.
+ *
+ * `meanSentiment` is `null`, never a substituted default, when no backing
+ * reflection carries an `implied_sentiment`: a cluster nobody rated and a
+ * cluster rated badly are different facts, and `0` or `5` would merge them.
+ */
+export interface SkillRecommendation {
+  /** Kebab-case slug built from the terms the cluster shares. */
+  slug: string;
+  /** How many reflections back this recommendation. */
+  reflectionCount: number;
+  /** Mean `implied_sentiment` of the backing entries that carry one. */
+  meanSentiment: number | null;
+  /** How many of the backing entries carried a sentiment at all. */
+  sentimentCount: number;
+  /** The terms the cluster was formed on, strongest first. */
+  terms: string[];
+  /** Every backing reflection's `task_description`, in input order. */
+  taskDescriptions: string[];
+}
+
 export interface SynthesisResult {
   skill: string;
   status: "promoted" | "error" | "skipped";
@@ -284,6 +306,128 @@ export function loadReflections(filePath: string): Reflection[] {
   }
 
   return reflections;
+}
+
+// ── Inference-free recommendations ──
+
+/**
+ * Terms that carry no cluster signal.
+ *
+ * Ordinary English function words, plus the three words the daemon's fallback
+ * description is built from (`Autonomous session <id>`): a corpus of fallback
+ * descriptions genuinely has nothing to cluster on, and letting those words
+ * through would produce one confident recommendation covering every session.
+ */
+const RECOMMENDATION_STOPWORDS = new Set([
+  "the", "and", "for", "with", "that", "this", "from", "into", "when", "then",
+  "have", "has", "had", "was", "were", "are", "its", "but", "not", "all",
+  "any", "out", "our", "you", "your", "they", "them", "their", "there",
+  "here", "what", "which", "who", "why", "how", "can", "will", "would",
+  "should", "could", "did", "does", "done", "get", "got", "let", "via",
+  "per", "off", "than", "too", "very", "just", "now", "new", "old", "one",
+  "two", "about", "after", "before", "again", "also", "because", "been",
+  "being", "between", "both", "each", "more", "most", "other", "over",
+  "same", "some", "such", "only", "own", "under", "while", "autonomous",
+  "session", "task",
+]);
+
+/** Distinct, lower-cased, meaningful terms in one description. */
+function recommendationTerms(text: string): string[] {
+  const seen = new Set<string>();
+  for (const raw of text.toLowerCase().split(/[^a-z0-9+#]+/)) {
+    if (raw.length < 3) continue;
+    if (/^[0-9]+$/.test(raw)) continue;
+    if (RECOMMENDATION_STOPWORDS.has(raw)) continue;
+    seen.add(raw);
+  }
+  return [...seen];
+}
+
+/**
+ * Cluster reflections into skill recommendations without calling an LLM.
+ *
+ * This is the path a standalone install has: `identifyMatchingReflections`
+ * and everything downstream of it need an API key, so without one the whole
+ * reflection-driven half of the optimizer is dead. Here the clustering is
+ * term overlap over `task_description` — a greedy cover that repeatedly takes
+ * the term shared by the most still-uncovered reflections, so every
+ * reflection backs at most one recommendation and the output is deterministic
+ * for a given input order.
+ *
+ * A term carried by fewer than `minSupport` reflections is not a cluster; it
+ * is one task described once, and recommending a skill for it is noise.
+ */
+export function recommendSkills(
+  reflections: Reflection[],
+  options: { minSupport?: number; maxRecommendations?: number } = {},
+): SkillRecommendation[] {
+  const minSupport = Math.max(2, options.minSupport ?? 2);
+  const maxRecommendations = Math.max(0, options.maxRecommendations ?? 10);
+
+  const docs = reflections
+    .filter(
+      (r): r is Reflection =>
+        !!r && typeof r.task_description === "string" && r.task_description.trim().length > 0,
+    )
+    .map((reflection) => ({
+      reflection,
+      terms: new Set(recommendationTerms(reflection.task_description)),
+    }));
+
+  let remaining = docs.map((_, i) => i);
+  const recommendations: SkillRecommendation[] = [];
+
+  while (recommendations.length < maxRecommendations) {
+    const postings = new Map<string, number[]>();
+    for (const i of remaining) {
+      for (const term of docs[i].terms) {
+        const members = postings.get(term);
+        if (members) members.push(i);
+        else postings.set(term, [i]);
+      }
+    }
+
+    // Highest support wins; ties go to the alphabetically first term, so the
+    // same corpus always produces the same slugs.
+    let bestTerm = "";
+    let bestMembers: number[] = [];
+    for (const term of [...postings.keys()].sort()) {
+      const members = postings.get(term) as number[];
+      if (members.length > bestMembers.length) {
+        bestTerm = term;
+        bestMembers = members;
+      }
+    }
+    if (bestMembers.length < minSupport) break;
+
+    // Terms every member shares describe the cluster better than one word.
+    const shared = [...docs[bestMembers[0]].terms]
+      .filter((t) => t !== bestTerm && bestMembers.every((i) => docs[i].terms.has(t)))
+      .sort();
+    const terms = [bestTerm, ...shared];
+
+    const backing = bestMembers.map((i) => docs[i].reflection);
+    const sentiments = backing
+      .map((r) => r.implied_sentiment)
+      .filter((s): s is number => typeof s === "number" && Number.isFinite(s));
+
+    recommendations.push({
+      slug: terms.slice(0, 2).join("-"),
+      reflectionCount: backing.length,
+      meanSentiment:
+        sentiments.length > 0
+          ? sentiments.reduce((sum, s) => sum + s, 0) / sentiments.length
+          : null,
+      sentimentCount: sentiments.length,
+      terms,
+      taskDescriptions: backing.map((r) => r.task_description),
+    });
+
+    const covered = new Set(bestMembers);
+    remaining = remaining.filter((i) => !covered.has(i));
+  }
+
+  return recommendations;
 }
 
 // ── Synthesize one skill ──

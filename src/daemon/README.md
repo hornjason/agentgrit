@@ -16,15 +16,29 @@ Runs in sequence:
 
 3. **Detect patterns** — Runs `minePatterns()` from `detect/patterns.ts`. Finds low-rated sessions with corrections, skill miss patterns, and score drops.
 
-4. **Promote** — For each detected pattern with frequency >= 3 and a candidate rule:
+4. **Auto-reflection** — Reads `ratings.jsonl`, groups the scored signals by
+   `session_id`, and appends one entry per session to
+   `algorithm-reflections.jsonl` under `config.signalDir` via
+   `auto-reflection.ts`. No LLM is involved and no API key is needed:
+   `implied_sentiment` is the measured mean of the session's ratings. The
+   session id is the idempotency key — any session already named in the file,
+   whether by an earlier cycle or by an external LEARN phase, is skipped, so
+   re-running the cycle over unchanged ratings appends nothing. The count of
+   entries written this cycle lands on `CycleResult.reflectionsGenerated`.
+
+   Ordered before **Optimize** on purpose: that step reads
+   `algorithm-reflections.jsonl` for traces, so entries written here are
+   visible to it within the same cycle.
+
+5. **Promote** — For each detected pattern with frequency >= 3 and a candidate rule:
    - Routes through `routeRule()` to determine the tier
    - Checks budget via `checkBudget()`
    - If `autoPromote` is enabled and budget allows, counts the promotion
    - Skips if `OVER_BUDGET`
 
-5. **Sync** — If the adapter is `"langfuse"` or `"both"`, dynamically imports the Langfuse adapter and pushes scores.
+6. **Sync** — If the adapter is `"langfuse"` or `"both"`, dynamically imports the Langfuse adapter and pushes scores.
 
-6. **Optimize** — Checks if any scores are <= 2 (critically low). If so, flags for hill-climbing optimization.
+7. **Optimize** — Checks if any scores are <= 2 (critically low). If so, flags for hill-climbing optimization.
 
 ### CycleResult
 
@@ -34,6 +48,7 @@ interface CycleResult {
   scores: Score[];       // Scores produced this cycle
   patterns: Pattern[];   // Patterns detected this cycle
   promoted: number;      // Rules promoted (if autoPromote)
+  reflectionsGenerated: number; // Reflection entries appended this cycle
   synced: boolean;       // Whether Langfuse sync succeeded
   optimized: boolean;    // Whether optimization was flagged
   errors: string[];      // Any errors (non-fatal, cycle continues)
@@ -224,6 +239,7 @@ Returns the count of files rotated.
 daemon/daemon.ts orchestrates:
   → evaluate/judge.ts (score)
   → detect/failures.ts + detect/patterns.ts (detect)
+  → daemon/auto-reflection.ts (signals/algorithm-reflections.jsonl)
   → promote/router.ts + promote/budget.ts (promote)
   → adapters/langfuse.ts (sync)
   → optimize/* (flag for optimization)
