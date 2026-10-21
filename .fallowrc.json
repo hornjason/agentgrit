@@ -1,0 +1,41 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "entry": [
+    "bin/agentgrit.ts",
+    "bin/commands/*.ts",
+    "scripts/*.ts",
+    "agentgrit.config.ts",
+    "verify.config.ts",
+    "test/**/*.test.ts"
+  ],
+  "ignoreDependencies": ["fallow"],
+  "ignoreFindings": [
+    "src/adapters/claude-code.ts",
+    "src/adapters/jsonl.ts",
+    "src/adapters/langfuse.ts",
+    "src/adapters/paths.ts",
+    "src/adapters/time.ts",
+    "src/capture/incidents.ts",
+    "src/capture/index.ts",
+    "src/daemon/scheduler.ts",
+    "src/evaluate/gold.ts",
+    "src/evaluate/precision.ts",
+    "src/evaluate/session.ts",
+    "src/graph/builder.ts",
+    "src/graph/context.ts",
+    "src/graph/domain-propagation.ts",
+    "src/graph/embedder.ts",
+    "src/graph/generate-patterns.ts",
+    "src/graph/index.ts",
+    "src/graph/rule-text.ts",
+    "src/optimize/skill-forge.ts",
+    "src/optimize/skill-synthesizer.ts",
+    "src/optimize/skill-tuner.ts",
+    "src/promote/auto-eviction.ts",
+    "src/promote/bridge.ts",
+    "src/promote/budget.ts",
+    "src/promote/domain-review.ts",
+    "src/promote/evict.ts",
+    "src/promote/lifecycle.ts"
+  ]
+}
