@@ -20,6 +20,17 @@ export interface HarvestedLearning {
   context: string;
   content: string;
   source: string;
+  /**
+   * A routing decision recorded in SHADOW mode (#253): the tier `routeRule`
+   * chose for this learning and the reason it gave. Writing it down is the
+   * whole of the effect — nothing on this path touches the rules store, so the
+   * artifact is where a later calibration pass reads the decisions from.
+   *
+   * Optional, and absent for every harvested learning: the transcript harvester
+   * routes nothing, and a section naming a tier nobody computed would be a
+   * fabricated reading rather than a missing one.
+   */
+  shadow?: { tier: string; rationale: string };
 }
 
 export interface HarvestResult {
@@ -186,7 +197,7 @@ export function harvestFromTranscript(
 
 export function formatLearningFile(learning: HarvestedLearning): string {
   const typeLabel = learning.type.charAt(0).toUpperCase() + learning.type.slice(1);
-  return [
+  const lines = [
     `# ${typeLabel} Learning`,
     "",
     `**Session:** ${learning.sessionId}`,
@@ -204,7 +215,20 @@ export function formatLearningFile(learning: HarvestedLearning): string {
     "",
     learning.content,
     "",
-  ].join("\n");
+  ];
+
+  if (learning.shadow) {
+    lines.push(
+      "## Shadow Routing",
+      "",
+      `**Tier:** ${learning.shadow.tier}`,
+      `**Rationale:** ${learning.shadow.rationale}`,
+      "**Applied:** no — shadow mode, the rules store is untouched",
+      "",
+    );
+  }
+
+  return lines.join("\n");
 }
 
 export function writeLearnings(

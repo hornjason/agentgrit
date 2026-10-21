@@ -25,6 +25,9 @@ export type {
   WorkLearning,
 } from "./corrections";
 
+export { captureIterationLearning } from "./iteration-learning";
+export type { IterationLearningInput, IterationLearningResult } from "./iteration-learning";
+
 export { captureSkillInvocation, classifyOutcome } from "./skills";
 export { captureSkillSequence, buildCoOccurrencePairs, analyzeSkillSequence } from "./skills";
 export type { SkillOutcome, SkillSequenceEntry, SkillSequenceResult } from "./skills";

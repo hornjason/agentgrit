@@ -5,7 +5,7 @@
   "measuredWith": "fallow 3.34.1 — `fallow dead-code --format json` with .fallowrc.json entry points applied",
   "counts": {
     "unusedFiles": 4,
-    "unusedExports": 67,
+    "unusedExports": 68,
     "unusedDependencies": 0,
     "circularDependencies": 6
   },
