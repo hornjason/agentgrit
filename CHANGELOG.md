@@ -25,6 +25,24 @@ updated: 2026-08-07
 - **`appendSignals`** in `src/adapters/jsonl.ts` — one atomic rewrite for a batch of signals;
   `appendSignal` now delegates to it. Looping the single-signal append over a bulk import is
   quadratic.
+- **Doc-staleness check on pull requests (#171)** — `.github/workflows/doc-check.yml` runs
+  `scripts/doc-check.ts` on every PR to main and posts an advisory comment. It never blocks a merge.
+  Three checks: `src/` changed without the doc sections that describe it, `package.json` version
+  bumped without a `CHANGELOG.md` edit, and the hardcoded "N tests pass" rows in
+  `docs/SYSTEM-SPEC.md` against a live `bun test` run. `doc-cascade-map.json` at the repo root is
+  the shared map, so the pre-push hook (#172) reads the same file.
+
+  Node-count and precision@5 drift were asked for in the issue and are **not** here: both read
+  `~/.agentgrit/`, which is gitignored and does not exist on a `pull_request` runner, and P@5 also
+  needs a built graph and an eval run. A check with nothing to read passes unconditionally. Filed
+  separately.
+
+  Proven by breaking it. Touching `src/graph/bm25.ts` with no README edit produced
+  "`src/graph/` changed (1 file) but **README.md** § _Graph — Knowledge Retrieval_ did not";
+  bumping the version to 0.2.1 with no changelog edit produced the version row; reverting
+  "339 tests pass" to 216 produced "doc says 216 tests pass, live run says 339 (+123)"; renaming
+  `### 6. Graph — Knowledge Retrieval` produced the map-is-blind row. Baseline run before all four:
+  "nothing to report".
 
 ### Fixes
 - **`graph context` no longer emits a rule id as its own body (#258)** — `src/graph/context.ts` fell open to

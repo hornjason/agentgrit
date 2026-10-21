@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "_about": "Maps src/ directories to the doc sections that describe them, and the doc's hardcoded test-count claims to the test paths that produce them. Consumed by scripts/doc-check.ts (CI, .github/workflows/doc-check.yml) and by the local pre-push hook (#172). Kept at repo root so both readers resolve the same file. Every directory under src/ must appear in `cascade`; an entry with no targets must say why in `undocumented`. A `section` must match exactly one heading in its doc, as a substring. Validated by test/scripts/doc-check.test.ts.",
+  "cascade": {
+    "src/capture": {
+      "targets": [
+        { "doc": "README.md", "section": "Capture — Signal Collection" },
+        { "doc": "docs/SYSTEM-SPEC.md", "section": "Signal Capture" }
+      ]
+    },
+    "src/detect": {
+      "targets": [
+        { "doc": "README.md", "section": "Detect — Pattern Recognition" },
+        { "doc": "docs/SYSTEM-SPEC.md", "section": "Pattern Detection" }
+      ]
+    },
+    "src/promote": {
+      "targets": [
+        { "doc": "README.md", "section": "Promote — Rule Management" },
+        { "doc": "docs/SYSTEM-SPEC.md", "section": "Rule Promotion" }
+      ]
+    },
+    "src/graph": {
+      "targets": [
+        { "doc": "README.md", "section": "Graph — Knowledge Retrieval" },
+        { "doc": "docs/SYSTEM-SPEC.md", "section": "Context Injection" }
+      ]
+    },
+    "src/evaluate": {
+      "targets": [
+        { "doc": "README.md", "section": "Evaluate — Quality Scoring" },
+        { "doc": "docs/SYSTEM-SPEC.md", "section": "Recall Measurement" }
+      ]
+    },
+    "src/optimize": {
+      "targets": [{ "doc": "README.md", "section": "Optimize — Hill-Climbing Improvement" }]
+    },
+    "src/daemon": {
+      "targets": [{ "doc": "README.md", "section": "Daemon — Automation" }]
+    },
+    "src/adapters": {
+      "targets": [{ "doc": "README.md", "section": "Architecture" }]
+    },
+    "src/scoring": {
+      "targets": [],
+      "undocumented": "Outcome scoring, turn attribution and lift comparison have no section of their own in README or SYSTEM-SPEC; neither doc mentions src/scoring. Give it one and add the targets here."
+    },
+    "src/showcase": {
+      "targets": [],
+      "undocumented": "The showcase template is undocumented in README and SYSTEM-SPEC; neither doc mentions src/showcase. Give it a section and add the target here."
+    }
+  },
+  "testCounts": {
+    "Signal capture": "test/capture",
+    "Pattern detection": "test/detect",
+    "Rule promotion": "test/promote",
+    "Skill optimization": "test/optimize"
+  },
+  "testCountDoc": "docs/SYSTEM-SPEC.md"
+}

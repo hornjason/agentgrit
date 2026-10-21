@@ -223,9 +223,9 @@ AgentGrit is imported at runtime via dynamic `import()`. If unavailable, PAI fal
 
 | Area | Status | Reference |
 |------|--------|-----------|
-| Signal capture | COMPLETE | 216 tests pass |
-| Pattern detection | COMPLETE | 47 tests pass |
-| Rule promotion | COMPLETE | 108 tests pass |
+| Signal capture | COMPLETE | 339 tests pass |
+| Pattern detection | COMPLETE | 52 tests pass |
+| Rule promotion | COMPLETE | 370 tests pass |
 | Graph + injection | SHIPPED (hybrid) | BM25 + vector + graph 3-way RRF (#97, #98). PRF query expansion (#213). sanitizeRuleText. |
 | Recall measurement | REVISED | 10-task curated eval with human-audited labels (#200). Old 60-session gold set retained as historical baseline. |
 | Precision instrumentation | SHIPPED | P@5/P@10/MRR eval (#200), BM25 diagnostics, auto-eviction, health red alerts |
@@ -237,7 +237,7 @@ AgentGrit is imported at runtime via dynamic `import()`. If unavailable, PAI fal
 | Embedding support | SHIPPED | transformers.js optional peerDep, vector-cache.json, EmbeddingProvider interface (#98) |
 | Feedback loop | CLOSED | Core loop (#99) + daemon refactor + session context enrichment + decay observability (#163). All 7 SCs verified. |
 | Eval regression gate | SHIPPED | Blocks buildGraph on precision drop >= 0.05 (#99) |
-| Skill optimization | COMPLETE | 75 tests pass |
+| Skill optimization | COMPLETE | 84 tests pass |
 | Track 1 ports (#63-74) | ALL CLOSED | 12/12 verified 2026-07-08 |
 | Track 1 cutover (#75) | OPEN | Prerequisites met |
 | LLM isolated node classification | SHIPPED | `classifyIsolatedNodes()` + daemon step 3c + CLI `graph classify` |
