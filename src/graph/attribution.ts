@@ -1,7 +1,8 @@
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import type { SessionContext } from "./context";
 import type { Graph } from "./types";
 import { readGraph, writeGraphFile } from "./builder";
+import { atomicWriteJSON } from "../adapters/atomic-write";
 
 export function proportionalAdjustment(rating: number): number {
   if (rating === 5) return 0;
@@ -49,7 +50,7 @@ export function updateEdgeWeightsFromRating(
   if (!changed) return;
 
   if (graphPath) {
-    writeFileSync(graphPath, JSON.stringify(graph, null, 2), "utf-8");
+    atomicWriteJSON(graphPath, graph);
   } else {
     writeGraphFile(graph);
   }
