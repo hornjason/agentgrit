@@ -7,9 +7,11 @@
  * already has, so a standalone install gets reflection-driven optimization.
  *
  * Deliberately free of any LLM call: `implied_sentiment` is the measured mean
- * of the session's ratings, not a self-assessment. Nothing here may import the
- * inference adapter — a test asserts that, and the whole module must run with
- * no API key in the environment.
+ * of the session's ratings, not a self-assessment. Nothing reachable from here
+ * — not this file and not anything it imports, however deep — may reference an
+ * inference, judge, or network call site; test/daemon/auto-reflection-purity.test.ts
+ * walks the import closure and asserts that (#308 AC-4). The whole module must
+ * run with no API key in the environment.
  */
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "fs";
