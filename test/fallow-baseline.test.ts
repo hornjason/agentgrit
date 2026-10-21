@@ -17,7 +17,7 @@
  * So this file compares the two, in both directions. Over-banking and
  * under-banking are both red.
  */
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, expect, afterAll } from "bun:test";
 import {
   existsSync,
   mkdtempSync,
@@ -31,6 +31,13 @@ import {
 import { tmpdir } from "os";
 import { join, relative, sep } from "path";
 import { fallowAvailable } from "rungate/lib/conformity";
+// One budget for the spawn clock AND the per-test clock, and one runner that
+// says WHICH of the three ways of having no reading happened (#311). Before
+// this file routed through them, its two spawns declared 180_000 and 120_000
+// while the `beforeAll` around them inherited bun's 5000ms — and 5105ms is
+// what PR #310 measured.
+import { FALLOW_BUDGET_MS, runFallowBudgeted } from "./setup/fallow-run";
+import { fallowBeforeAll, fallowTest } from "./setup/fallow-test";
 
 const ROOT = join(import.meta.dir, "..");
 const BASELINE_PATH = join(ROOT, "fallow-baseline.json");
@@ -78,7 +85,7 @@ function markerCount(relPath: string): number {
 }
 
 describe("fallow baseline ratchet (#261)", () => {
-  test("the baseline is a readable record and not just a number", () => {
+  fallowTest("the baseline is a readable record and not just a number", () => {
     expect(baseline.issue).toBe(261);
     expect(typeof baseline.bankedAt).toBe("string");
     // A ratchet nobody can interpret becomes a number nobody lowers.
@@ -88,7 +95,7 @@ describe("fallow baseline ratchet (#261)", () => {
     }
   });
 
-  test("unusedFiles equals the files banked in .fallowrc.json", () => {
+  fallowTest("unusedFiles equals the files banked in .fallowrc.json", () => {
     const banked = config.ignoreFindings ?? [];
     // Non-emptiness is asserted separately: comparing two empty collections
     // is satisfied by a config whose suppressions were all deleted.
@@ -96,7 +103,7 @@ describe("fallow baseline ratchet (#261)", () => {
     expect(banked.length).toBe(baseline.counts.unusedFiles);
   });
 
-  test("unusedExports equals the export names banked in .fallowrc.json", () => {
+  fallowTest("unusedExports equals the export names banked in .fallowrc.json", () => {
     const rules = config.ignoreExports ?? [];
     expect(rules.length).toBeGreaterThan(0);
     // `exports: ["*"]` would bank an unbounded, uncountable population — a
@@ -106,19 +113,19 @@ describe("fallow baseline ratchet (#261)", () => {
     expect(banked).toBe(baseline.counts.unusedExports);
   });
 
-  test("unusedDependencies is zero and nothing is suppressing a dependency", () => {
+  fallowTest("unusedDependencies is zero and nothing is suppressing a dependency", () => {
     expect(config.ignoreDependencies ?? []).toEqual([]);
     expect(baseline.counts.unusedDependencies).toBe(0);
   });
 
-  test("circularDependencies equals the cycles the inline markers bank", () => {
+  fallowTest("circularDependencies equals the cycles the inline markers bank", () => {
     const sites = baseline.circularDependencySites;
     expect(sites.length).toBeGreaterThan(0);
     const declared = sites.reduce((n, s) => n + s.cycles, 0);
     expect(declared).toBe(baseline.counts.circularDependencies);
   });
 
-  test("every declared cycle site carries the markers it claims", () => {
+  fallowTest("every declared cycle site carries the markers it claims", () => {
     const actual = baseline.circularDependencySites.map(s => ({
       file: s.file,
       markers: markerCount(s.file),
@@ -128,7 +135,7 @@ describe("fallow baseline ratchet (#261)", () => {
     );
   });
 
-  test("no cycle marker exists outside the declared sites", () => {
+  fallowTest("no cycle marker exists outside the declared sites", () => {
     const declared = new Set(baseline.circularDependencySites.map(s => s.file));
     const undeclared = srcFiles().filter(f => !declared.has(f) && markerCount(f) > 0);
     expect(undeclared).toEqual([]);
@@ -178,21 +185,20 @@ describe("fallow baseline reconciles with the unsuppressed tree (#261)", () => {
   }
 
   function runFallow(configPath?: string): Reading {
-    const args = ["fallow", "dead-code"];
+    const args = ["dead-code"];
     if (configPath) args.push("--config", configPath);
     args.push("--format", "json", "--quiet");
-    const proc = Bun.spawnSync(["npx", ...args], {
-      cwd: ROOT,
-      env: { ...process.env, NODE_NO_WARNINGS: "1" },
-      timeout: 180_000,
-    });
-    const stdout = proc.stdout.toString().trim();
-    if (!stdout) {
-      throw new Error(
-        `fallow produced no output (config=${configPath ?? ".fallowrc.json"}). ` +
-          `stderr: ${proc.stderr.toString().slice(0, 400)}`,
-      );
+    // The spawn, its budget and the classification of a missing reading all
+    // come from one place. This function used to carry its own 180_000 and its
+    // own "fallow produced no output" sentence, and that sentence is what a
+    // budget kill printed — an empty stdout is what a killed process has, so
+    // "timed out" has to be decided before "wrote nothing" or every timeout is
+    // reported as an empty reading (#311).
+    const outcome = runFallowBudgeted(ROOT, args, { budgetMs: FALLOW_BUDGET_MS });
+    if (outcome.kind !== "ok") {
+      throw new Error(`${outcome.message} (config=${configPath ?? ".fallowrc.json"})`);
     }
+    const stdout = outcome.stdout;
     let parsed: Reading & { error?: boolean; message?: string };
     try {
       parsed = JSON.parse(stdout);
@@ -212,7 +218,7 @@ describe("fallow baseline reconciles with the unsuppressed tree (#261)", () => {
   let suppressed: Reading;
   let unsuppressed: Reading;
 
-  beforeAll(() => {
+  fallowBeforeAll(() => {
     const unknown = Object.keys(config).filter(
       k => k.toLowerCase().startsWith("ignore") && !KNOWN_IGNORE_KEYS.includes(k),
     );
@@ -242,7 +248,7 @@ describe("fallow baseline reconciles with the unsuppressed tree (#261)", () => {
     if (scratch) rmSync(scratch, { recursive: true, force: true });
   });
 
-  test("the unsuppressed reading is what the baseline banks — in both directions", () => {
+  fallowTest("the unsuppressed reading is what the baseline banks — in both directions", () => {
     // Vacuity first: a derivation that produced a config finding nothing would
     // satisfy "0 unbanked findings" and every comparison below it.
     expect(unsuppressed.unused_files.length + unsuppressed.unused_exports.length).toBeGreaterThan(0);
@@ -251,13 +257,13 @@ describe("fallow baseline reconciles with the unsuppressed tree (#261)", () => {
     expect(unsuppressed.unused_dependencies.length).toBe(baseline.counts.unusedDependencies);
   });
 
-  test("every banked path still owns a finding — the bank is not an exemption list", () => {
+  fallowTest("every banked path still owns a finding — the bank is not an exemption list", () => {
     const owners = new Set(unsuppressed.unused_files.map(f => f.path));
     const stale = (config.ignoreFindings ?? []).filter(p => !owners.has(p));
     expect(stale).toEqual([]);
   });
 
-  test("every banked export still owns a finding", () => {
+  fallowTest("every banked export still owns a finding", () => {
     const owned = new Set(unsuppressed.unused_exports.map(e => `${e.path}::${e.export_name}`));
     const stale: string[] = [];
     for (const rule of config.ignoreExports ?? []) {
@@ -268,7 +274,7 @@ describe("fallow baseline reconciles with the unsuppressed tree (#261)", () => {
     expect(stale).toEqual([]);
   });
 
-  test("the suppressed reading the conformity checks see is empty", () => {
+  fallowTest("the suppressed reading the conformity checks see is empty", () => {
     // Without this, "FALLOW-1 passed" and "FALLOW-1 was measured against a
     // different tree than this file was" are the same observation.
     expect({
@@ -279,7 +285,7 @@ describe("fallow baseline reconciles with the unsuppressed tree (#261)", () => {
     }).toEqual({ unusedFiles: 0, unusedExports: 0, unusedDependencies: 0, circularDependencies: 0 });
   });
 
-  test("cycles are UNMEASURED by the config strip — the premise the marker census rests on", () => {
+  fallowTest("cycles are UNMEASURED by the config strip — the premise the marker census rests on", () => {
     // fallow suppresses circular-dependency only from a source comment, so the
     // strip above cannot reach the six this tree banks. If this ever reports
     // them, the strip HAS become a reading of cycles and the marker census is
@@ -406,7 +412,7 @@ describe("the fallow run is wired rather than skipped (#261)", () => {
     return match[1]!;
   })();
 
-  test("fallow is declared as an exactly-pinned devDependency, in one position", () => {
+  fallowTest("fallow is declared as an exactly-pinned devDependency, in one position", () => {
     const declaring = DEPENDENCY_FIELDS.filter(f => specIn(f) !== undefined);
     // One declaring position. Two would be two answers to one question, and
     // the day they disagree the installed binary is whichever bun resolved.
@@ -425,7 +431,7 @@ describe("the fallow run is wired rather than skipped (#261)", () => {
     });
   });
 
-  test("the fallow binary resolves from this project's own node_modules, not the network", () => {
+  fallowTest("the fallow binary resolves from this project's own node_modules, not the network", () => {
     // `fallowAvailable` is the binding the conformity checks gate on, and it
     // accepts EITHER a local install OR any `fallow` on PATH. A machine-wide
     // install answers true on a laptop and false on CI, so asserting it alone
@@ -447,7 +453,7 @@ describe("the fallow run is wired rather than skipped (#261)", () => {
         npm_config_offline: "true",
         NODE_NO_WARNINGS: "1",
       },
-      timeout: 120_000,
+      timeout: FALLOW_BUDGET_MS,
     });
     const reading = proc.stdout.toString().trim();
     if (!reading) {
@@ -460,7 +466,7 @@ describe("the fallow run is wired rather than skipped (#261)", () => {
     expect(reading.split("\n")[0]!.trim()).toBe(`fallow ${MEASURED_VERSION}`);
   });
 
-  test("the baseline file parses, is committed, and banks something", () => {
+  fallowTest("the baseline file parses, is committed, and banks something", () => {
     // Read the bytes here rather than reusing the module-scope parse: a case
     // asserting over an object the file already parsed is asserting a value
     // the test's own setup produced.

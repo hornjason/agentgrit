@@ -14,6 +14,7 @@
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { warmFallow } from "./fallow-run";
 
 if (!process.env.AGENTGRIT_DIR) {
   const base = mkdtempSync(join(tmpdir(), "agentgrit-test-"));
@@ -33,4 +34,30 @@ if (!process.env.AGENTGRIT_DIR) {
       // Best effort — a leftover temp dir is not worth failing a run over.
     }
   });
+}
+
+/**
+ * Pay fallow's cold start here, once per process, before any test body (#311).
+ *
+ * Deliberately OUTSIDE the guard above: that guard is about whether this
+ * process owns the temp dir, and the cold start is paid per process either
+ * way. `warmFallow` memoises, so the preload running again for a second test
+ * file in the same process costs nothing.
+ *
+ * This is the only hook into the process that runs the GENERATED
+ * `test/scaffold-conformity.test.ts`, which this repo does not own and cannot
+ * edit. Without it, `FALLOW-1` is the first fallow invocation in the process,
+ * pays ~1s of index building that FALLOW-2/3/4 never see, and is killed by
+ * bun's 5000ms default on a slow runner — which is PR #310's red on a commit
+ * that changed two markdown files.
+ *
+ * Failure is swallowed and recorded, never thrown: a warm-up that can kill a
+ * run is a new way for an unrelated commit to go red, which is the thing being
+ * removed. An absent record is refused loudly in `test/fallow-timeout.test.ts`,
+ * where it is a judgement rather than a side effect.
+ */
+try {
+  warmFallow(join(import.meta.dir, "..", ".."));
+} catch {
+  // Recorded by its absence. See test/fallow-timeout.test.ts AC-1.
 }
