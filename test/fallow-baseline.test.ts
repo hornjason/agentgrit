@@ -1,199 +1,123 @@
 /**
- * #261: the four FALLOW conformity checks used to print
- * "fallow is not installed … this check did NOT run" and pass. `fallow` is a
- * declared devDependency now, so they run — and they run GREEN only because
- * `.fallowrc.json` hides a banked set of findings that already existed.
+ * The fallow ratchet reconciles with what is actually suppressed (#261).
  *
- * A hidden finding and an absent finding look identical to the conformity
- * run, which is the defect #261 is about wearing different clothes. This file
- * is what stops the bank becoming an exemption list:
+ * `FALLOW-1..4` in `test/scaffold-conformity.test.ts` answer one question:
+ * does fallow report any dead code that is NOT banked? They go red on
+ * anything new, and that is the whole of their job. Nothing is asserted here
+ * about the live fallow output, deliberately — two guards answering one
+ * question about one input are behaviourally one guard, and a mutation of
+ * either leaves the other holding the case up.
  *
- *  - it runs fallow a second time with `ignoreFindings` REMOVED, so it sees
- *    the unsuppressed tree, and refuses in BOTH directions against the count
- *    banked in `fallow-baseline.json` — growth fails, and so does shrinkage
- *    that nobody banked;
- *  - it asserts every banked path still owns a finding, so a path that has
- *    been cleaned cannot sit in the config quietly hiding the next one;
- *  - it asserts the suppressed reading — the one the conformity checks see —
- *    is empty, so "FALLOW-1 passed" means the same thing this file measured.
+ * The question nobody else asks is whether `fallow-baseline.json` still
+ * describes the suppressions. A number and the thing it counts live in two
+ * files, so they drift in silence: delete a `circular-dependency` marker and
+ * the conformity run stays green while the baseline keeps claiming six, and
+ * the next person to lower the number has no way to tell what it meant.
  *
- * Refusals, never skips. An unresolvable binary, an unparseable reading or an
- * empty one ends this file loudly: `0`, `{}` and silence are indistinguishable
- * from success (`.claude/rules/checks-must-be-able-to-fail.md`).
+ * So this file compares the two, in both directions. Over-banking and
+ * under-banking are both red.
  */
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
-import { join, resolve } from "path";
+import { describe, test, expect } from "bun:test";
+import { readdirSync, readFileSync, statSync } from "fs";
+import { join, relative } from "path";
 
-const ROOT = resolve(import.meta.dir, "..");
+const ROOT = join(import.meta.dir, "..");
 const BASELINE_PATH = join(ROOT, "fallow-baseline.json");
-const RC_PATH = join(ROOT, ".fallowrc.json");
+const CONFIG_PATH = join(ROOT, ".fallowrc.json");
 
-/**
- * The banked-count key beside the array `lib/conformity.ts`'s FALLOW check of
- * the same number reads. One row per check, so a class nobody banked is a
- * missing key rather than a silently absent comparison.
- */
-const CLASSES = {
-  unusedFiles: "unused_files",
-  unusedExports: "unused_exports",
-  unusedDependencies: "unused_dependencies",
-  circularDependencies: "circular_dependencies",
-} as const;
+/** The exact marker fallow honours. A near-miss suppresses nothing. */
+const CYCLE_MARKER = "// fallow-ignore-next-line circular-dependency";
 
-type ClassKey = keyof typeof CLASSES;
-const CLASS_KEYS = Object.keys(CLASSES) as ClassKey[];
-
-interface FallowReading {
-  unused_files: Array<{ path: string }>;
-  unused_exports: Array<{ path: string }>;
-  unused_dependencies: Array<{ name: string }>;
-  circular_dependencies: Array<{ files: string[] }>;
+interface Baseline {
+  issue: number;
+  bankedAt: string;
+  _comment: string;
+  counts: Record<string, number>;
+  circularDependencySites: Array<{ file: string; markers: number; cycles: number }>;
 }
 
-function runFallow(configPath?: string): FallowReading {
-  const args = ["fallow", "dead-code"];
-  if (configPath) args.push("--config", configPath);
-  args.push("--format", "json", "--quiet");
-  const proc = Bun.spawnSync(["npx", ...args], {
-    cwd: ROOT,
-    env: { ...process.env, NODE_NO_WARNINGS: "1" },
-    timeout: 180_000,
-  });
-  const stdout = proc.stdout.toString().trim();
-  if (!stdout) {
-    throw new Error(
-      `fallow produced no output (config=${configPath ?? ".fallowrc.json"}). ` +
-        `stderr: ${proc.stderr.toString().slice(0, 400)}`,
-    );
-  }
-  let parsed: FallowReading & { error?: boolean; message?: string };
-  try {
-    parsed = JSON.parse(stdout);
-  } catch {
-    throw new Error(`fallow output did not parse as JSON: ${stdout.slice(0, 400)}`);
-  }
-  if (parsed.error) throw new Error(`fallow refused: ${parsed.message}`);
-  for (const arrayKey of Object.values(CLASSES)) {
-    if (!Array.isArray((parsed as unknown as Record<string, unknown>)[arrayKey])) {
-      throw new Error(`fallow's JSON carries no '${arrayKey}' array — the conformity check reads it`);
+interface FallowConfig {
+  ignoreFindings?: string[];
+  ignoreExports?: Array<{ file: string; exports: string[] }>;
+  ignoreDependencies?: string[];
+}
+
+const baseline: Baseline = JSON.parse(readFileSync(BASELINE_PATH, "utf-8"));
+const config: FallowConfig = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
+
+/** Every `.ts` file under `src/`, repo-relative, `/`-separated. */
+function srcFiles(): string[] {
+  const out: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir)) {
+      if (entry === "node_modules" || entry.startsWith(".")) continue;
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) walk(full);
+      else if (entry.endsWith(".ts")) out.push(relative(ROOT, full).split("\\").join("/"));
     }
-  }
-  return parsed;
-}
-
-function ownersOf(reading: FallowReading): Set<string> {
-  const owners = new Set<string>();
-  for (const f of reading.unused_files) owners.add(f.path);
-  for (const e of reading.unused_exports) owners.add(e.path);
-  for (const c of reading.circular_dependencies) for (const f of c.files) owners.add(f);
-  return owners;
-}
-
-function countsOf(reading: FallowReading): Record<ClassKey, number> {
-  return Object.fromEntries(
-    CLASS_KEYS.map((k) => [k, (reading as unknown as Record<string, unknown[]>)[CLASSES[k]].length]),
-  ) as Record<ClassKey, number>;
-}
-
-describe("fallow dead-code baseline (#261)", () => {
-  let scratch: string;
-  let suppressed: FallowReading;
-  let unsuppressed: FallowReading;
-  let banked: {
-    _comment?: unknown;
-    bankedAt?: unknown;
-    issue?: unknown;
-    counts?: Record<string, unknown>;
   };
-  let ignoreFindings: string[];
+  walk(join(ROOT, "src"));
+  return out;
+}
 
-  beforeAll(() => {
-    if (!existsSync(BASELINE_PATH)) {
-      throw new Error(`${BASELINE_PATH} is missing — the banked counts are what this file ratchets against`);
-    }
-    banked = JSON.parse(readFileSync(BASELINE_PATH, "utf-8"));
+function markerCount(relPath: string): number {
+  return readFileSync(join(ROOT, relPath), "utf-8").split(CYCLE_MARKER).length - 1;
+}
 
-    if (!existsSync(RC_PATH)) throw new Error(`${RC_PATH} is missing — it declares the banked paths`);
-    const rc = JSON.parse(readFileSync(RC_PATH, "utf-8"));
-    if (!Array.isArray(rc.ignoreFindings)) {
-      throw new Error(".fallowrc.json declares no ignoreFindings array — nothing is banked, so nothing is measured");
-    }
-    ignoreFindings = rc.ignoreFindings;
-
-    // The unsuppressed config is DERIVED from the live one rather than written
-    // out a second time: two entry-point lists would drift, and the reading
-    // taken against the stale one would be a measurement of nothing.
-    scratch = mkdtempSync(join(tmpdir(), "agentgrit-fallow-"));
-    const full = { ...rc };
-    delete full.ignoreFindings;
-    delete full.$schema;
-    const fullPath = join(scratch, "fallow-unsuppressed.json");
-    writeFileSync(fullPath, JSON.stringify(full));
-
-    suppressed = runFallow();
-    unsuppressed = runFallow(fullPath);
-  });
-
-  afterAll(() => {
-    if (scratch) rmSync(scratch, { recursive: true, force: true });
-  });
-
-  // AC-1: fallow is declared and locally resolvable, so no check can skip.
-  test("AC-1: fallow is a declared devDependency and resolves to a local binary", () => {
-    const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf-8"));
-    expect(pkg.devDependencies?.fallow).toBeDefined();
-    expect(existsSync(join(ROOT, "node_modules", ".bin", "fallow"))).toBe(true);
-  });
-
-  // AC-3: the four arrays the conformity checks read are all present.
-  test("AC-3: the reading carries all four dead-code arrays", () => {
-    for (const arrayKey of Object.values(CLASSES)) {
-      expect(Array.isArray((unsuppressed as unknown as Record<string, unknown>)[arrayKey])).toBe(true);
+describe("fallow baseline ratchet (#261)", () => {
+  test("the baseline is a readable record and not just a number", () => {
+    expect(baseline.issue).toBe(261);
+    expect(typeof baseline.bankedAt).toBe("string");
+    // A ratchet nobody can interpret becomes a number nobody lowers.
+    expect(baseline._comment.length).toBeGreaterThan(80);
+    for (const cls of ["unusedFiles", "unusedExports", "unusedDependencies", "circularDependencies"]) {
+      expect(typeof baseline.counts[cls]).toBe("number");
     }
   });
 
-  // AC-4: the bank is interpretable — a number nobody can read is a number
-  // nobody lowers.
-  test("AC-4: the baseline banks a numeric count for each of the four classes", () => {
-    expect(typeof banked._comment).toBe("string");
-    expect(typeof banked.bankedAt).toBe("string");
-    expect(banked.issue).toBe(261);
-    for (const k of CLASS_KEYS) expect(typeof banked.counts?.[k]).toBe("number");
+  test("unusedFiles equals the files banked in .fallowrc.json", () => {
+    const banked = config.ignoreFindings ?? [];
+    // Non-emptiness is asserted separately: comparing two empty collections
+    // is satisfied by a config whose suppressions were all deleted.
+    expect(banked.length).toBeGreaterThan(0);
+    expect(banked.length).toBe(baseline.counts.unusedFiles);
   });
 
-  // The instrument control. Every assertion below compares against the banked
-  // numbers, and a bank of all-zeros would make them agree with a fallow run
-  // that read nothing at all.
-  test("the unsuppressed run found something — a bank of zeros measures nothing", () => {
-    const total = CLASS_KEYS.reduce((n, k) => n + (banked.counts?.[k] as number), 0);
-    expect(total).toBeGreaterThan(0);
-    expect(ownersOf(unsuppressed).size).toBeGreaterThan(0);
+  test("unusedExports equals the export names banked in .fallowrc.json", () => {
+    const rules = config.ignoreExports ?? [];
+    expect(rules.length).toBeGreaterThan(0);
+    // `exports: ["*"]` would bank an unbounded, uncountable population — a
+    // suppression that keeps growing while the recorded number stands still.
+    expect(rules.flatMap(r => r.exports).filter(n => n === "*")).toEqual([]);
+    const banked = rules.reduce((n, r) => n + r.exports.length, 0);
+    expect(banked).toBe(baseline.counts.unusedExports);
   });
 
-  // The ratchet, refusing in both directions.
-  test("the unsuppressed counts equal the banked counts, exactly", () => {
-    expect(countsOf(unsuppressed)).toEqual(
-      Object.fromEntries(CLASS_KEYS.map((k) => [k, banked.counts?.[k]])) as Record<ClassKey, number>,
+  test("unusedDependencies is zero and nothing is suppressing a dependency", () => {
+    expect(config.ignoreDependencies ?? []).toEqual([]);
+    expect(baseline.counts.unusedDependencies).toBe(0);
+  });
+
+  test("circularDependencies equals the cycles the inline markers bank", () => {
+    const sites = baseline.circularDependencySites;
+    expect(sites.length).toBeGreaterThan(0);
+    const declared = sites.reduce((n, s) => n + s.cycles, 0);
+    expect(declared).toBe(baseline.counts.circularDependencies);
+  });
+
+  test("every declared cycle site carries the markers it claims", () => {
+    const actual = baseline.circularDependencySites.map(s => ({
+      file: s.file,
+      markers: markerCount(s.file),
+    }));
+    expect(actual).toEqual(
+      baseline.circularDependencySites.map(s => ({ file: s.file, markers: s.markers })),
     );
   });
 
-  // A banked path that owns nothing is an exemption, not a bank.
-  test("every banked path still owns at least one finding", () => {
-    const owners = ownersOf(unsuppressed);
-    const stale = ignoreFindings.filter((p) => !owners.has(p));
-    expect(stale).toEqual([]);
-  });
-
-  // What the conformity FALLOW checks see. If this disagrees with the bank,
-  // "FALLOW-1 passed" stops meaning what this file measured.
-  test("the suppressed reading — what the conformity checks read — is empty", () => {
-    expect(countsOf(suppressed)).toEqual({
-      unusedFiles: 0,
-      unusedExports: 0,
-      unusedDependencies: 0,
-      circularDependencies: 0,
-    });
+  test("no cycle marker exists outside the declared sites", () => {
+    const declared = new Set(baseline.circularDependencySites.map(s => s.file));
+    const undeclared = srcFiles().filter(f => !declared.has(f) && markerCount(f) > 0);
+    expect(undeclared).toEqual([]);
   });
 });

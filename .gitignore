@@ -31,3 +31,6 @@ service-account*
 
 # scripts/doc-check.ts report artifact — regenerated per run
 doc-check-report.md
+
+# fallow's analysis cache — rebuilt on every run, never reviewed
+.fallow/

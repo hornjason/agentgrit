@@ -1,21 +1,23 @@
 ---
-description: Which spec governs which area — read the governing spec before changing that area
+description: Specs routing table — which spec governs which area, read before changing that area
 ---
 
-## Specs Routing
-
-Read the governing spec BEFORE making changes in that area. Every file in
-`specs/` must have a row here: `HYGIENE-4` in the conformity run reads this
-table and fails on a spec that is not listed.
+Read the governing spec BEFORE making changes in that area.
 
 | Spec | Governs | Testable |
 |------|---------|----------|
-| _(none yet)_ | `specs/` currently holds only `SPEC-TEMPLATE.md`, which documents how to write a spec and governs nothing | — |
+| _(none yet)_ | — | — |
 
-`SPEC-TEMPLATE.md` is excluded by the check itself and deliberately has no row.
+`specs/SPEC-TEMPLATE.md` is not listed: it documents how to write a spec and
+governs nothing.
 
-## Adding a spec
+## Adding a row
 
-Create it with `bunx rungate create-spec "title"`, then add its row here in the
-same commit. A spec with no row fails the conformity run, and the failure names
-the file — not this table — so the next reader has to find their way back here.
+Every file you add under `specs/` needs a row here in the same commit. The row
+is not paperwork — `HYGIENE-4` in `test/scaffold-conformity.test.ts` reads this
+file and fails on any `specs/*.md` it cannot find, and without the file at all
+the check skips, which reads exactly like a check that passed.
+
+Take the `Governs` text from the spec's own `governs` frontmatter field and the
+`Testable` column from `testable`, so the table and the spec cannot drift into
+two different answers.

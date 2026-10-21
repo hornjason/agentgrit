@@ -1,11 +1,17 @@
 {
-  "_comment": "Known-violations ratchet for fallow's dead-code analysis, banked by #261 — the issue that made the four FALLOW conformity checks run at all. Before it, `fallow` was not a declared dependency, every check printed 'this check did NOT run' and the suite reported 43/44 green over a tree nothing had looked at. Installing it surfaced these findings all at once; fixing them is a refactor of src/graph and src/promote and is not this issue. Each number is the count fallow reports with `.fallowrc.json`'s ignoreFindings REMOVED — the unsuppressed tree. The paths in that ignoreFindings list are what keeps the conformity checks green, and `test/fallow-baseline.test.ts` is what stops the list becoming an exemption list: it re-runs fallow unsuppressed and refuses in BOTH directions against these counts, refuses a banked path that no longer owns a finding, and refuses if the suppressed reading the conformity checks see is not empty. Lower a number only in the same commit that earns it, and delete a path from ignoreFindings when it stops owning findings.",
+  "_comment": "Known-violations ratchet, not an exemption list. Each count is the number of dead-code findings fallow reported on 2026-10-21 that are banked in .fallowrc.json (unusedFiles, unusedExports) or behind an inline `fallow-ignore-next-line circular-dependency` marker (circularDependencies). Anything NOT in these counts fails FALLOW-1..4 in test/scaffold-conformity.test.ts, so the suite is green on the banked population and red on everything new. Lowering a number means deleting the matching suppression in the same commit; test/fallow-baseline.test.ts refuses a change to either side alone.",
   "issue": 261,
   "bankedAt": "2026-10-21",
+  "measuredWith": "fallow 3.34.1 — `fallow dead-code --format json` with .fallowrc.json entry points applied",
   "counts": {
-    "unusedFiles": 3,
+    "unusedFiles": 4,
     "unusedExports": 67,
     "unusedDependencies": 0,
     "circularDependencies": 6
-  }
+  },
+  "circularDependencySites": [
+    { "file": "src/graph/builder.ts", "markers": 2, "cycles": 2 },
+    { "file": "src/promote/auto-eviction.ts", "markers": 1, "cycles": 1 },
+    { "file": "src/promote/bridge.ts", "markers": 1, "cycles": 3 }
+  ]
 }

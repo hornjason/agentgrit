@@ -2,6 +2,8 @@ import { existsSync, readFileSync, appendFileSync, writeFileSync, mkdirSync, ren
 import { dirname, join } from "path";
 import { stateDir } from "../adapters/paths";
 import type { RuleStats } from "./rules";
+// Banked cycle (#261): lifecycle.ts imports back from this module.
+// fallow-ignore-next-line circular-dependency
 import { getFilteredRuleIds } from "./lifecycle";
 import type { LearningArtifactStats } from "../adapters/types";
 

@@ -2,6 +2,9 @@ import { existsSync, mkdirSync, renameSync, unlinkSync, readFileSync, writeFileS
 import { dirname, join } from "path";
 import type { Rule } from "../adapters/types";
 import { loadConfig } from "../adapters/paths";
+// Banked cycles (#261): budget.ts reaches back here directly and through
+// evict.ts and lifecycle.ts — three of the six counted in fallow-baseline.json.
+// fallow-ignore-next-line circular-dependency
 import { checkBudget } from "./budget";
 import { checkContradiction, extractExistingRules, type InferenceFn } from "./contradiction";
 

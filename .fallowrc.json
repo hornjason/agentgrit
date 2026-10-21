@@ -1,41 +1,83 @@
 {
-  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "$schema": "./node_modules/fallow/schema.json",
   "entry": [
     "bin/agentgrit.ts",
-    "bin/commands/*.ts",
     "scripts/*.ts",
     "agentgrit.config.ts",
-    "verify.config.ts",
-    "test/**/*.test.ts"
+    "verify.config.ts"
   ],
-  "ignoreDependencies": ["fallow"],
+  "ignorePatterns": [
+    "dist/**",
+    "reference/**",
+    "templates/**"
+  ],
   "ignoreFindings": [
+    "bin/commands/cleanup-orphans.ts",
     "src/adapters/claude-code.ts",
-    "src/adapters/jsonl.ts",
     "src/adapters/langfuse.ts",
-    "src/adapters/paths.ts",
-    "src/adapters/time.ts",
-    "src/capture/incidents.ts",
-    "src/capture/index.ts",
-    "src/daemon/scheduler.ts",
-    "src/evaluate/gold.ts",
-    "src/evaluate/precision.ts",
-    "src/evaluate/session.ts",
-    "src/graph/builder.ts",
-    "src/graph/context.ts",
-    "src/graph/domain-propagation.ts",
-    "src/graph/embedder.ts",
-    "src/graph/generate-patterns.ts",
-    "src/graph/index.ts",
-    "src/graph/rule-text.ts",
-    "src/optimize/skill-forge.ts",
-    "src/optimize/skill-synthesizer.ts",
-    "src/optimize/skill-tuner.ts",
-    "src/promote/auto-eviction.ts",
-    "src/promote/bridge.ts",
-    "src/promote/budget.ts",
-    "src/promote/domain-review.ts",
-    "src/promote/evict.ts",
-    "src/promote/lifecycle.ts"
+    "src/graph/index.ts"
+  ],
+  "ignoreExports": [
+    { "file": "src/adapters/jsonl.ts", "exports": ["createJsonlAdapter"] },
+    { "file": "src/adapters/paths.ts", "exports": ["rubricPath", "projectSignalsDir", "projectStateDir"] },
+    { "file": "src/adapters/time.ts", "exports": ["isoTimestamp", "localTimestamp", "dateOnly", "yearMonth"] },
+    { "file": "src/capture/incidents.ts", "exports": ["recordIncident"] },
+    {
+      "file": "src/capture/index.ts",
+      "exports": [
+        "captureRating",
+        "parseRating",
+        "scoreSentiment",
+        "cacheLastResponse",
+        "computeComposite",
+        "truncatePreview",
+        "captureSessionSentiment",
+        "scoreSession",
+        "wordOverlapRatio",
+        "auditAssertions",
+        "captureFailure",
+        "detectCorrection",
+        "extractWorkLearnings",
+        "captureSkillInvocation",
+        "classifyOutcome",
+        "analyzeSkillSequence",
+        "buildCoOccurrencePairs",
+        "captureSkillSequence",
+        "captureOutcome",
+        "computeOutcomeScore",
+        "detectMiniBoundary",
+        "readOutcomes",
+        "captureRuleSnapshot",
+        "getActiveRulesAtTurn",
+        "extractDebrief",
+        "buildMinimalAudit",
+        "captureToolUse",
+        "categorizeToolName"
+      ]
+    },
+    { "file": "src/daemon/scheduler.ts", "exports": ["DEFAULT_LABEL"] },
+    { "file": "src/evaluate/gold.ts", "exports": ["resetGoldPatterns"] },
+    { "file": "src/evaluate/precision.ts", "exports": ["EVAL_TASKS"] },
+    { "file": "src/evaluate/session.ts", "exports": ["DEFAULT_QUALITY_DIMENSIONS"] },
+    { "file": "src/graph/context.ts", "exports": ["loadLearningDigest", "formatLearningContext", "createReranker", "getContextRulesWithReranking"] },
+    { "file": "src/graph/embedder.ts", "exports": ["embedRules", "findNearDuplicates", "classifyMemoryType"] },
+    { "file": "src/graph/rule-text.ts", "exports": ["readRuleTextFromDocument"] },
+    { "file": "src/optimize/skill-forge.ts", "exports": ["semanticCluster", "filterSuppressedClusters"] },
+    { "file": "src/optimize/skill-synthesizer.ts", "exports": ["identifyMatchingReflections", "draftSkillMd", "refineSkillMd", "generateDescription"] },
+    {
+      "file": "src/optimize/skill-tuner.ts",
+      "exports": [
+        "scoreDeterministic",
+        "evaluateSkill",
+        "FAST_CRITERIA_DEBUGGING",
+        "FAST_CRITERIA_QA",
+        "FAST_CRITERIA_DEV_LOOP",
+        "FAST_CRITERIA_SHIP",
+        "CRITERIA_REGISTRY"
+      ]
+    },
+    { "file": "src/promote/auto-eviction.ts", "exports": ["addToEvictedRegistry"] },
+    { "file": "src/promote/domain-review.ts", "exports": ["runDomainReview"] },
+    { "file": "src/promote/lifecycle.ts", "exports": ["appendTransitionLog", "findGraduationCandidates", "autoGraduateRules"] }
   ]
 }
