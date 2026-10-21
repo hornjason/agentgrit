@@ -43,6 +43,7 @@ interface Baseline {
   issue: number;
   bankedAt: string;
   _comment: string;
+  /** Names the tool version the banked counts were taken with. */
   measuredWith: string;
   counts: Record<string, number>;
   circularDependencySites: Array<{ file: string; markers: number; cycles: number }>;
@@ -291,160 +292,220 @@ describe("fallow baseline reconciles with the unsuppressed tree (#261)", () => {
 });
 
 /**
- * …and the three artefacts the whole arrangement stands on are pinned (#261).
+ * …and the three things that make any of the above a measurement at all.
  *
- * Everything above reasons about readings. None of it survives the regression
- * that opened this issue, because that regression removes the ability to take
- * one: `fallowAvailable(root)` in `rungate/lib/fallow-availability.ts` answers
- * `existsSync(root/node_modules/.bin/fallow) || Bun.which("fallow") !== null`,
- * and on `false` each of `FALLOW-1..4` prints `SKIP … this check did NOT run`
- * and returns. Four green lines over four checks that looked at nothing — and
- * `bun test` exits 0, because a `console.warn` is not a failure.
+ * Everything in this file so far compares one reading to another. None of it
+ * can fire when there is no reading: `runFallowCommand` in `lib/conformity.ts`
+ * asks `fallowAvailable(root)` first and, on a false answer, prints
+ * `SKIP FALLOW-N` and returns. A skipped check is a green check. That is the
+ * state issue #261 opened in — four conformity checks reporting nothing wrong
+ * about a tree none of them had looked at — and Phase 1 left it one ordinary
+ * edit away from returning, because nothing held the three artefacts it added:
  *
- * So three facts, each the single point of failure for a different part of it:
+ *   1. the devDependency, without which `bun install` installs no binary,
+ *   2. the binary under `node_modules/.bin`, which is what makes the spawn a
+ *      local resolution rather than a registry fetch per invocation, and
+ *   3. `fallow-baseline.json`, which is what the counts mean.
  *
- *   1. the devDependency, which is what puts the binary in `node_modules`;
- *   2. the binary resolving from THIS project's modules, which is what makes
- *      the run local — `npx fallow` with nothing installed is a registry fetch
- *      per invocation, and that is the slow non-deterministic path #581 named;
- *   3. the baseline file, parseable, at the name everything above reads.
+ * Drop any one and the suite goes back to passing for a reason unrelated to
+ * the code. So each is pinned here, in a repo-owned file rather than in the
+ * generated conformity run, and `.claude/rules/checks-must-be-able-to-fail.md`
+ * asks what was broken to make each go red.
  *
- * Deliberately NOT asserted here: that the checks pass. That is what
- * `FALLOW-1..4` are for, and asking it twice would make two guards out of one.
- * What is asserted is that they CAN run, which is the only thing their green
- * does not establish about itself.
+ * WHAT WAS BROKEN, run and counted rather than asserted. Measured 2026-10-21
+ * on this tree, each mutation applied to the real files, observed, reverted,
+ * and the files confirmed byte-identical by sha256 afterwards. Every count was
+ * predicted before the battery ran, and the baseline rows were read first — an
+ * instrument that has stopped reporting takes the baseline down with it, and
+ * that is the row nobody mutates anything to produce. The denominator is the
+ * three cases below, selected by the same `--test-name-pattern` the brief uses.
  *
- * What was broken to make each go red is recorded case by case below, because
- * a check nobody has seen fail is a line in a report.
+ * | Row | Predicted | Measured | The input on which mutant and original differ |
+ * |---|---|---|---|
+ * | baseline, these three | 3 pass, 0 fail | 3 pass, 0 fail | — |
+ * | baseline, whole file | 15 pass, 0 fail | 15 pass, 0 fail | — |
+ * | `fallow` deleted from `devDependencies` | 1 | 1 of 3 | this tree: the original reads one declaring field, the mutant reads none — and `bun install` then installs no binary |
+ * | `fallow` ALSO added to `dependencies` | 1 | 1 of 3 | two fields naming the tool: the original reports one declaring position, the mutant two, which is two answers to one question |
+ * | the pin loosened to `^3.34.1` | 1 | 1 of 3 | a caret spec: the original demands `x.y.z`, the mutant's spec re-resolves and the installed binary drifts off the banked counts |
+ * | `measuredWith` bumped to 3.34.2, pin left at 3.34.1 | 2 | 2 of 3 | a bank claiming a version nothing installs: the declaration case sees 3.34.1 against 3.34.2, and the version reading comes back `fallow 3.34.1` |
+ * | `node_modules/.bin/fallow` moved aside | 1 | 1 of 3 | a tree with no local install: `existsSync` is false, which is precisely the state in which `fallowAvailable` goes false on CI and FALLOW-1..4 print SKIP |
+ * | every `counts` entry set to 0 | 1 | 1 of 3 | a bank of four zeros: it parses, carries four integers, and banks nothing |
+ * | one byte flipped in `fallow-baseline.json` | the file aborts | 0 pass, 1 fail, 1 error — `SyntaxError` at load | an unparseable bank: nothing in the file runs, loudly |
+ *
+ * The last row is the honest one to read carefully. The corruption refusal is
+ * the MODULE-SCOPE parse's, not the third case's — both would refuse, so they
+ * are two deciders answering one question and no count can tell them apart.
+ * The third case re-reads the bytes anyway so that it is not asserting over an
+ * object its own setup produced, but what it uniquely holds is the rest: the
+ * bank is at the canonical path, is tracked by git, and carries non-negative
+ * integers summing above zero. Those are the assertions the 1-of-3 row above
+ * is measuring.
+ *
+ * THE CHEAPEST WRONG FIXES, named, and whether these cases survive them:
+ *
+ *  - The declaration case goes red after a version bump. The 5pm repair is to
+ *    edit `measuredWith` to the new version and ship without re-measuring.
+ *    These cases GO GREEN under it — they compare two declarations, and both
+ *    now agree. What catches it is the reconciling block above, which runs the
+ *    new binary and compares its findings to the banked counts. Said out loud
+ *    because a survival nobody writes down reads as coverage.
+ *  - The local binary is missing in some environment. The 5pm repair is
+ *    `npm i -g fallow`, which satisfies `fallowAvailable` — it accepts a
+ *    `fallow` anywhere on PATH, which is exactly why asserting that alone
+ *    would be the skip wearing a green tick. The case SURVIVES: the path under
+ *    this project is asserted directly, so a machine-wide install leaves it
+ *    red and the CI-only failure stays visible here.
+ *  - The bank is renamed. The 5pm repair is to edit `BASELINE_PATH` at the top
+ *    of this file, and these cases go green. Nothing holds that name, because
+ *    nothing outside this file reads it — the readers are this file and the
+ *    people lowering the numbers.
  */
-describe("the four FALLOW checks cannot silently skip again (#261)", () => {
-  /**
-   * One binding for the declared version. Both the pin case and the binary
-   * case compare against it, so there is one thing to delete and two cases
-   * that notice.
-   */
-  function declaredFallowVersion(): string | undefined {
-    const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf-8")) as {
-      dependencies?: Record<string, string>;
-      devDependencies?: Record<string, string>;
-    };
-    return pkg.devDependencies?.fallow ?? pkg.dependencies?.fallow;
+describe("the fallow run is wired rather than skipped (#261)", () => {
+  /** Every field `bun install` would honour. A declaration in any of them installs. */
+  const DEPENDENCY_FIELDS = [
+    "dependencies",
+    "devDependencies",
+    "peerDependencies",
+    "optionalDependencies",
+  ] as const;
+
+  const BASELINE_FILE = "fallow-baseline.json";
+  const LOCAL_BIN = join(ROOT, "node_modules", ".bin", "fallow");
+
+  const pkg: Record<string, unknown> = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf-8"));
+
+  function specIn(field: string): string | undefined {
+    const map = pkg[field];
+    if (typeof map !== "object" || map === null) return undefined;
+    const spec = (map as Record<string, unknown>).fallow;
+    return typeof spec === "string" ? spec : undefined;
   }
 
-  test("fallow is declared in package.json, pinned to the version the bank was measured with", () => {
-    // Read from disk rather than importing: a declaration is a fact about the
-    // file an install reads, and this case is about that file.
-    const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf-8")) as {
-      dependencies?: Record<string, string>;
-      devDependencies?: Record<string, string>;
-    };
-    // Named as a dev tool, not a runtime one: it is in neither `files[]` nor
-    // any `src/` import, and a runtime entry would ship it to every consumer.
-    expect(Object.keys(pkg.dependencies ?? {})).not.toContain("fallow");
-    expect(typeof pkg.devDependencies?.fallow).toBe("string");
+  /**
+   * The version the bank says it was taken with.
+   *
+   * A refusal, not a default: an unreadable `measuredWith` compared against an
+   * unreadable package spec is two absences agreeing, which is this file's own
+   * reason for existing one level up.
+   */
+  const MEASURED_VERSION: string = (() => {
+    const raw = baseline.measuredWith;
+    if (typeof raw !== "string" || raw.trim() === "") {
+      throw new Error(
+        `${BASELINE_FILE} carries no 'measuredWith' string, so there is no recorded ` +
+          `version to hold the installed tool to. A bank that does not say what produced ` +
+          `it cannot be reconciled with anything.`,
+      );
+    }
+    const match = raw.match(/\bfallow (\d+\.\d+\.\d+)\b/);
+    if (!match) {
+      throw new Error(
+        `${BASELINE_FILE}'s 'measuredWith' names no 'fallow <x.y.z>' version: ${raw.slice(0, 160)}`,
+      );
+    }
+    return match[1]!;
+  })();
 
-    // An exact pin, not a range. Every number in fallow-baseline.json was
-    // produced by ONE version of the tool; a caret lets an install move the
-    // tool under a ratchet whose counts nobody re-measured, and the suite
-    // stays green while the population it counts changes underneath it.
-    expect(declaredFallowVersion()).toMatch(/^\d+\.\d+\.\d+$/);
+  test("fallow is declared as an exactly-pinned devDependency, in one position", () => {
+    const declaring = DEPENDENCY_FIELDS.filter(f => specIn(f) !== undefined);
+    // One declaring position. Two would be two answers to one question, and
+    // the day they disagree the installed binary is whichever bun resolved.
+    expect(declaring).toEqual(["devDependencies"]);
 
-    // Vacuity guard. Without it, a `measuredWith` that stopped naming a
-    // version would make the comparison below `undefined === undefined`,
-    // which every tree in the world satisfies.
-    const measured = /\b(\d+\.\d+\.\d+)\b/.exec(baseline.measuredWith ?? "");
-    expect(measured).not.toBeNull();
-    expect(declaredFallowVersion()).toBe(measured?.[1]);
+    const spec = specIn("devDependencies")!;
+    // A range re-resolves. The binary that produced the banked counts and the
+    // binary CI installs stop being the same artefact, with nothing saying so.
+    expect(spec).toMatch(/^\d+\.\d+\.\d+$/);
 
-    // Broken to prove it: deleting the `fallow` line from devDependencies is
-    // red here (and in the next case); changing the pin to `^3.34.1` is red on
-    // the exact-pin assertion; editing `measuredWith` to 3.33.0 is red on the
-    // agreement.
+    // …and it is the version the bank names. Two files stating one version
+    // with nothing comparing them is how they come to disagree in silence.
+    expect({ pinned: spec, banked: MEASURED_VERSION }).toEqual({
+      pinned: MEASURED_VERSION,
+      banked: MEASURED_VERSION,
+    });
   });
 
-  test("the fallow binary resolves from this project's node_modules, not from a network fetch", () => {
-    // The exact path the availability predicate stats. Asserting the predicate
-    // alone would not say this: its second disjunct is `Bun.which`, so a tool
-    // on $PATH — a global install on one laptop, absent in CI — satisfies it
-    // with nothing in `node_modules` at all.
-    const localBin = join(ROOT, "node_modules", ".bin", "fallow");
-    expect(existsSync(localBin)).toBe(true);
-    // …and it points INTO this project's modules. A `.bin` entry symlinked at
-    // a global store resolves, runs, and is still not the declared install.
-    const inProjectModules = realpathSync(localBin).startsWith(
-      realpathSync(join(ROOT, "node_modules")) + sep,
-    );
-    expect(inProjectModules).toBe(true);
-
-    // The reading. Spawned BY PATH rather than through `npx`, so there is no
-    // resolution step that can reach a registry: if this prints a version, the
-    // tool ran off this disk. `existsSync` passes over a dangling symlink and
-    // over a stub that exits 1; neither gets past here.
-    const probe = Bun.spawnSync([localBin, "--version"], {
-      cwd: ROOT,
-      env: { ...process.env, NODE_NO_WARNINGS: "1" },
-      timeout: 60_000,
-    });
-    const reading = `${probe.stdout.toString()}${probe.stderr.toString()}`.trim();
-    const pinned = declaredFallowVersion();
-    expect({
-      exitCode: probe.exitCode,
-      readingIsEmpty: reading.length === 0,
-      namesThePinnedVersion: pinned !== undefined && reading.includes(pinned),
-    }).toEqual({ exitCode: 0, readingIsEmpty: false, namesThePinnedVersion: true });
-
-    // And the predicate the four checks actually consult agrees, so they run
-    // instead of printing the skip notice. Imported from rungate rather than
-    // re-implemented here: a second copy of that `||` would agree with the
-    // first on every input and neither could be mutated out from under the
-    // other.
+  test("the fallow binary resolves from this project's own node_modules, not the network", () => {
+    // `fallowAvailable` is the binding the conformity checks gate on, and it
+    // accepts EITHER a local install OR any `fallow` on PATH. A machine-wide
+    // install answers true on a laptop and false on CI, so asserting it alone
+    // would be the silent skip wearing a green tick. The local path is the
+    // witness; fallowAvailable is asserted only to tie this to the consumer.
+    expect(existsSync(LOCAL_BIN)).toBe(true);
+    expect(statSync(LOCAL_BIN).mode & 0o111).toBeGreaterThan(0);
+    expect(realpathSync(LOCAL_BIN).startsWith(realpathSync(ROOT) + sep)).toBe(true);
     expect(fallowAvailable(ROOT)).toBe(true);
 
-    // Broken to prove it: `rm node_modules/.bin/fallow` is red on the first
-    // assertion and on `fallowAvailable`; replacing the symlink with a script
-    // that exits 1 is red on the reading while `existsSync` stays green;
-    // pointing it at a copy outside the project is red on `inProjectModules`.
+    // The reading. `npx fallow` is the exact spawn `runFallowCommand` makes,
+    // run here with the registry pointed at a closed port and the installer
+    // offline. An answer under those conditions cannot have been fetched.
+    const proc = Bun.spawnSync(["npx", "fallow", "--version"], {
+      cwd: ROOT,
+      env: {
+        ...process.env,
+        npm_config_registry: "http://127.0.0.1:1/",
+        npm_config_offline: "true",
+        NODE_NO_WARNINGS: "1",
+      },
+      timeout: 120_000,
+    });
+    const reading = proc.stdout.toString().trim();
+    if (!reading) {
+      throw new Error(
+        `\`npx fallow --version\` produced no output with the registry unreachable — ` +
+          `the spawn the conformity checks make is NOT resolving locally. ` +
+          `stderr: ${proc.stderr.toString().slice(0, 400)}`,
+      );
+    }
+    expect(reading.split("\n")[0]!.trim()).toBe(`fallow ${MEASURED_VERSION}`);
   });
 
-  test("the baseline file parses, at the exact name every reading above resolves", () => {
-    // Scoped honestly: a file that is MISSING or wholly unparseable aborts
-    // this module at import, loudly, before any case here runs — that is the
-    // top-level `JSON.parse` near the head of the file, and it is a real
-    // refusal, just not this one's. What this case holds is the population a
-    // parse survives, which is the population nothing else looks at: a record
-    // emptied to `{}`, a `counts` block gutted to a different shape, a number
-    // turned into a string or a float, and a file re-created under a new name
-    // beside a stale one.
+  test("the baseline file parses, is committed, and banks something", () => {
+    // Read the bytes here rather than reusing the module-scope parse: a case
+    // asserting over an object the file already parsed is asserting a value
+    // the test's own setup produced.
     expect(existsSync(BASELINE_PATH)).toBe(true);
-    expect(relative(ROOT, BASELINE_PATH).split("\\").join("/")).toBe("fallow-baseline.json");
 
-    const raw = readFileSync(BASELINE_PATH, "utf-8");
-    let parsed: Baseline;
-    try {
-      parsed = JSON.parse(raw) as Baseline;
-    } catch (err) {
+    const inRepo = Bun.spawnSync(["git", "rev-parse", "--is-inside-work-tree"], { cwd: ROOT });
+    if (!inRepo.success) {
       throw new Error(
-        `fallow-baseline.json does not parse — the ratchet has no record, and ` +
-          `FALLOW-1..4 have nothing to be measured against: ${(err as Error).message}`,
+        `cannot establish whether ${BASELINE_FILE} is committed: ${ROOT} is not a git work ` +
+          `tree. A reading that could not be taken is not a reading that passed.`,
+      );
+    }
+    // Tracked, because a bank that exists only in this checkout is a bank CI
+    // does not have — and a ratchet CI cannot read is a ratchet that holds
+    // nothing, which is the shape of the defect this whole file is about.
+    const tracked = Bun.spawnSync(["git", "ls-files", "--error-unmatch", "--", BASELINE_FILE], {
+      cwd: ROOT,
+    });
+    if (!tracked.success) {
+      throw new Error(
+        `${BASELINE_FILE} is not tracked by git: ${tracked.stderr.toString().trim().slice(0, 200)}`,
       );
     }
 
-    // The four classes `runFallowCheck` reports, each a whole count and not a
-    // negative one. `typeof x === "number"` is satisfied by `NaN` and by
-    // `-1`, and a ratchet cannot be lowered below the floor it describes.
+    let parsed: Baseline;
+    const raw = readFileSync(BASELINE_PATH, "utf-8");
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      throw new Error(
+        `${BASELINE_FILE} did not parse as JSON (${(err as Error).message}); ` +
+          `first bytes: ${raw.slice(0, 120)}`,
+      );
+    }
+
     const classes = ["unusedFiles", "unusedExports", "unusedDependencies", "circularDependencies"];
-    const whole = classes.filter(c => Number.isInteger(parsed.counts?.[c]) && parsed.counts[c] >= 0);
-    expect(whole).toEqual(classes);
+    const counts = parsed.counts ?? {};
+    // Integers, not merely numbers: `1.5` findings and `-1` findings are both
+    // a corrupted bank that `typeof === "number"` reports as healthy.
+    const malformed = classes.filter(c => !Number.isInteger(counts[c]) || (counts[c] as number) < 0);
+    expect(malformed).toEqual([]);
 
-    // Not every count is non-zero — `unusedDependencies` is legitimately 0 —
-    // but a record of all zeros banks nothing, and would agree with a tree
-    // whose suppressions had every one been deleted.
-    expect(classes.reduce((n, c) => n + parsed.counts[c], 0)).toBeGreaterThan(0);
-    expect(parsed.issue).toBe(261);
-
-    // Broken to prove it: truncating the file mid-object is red on the parse
-    // refusal; `counts.unusedExports` set to "67" or to -1 is red on the
-    // whole-count list; a record whose four counts are all 0 is red on the
-    // sum, with every other assertion in this case still green.
+    // A bank of all zeros parses, carries four integers, and suppresses
+    // nothing — indistinguishable from a bank that was emptied, which is why
+    // the sum is asserted rather than only the shape.
+    expect(classes.reduce((n, c) => n + (counts[c] as number), 0)).toBeGreaterThan(0);
   });
 });
