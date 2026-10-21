@@ -1,4 +1,4 @@
-# generated-sha: 1225822c41de1f03
+# generated-sha: 4271b168a8fcfcf6
 # Managed by rungate — do not edit. Customize the ci section of .claude/rungate/config.json.
 name: CI
 
@@ -34,9 +34,9 @@ jobs:
             || echo "WARN: could not fetch main; the conformity allowlist growth check will report UNMEASURED."
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          # From ci.bunVersion in .claude/rungate/config.json — this project declares no
-          # .bun-version. Add one and re-scaffold to let CI read the declaration directly.
-          bun-version: "latest"
+          # Pinned by .bun-version — the project's single declaration (#622).
+          # setup-bun reads that file, so there is no version spelled here to drift from it.
+          bun-version-file: ".bun-version"
       - run: bun install
       # No global tools installed: the config declares no ci.globalTools.
       - name: Consumer setup (scripts/ci-setup.sh, optional)
