@@ -154,6 +154,28 @@ The hill-climbing engine (`hill-climb.ts`) is generic: propose a change, evaluat
 
 The 15% maximum change ratio prevents the optimizer from making drastic rewrites in a single round. Proposals that exceed this limit are logged as `rejected_size` and skipped.
 
+**Inference-free recommendations** (`skill-synthesizer.ts`, `recommendSkills`):
+everything downstream of `identifyMatchingReflections` needs an API key, so a
+standalone install had no reflection-driven path at all. `recommendSkills`
+clusters reflections by term overlap over `task_description` — a deterministic
+greedy cover, so each reflection backs at most one recommendation — and calls
+no model.
+
+Two deliberate choices, both to stop it reporting confidence it has not
+earned:
+
+- `meanSentiment` is `number | null`, never a substituted default. A cluster
+  nobody rated and a cluster rated badly are different facts; `0` or `5`
+  would merge them. `sentimentCount` says how many backing entries carried
+  one.
+- The stopword list includes the words the daemon's own fallback description
+  is built from (`autonomous`, `session`, `task`). A corpus of
+  `Autonomous session <id>` has nothing to cluster on, and without this the
+  cover would emit a single confident recommendation spanning every session.
+
+A term carried by fewer than `minSupport` reflections is not a cluster — it is
+one task described once, and recommending a skill for it is noise.
+
 ### 6. Graph — Knowledge Retrieval
 
 The knowledge graph stores rules as nodes connected by domain relationships. At session start, the graph injects the most relevant rules based on the current task's domain.
@@ -185,8 +207,27 @@ The knowledge graph stores rules as nodes connected by domain relationships. At 
 1. **Score** — evaluate recent traces against rubrics using the LLM judge
 2. **Detect** — scan for failure patterns and cross-signal patterns
 3. **Promote** — route detected patterns to rules (if auto-promote is enabled and budget allows)
-4. **Sync** — push scores to Langfuse (if configured)
-5. **Optimize** — flag dimensions with scores <= 2 for hill-climbing
+4. **Reflect** — compose reflection entries from scored sessions (`auto-reflection.ts`)
+5. **Sync** — push scores to Langfuse (if configured)
+6. **Optimize** — flag dimensions with scores <= 2 for hill-climbing
+
+**Reflect** (`auto-reflection.ts`) exists because `algorithm-reflections.jsonl`
+is read by the whole optimizer stack but was previously only ever *written* by
+an external system. Without this step a standalone install has signal capture,
+rule injection, attribution and eviction — and a reflection-driven optimizer
+with no input at all.
+
+It composes one entry per scored session from signals already on disk.
+`implied_sentiment` is the measured arithmetic mean of that session's ratings,
+unrounded — not a self-assessment. **No LLM is involved**, and the step runs
+with no API key set; a test asserts the module has no edge to the inference
+adapter, not even a type-only one.
+
+The step runs before **Optimize** so entries written this cycle are visible to
+it in the same cycle, and it is idempotent on `session_id`: an entry already
+present — from an earlier cycle *or* from an external LEARN phase — is
+skipped, so re-running over the same `ratings.jsonl` adds nothing.
+`CycleResult.reflectionsGenerated` counts only what this cycle appended.
 
 **Weekly cycle** (runs on the configured day, default Sunday):
 1. Full learning review with pattern synthesis
