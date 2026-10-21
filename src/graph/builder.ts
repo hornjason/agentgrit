@@ -1,9 +1,9 @@
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, resolve } from "path";
+import { atomicWriteJSON } from "../adapters/atomic-write";
 import { homedir } from "os";
 import { createHash } from "crypto";
 import { getBaseDir, stateDir, ruleDomainsFile } from "../adapters/paths";
-import { atomicWriteJSON } from "../adapters/atomic-write";
 import type { GraphNode, GraphEdge, Rule } from "../adapters/types";
 import type { CorpusProvenance, Graph } from "./types";
 // Banked cycle (#261): domain-propagation.ts imports DOMAINS back from this

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, appendFileSync, mkdirSync } from "fs";
 import { join, basename, dirname } from "path";
 import { stateDir, hostRulesFile } from "../adapters/paths";
-import { atomicWriteJSON, cleanupTmpFiles } from "../adapters/atomic-write";
+import { atomicWriteJSON, cleanupOrphanedTmpFiles } from "../adapters/atomic-write";
 import { loadEvictedRegistryEntries } from "./auto-eviction";
 import { loadRuleStats } from "./rules";
 import { normalizeRuleId } from "./bridge";
@@ -25,7 +25,7 @@ const LIFECYCLE_FILE = "rule-lifecycle.json";
 export function loadLifecycle(dir?: string): RuleLifecycle {
   const baseDir = dir ?? stateDir();
   const filePath = join(baseDir, LIFECYCLE_FILE);
-  cleanupTmpFiles(baseDir, LIFECYCLE_FILE);
+  cleanupOrphanedTmpFiles(baseDir, LIFECYCLE_FILE);
   if (!existsSync(filePath)) return { version: 1, rules: {} };
   try {
     const data = JSON.parse(readFileSync(filePath, "utf-8"));

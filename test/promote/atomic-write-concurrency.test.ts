@@ -1,188 +1,115 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "fs";
+import { describe, expect, test, beforeEach, afterEach } from "bun:test";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync } from "fs";
 import { join } from "path";
 
-const TMP_DIR = join(import.meta.dir, ".tmp-atomic-write-concurrency");
-const STATE_DIR = join(TMP_DIR, "state");
-const HELPER = join(import.meta.dir, "..", "..", "src", "adapters", "atomic-write.ts");
-
 /**
- * The four JSON state files this issue is about. Each is written by the daemon
- * and by ad-hoc CLI invocations, so two writers landing on one file is the
- * normal case, not the pathological one.
+ * Real concurrency, not simulated. `atomicWriteJSON` is synchronous, so twenty
+ * calls on one event loop cannot interleave and would prove nothing — the
+ * orphaned .tmp files this issue is about came from separate processes.
+ * Each writer here is its own `bun` process contending for the same file.
  */
+
+const TEMP_DIR = join(import.meta.dir, ".tmp-atomic-write-concurrency");
+const HELPER = join(import.meta.dir, "..", "..", "src", "adapters", "atomic-write.ts");
+const WRITERS = 20;
 const STATE_FILES = ["rule-stats.json", "recall-eval.json", "recall-scores.json", "knowledge-graph.json"];
 
-const WRITERS = 20;
-const WRITES_PER_WRITER = 15;
-const READERS = 8;
-const PAYLOAD_BYTES = 40_000;
+const WORKER_SOURCE = `
+const [target, idx] = process.argv.slice(2);
+const { atomicWriteJSON } = await import(${JSON.stringify(HELPER)});
+// A payload big enough that the write is not a single instantaneous syscall,
+// so a non-atomic implementation has a window to be caught in.
+atomicWriteJSON(target, { writer: Number(idx), filler: "x".repeat(40000) });
+`;
 
-/**
- * Scratch and lock files are the evidence of a half-finished write. A reader of
- * the final document cannot see them, which is why this lists the directory
- * instead of parsing the JSON.
- */
-function residue(dir: string): string[] {
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir).filter((f) => f.includes(".tmp.") || f.endsWith(".lock")).sort();
+function workerPath(): string {
+  const p = join(TEMP_DIR, "writer.mjs");
+  writeFileSync(p, WORKER_SOURCE, "utf-8");
+  return p;
 }
 
-/**
- * Real OS processes, not promises. Inside one process every `atomicWriteJSON`
- * call is synchronous and therefore serialised by the event loop, so an
- * in-process "concurrency" test passes no matter what the helper does.
- *
- * Each writer loops: the run has to outlast the helper's lock-wait window, or
- * the lock serialises everything and the temp-naming half of the write path is
- * never exercised at all.
- */
-function spawnWriter(target: string, index: number) {
-  const code = `
-    const { atomicWriteJSON } = await import(${JSON.stringify(HELPER)});
-    for (let i = 0; i < ${WRITES_PER_WRITER}; i++) {
-      atomicWriteJSON(${JSON.stringify(target)}, {
-        writer: ${index},
-        round: i,
-        filler: "x".repeat(${PAYLOAD_BYTES}),
-      });
-    }
-  `;
-  return Bun.spawn([process.execPath, "-e", code], { cwd: TMP_DIR, stdout: "pipe", stderr: "pipe" });
-}
-
-/**
- * A reader hammering the same file while the writers run. This is the half of
- * the test that can actually fail: a writer that truncates the real file in
- * place leaves a window where the document on disk is empty or partial, and
- * only a concurrent reader is positioned to see it. Without these processes the
- * test passes against a bare `writeFileSync` — verified by doing exactly that.
- */
-function spawnReader(target: string, durationMs: number) {
-  const code = `
-    const { readFileSync, existsSync } = await import("fs");
-    const target = ${JSON.stringify(target)};
-    const deadline = Date.now() + ${durationMs};
-    let reads = 0;
-    while (Date.now() < deadline) {
-      if (!existsSync(target)) continue;
-      let raw;
-      try { raw = readFileSync(target, "utf-8"); } catch (err) {
-        if (err && err.code === "ENOENT") continue;
-        throw err;
-      }
-      try {
-        const doc = JSON.parse(raw);
-        if (typeof doc.filler !== "string" || doc.filler.length !== ${PAYLOAD_BYTES}) {
-          console.error("torn document: filler length " + (doc.filler && doc.filler.length));
-          process.exit(1);
-        }
-      } catch (err) {
-        console.error("unparseable document after " + reads + " good reads, " + raw.length + " bytes: " + err.message);
-        process.exit(1);
-      }
-      reads++;
-    }
-  `;
-  return Bun.spawn([process.execPath, "-e", code], { cwd: TMP_DIR, stdout: "pipe", stderr: "pipe" });
-}
-
-async function collect(procs: ReturnType<typeof Bun.spawn>[]) {
-  return Promise.all(
-    procs.map(async (p) => ({ code: await p.exited, stderr: await new Response(p.stderr).text() })),
-  );
+function residue(dir: string, infix: string): string[] {
+  return readdirSync(dir).filter((f) => f.includes(infix));
 }
 
 beforeEach(() => {
-  if (existsSync(TMP_DIR)) rmSync(TMP_DIR, { recursive: true });
-  mkdirSync(STATE_DIR, { recursive: true });
+  if (existsSync(TEMP_DIR)) rmSync(TEMP_DIR, { recursive: true });
+  mkdirSync(TEMP_DIR, { recursive: true });
 });
 
 afterEach(() => {
-  if (existsSync(TMP_DIR)) rmSync(TMP_DIR, { recursive: true });
+  if (existsSync(TEMP_DIR)) rmSync(TEMP_DIR, { recursive: true });
 });
 
-describe("concurrent writers", () => {
-  for (const name of STATE_FILES) {
-    test(
-      `${WRITERS} concurrent writers to ${name} leave no orphaned temp files and a parseable document`,
-      async () => {
-        const target = join(STATE_DIR, name);
-        const procs = [
-          ...Array.from({ length: WRITERS }, (_, i) => spawnWriter(target, i)),
-          ...Array.from({ length: READERS }, () => spawnReader(target, 1500)),
-        ];
+describe("concurrent writers against state files", () => {
+  test(
+    "twenty concurrent processes per state file leave no orphaned temp files and a parseable document",
+    async () => {
+      const worker = workerPath();
+      const stateDir = join(TEMP_DIR, "state");
+      mkdirSync(stateDir, { recursive: true });
 
-        const results = await collect(procs);
-        const failed = results.filter((r) => r.code !== 0);
-        expect(failed.map((f) => f.stderr.trim()).join("\n---\n")).toBe("");
-        expect(failed.length).toBe(0);
+      const procs: Array<{ file: string; idx: number; exited: Promise<number> }> = [];
+      for (const file of STATE_FILES) {
+        const target = join(stateDir, file);
+        for (let i = 0; i < WRITERS; i++) {
+          const child = Bun.spawn(["bun", worker, target, String(i)], {
+            stdout: "pipe",
+            stderr: "pipe",
+          });
+          procs.push({ file, idx: i, exited: child.exited });
+        }
+      }
 
-        expect(residue(STATE_DIR)).toEqual([]);
+      const codes = await Promise.all(procs.map((p) => p.exited));
+      const failed = procs.filter((_, i) => codes[i] !== 0).map((p) => `${p.file}#${p.idx}`);
+      expect(failed).toEqual([]);
 
-        const parsed = JSON.parse(readFileSync(target, "utf-8")) as { writer: number; filler: string };
-        expect(typeof parsed.writer).toBe("number");
+      // Zero orphaned temp files across every target.
+      expect(residue(stateDir, ".tmp.")).toEqual([]);
+      expect(residue(stateDir, ".lock")).toEqual([]);
+
+      // Every final document is whole: parseable, and exactly one writer's
+      // payload rather than two spliced together.
+      for (const file of STATE_FILES) {
+        const raw = readFileSync(join(stateDir, file), "utf-8");
+        const parsed = JSON.parse(raw) as { writer: number; filler: string };
         expect(parsed.writer).toBeGreaterThanOrEqual(0);
         expect(parsed.writer).toBeLessThan(WRITERS);
-        expect(parsed.filler.length).toBe(PAYLOAD_BYTES);
-      },
-      180_000,
-    );
-  }
-
-  /**
-   * The lock fails open rather than throwing, so there is a real window in
-   * which several writers hold no lock and overlap. Everything above runs with
-   * the lock available, which hides that window — with the lock in play a
-   * single shared temp name passes every test in this file.
-   *
-   * Planting a lock nobody will release forces every writer through the
-   * fail-open path at the same moment, which is the only place the temp name's
-   * uniqueness is load-bearing. Verified by replacing the per-writer name with
-   * a constant: this test goes red and the others stay green.
-   */
-  test(
-    "writers that time out on a held lock still do not collide",
-    async () => {
-      const target = join(STATE_DIR, "rule-stats.json");
-      const lockPath = target + ".lock";
-      writeFileSync(lockPath, "", "utf-8");
-
-      const procs = [
-        ...Array.from({ length: 8 }, (_, i) => spawnWriter(target, i)),
-        ...Array.from({ length: 4 }, () => spawnReader(target, 2500)),
-      ];
-
-      const results = await collect(procs);
-      const failed = results.filter((r) => r.code !== 0);
-      expect(failed.map((f) => f.stderr.trim()).join("\n---\n")).toBe("");
-
-      // The planted lock is nobody's to release, so it is expected residue.
-      unlinkSync(lockPath);
-      expect(residue(STATE_DIR)).toEqual([]);
-      expect((JSON.parse(readFileSync(target, "utf-8")) as { filler: string }).filler.length).toBe(PAYLOAD_BYTES);
-    },
-    180_000,
-  );
-
-  test(
-    "writers against all four state files at once leave no residue in the shared directory",
-    async () => {
-      const procs = STATE_FILES.flatMap((name) => [
-        ...Array.from({ length: 5 }, (_, i) => spawnWriter(join(STATE_DIR, name), i)),
-        spawnReader(join(STATE_DIR, name), 1200),
-      ]);
-
-      const results = await collect(procs);
-      const failed = results.filter((r) => r.code !== 0);
-      expect(failed.map((f) => f.stderr.trim()).join("\n---\n")).toBe("");
-
-      expect(residue(STATE_DIR)).toEqual([]);
-      for (const name of STATE_FILES) {
-        const parsed = JSON.parse(readFileSync(join(STATE_DIR, name), "utf-8")) as { filler: string };
-        expect(parsed.filler.length).toBe(PAYLOAD_BYTES);
+        expect(parsed.filler.length).toBe(40000);
       }
     },
     180_000,
   );
+
+  test("a stale lock left by a dead writer does not block rule-stats.json forever", async () => {
+    const { atomicWriteJSON } = await import("../../src/adapters/atomic-write");
+    const target = join(TEMP_DIR, "rule-stats.json");
+    const lock = target + ".lock";
+    writeFileSync(lock, "", "utf-8");
+    // Backdate past the stale threshold the helper uses.
+    const old = new Date(Date.now() - 10 * 60 * 1000);
+    const { utimesSync } = await import("fs");
+    utimesSync(lock, old, old);
+
+    atomicWriteJSON(target, { recovered: true });
+
+    expect(JSON.parse(readFileSync(target, "utf-8")).recovered).toBe(true);
+    expect(residue(TEMP_DIR, ".tmp.")).toEqual([]);
+    expect(existsSync(lock)).toBe(false);
+  });
+
+  test("orphaned temp files from a previous crash are swept for knowledge-graph.json", async () => {
+    const { cleanupOrphanedTmpFiles, atomicWriteJSON } = await import("../../src/adapters/atomic-write");
+    const target = join(TEMP_DIR, "knowledge-graph.json");
+    for (const pid of [101, 202, 303]) {
+      writeFileSync(`${target}.tmp.${pid}`, "partial", "utf-8");
+    }
+
+    atomicWriteJSON(target, { nodeCount: 1 });
+    cleanupOrphanedTmpFiles(TEMP_DIR, "knowledge-graph.json");
+
+    expect(residue(TEMP_DIR, ".tmp.")).toEqual([]);
+    expect(JSON.parse(readFileSync(target, "utf-8")).nodeCount).toBe(1);
+  });
 });

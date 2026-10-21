@@ -12,88 +12,97 @@ import {
 import { dirname, join } from "path";
 
 /**
- * Lock-guarded, crash-safe writes for the JSON documents under
- * `~/.agentgrit/state/`.
+ * The single write path for every JSON file under the state directory.
  *
- * Every one of those files is a read-modify-write: load the whole document,
- * change one key, write the whole document back. Two writers overlapping on
- * that cycle lose one of the two edits, and a writer killed mid-`writeFileSync`
- * leaves a truncated document that the next load silently treats as "no data".
+ * Only `rule-lifecycle.json` used to be written this way; every other state
+ * file was a bare `writeFileSync`, which is a read-modify-write race between
+ * any two processes that touch it — the daemon, a CLI command and a hook all
+ * do. The evidence was 36 orphaned `.tmp` files in a live state directory
+ * (#242). PID-based temp names gave uniqueness, never mutual exclusion.
  *
- * Only `rule-lifecycle.json` was protected. This module is that protection
- * extracted so every state file gets it, because a guard on one of five write
- * paths is a guard on none — the 36 orphaned `.tmp.` files found in a live
- * state directory were proof the overlap is routine, not theoretical.
+ * Two mechanisms, and they do different jobs. Do not collapse them:
+ *
+ * - **temp-and-rename** makes each write atomic. `rename(2)` within a
+ *   filesystem is atomic, so a reader sees the old document or the new one and
+ *   never a half-flushed one. This holds even with no lock at all.
+ * - **the lock file** serialises read-modify-write callers, so two processes
+ *   that each read, edit and save do not silently drop one of the two edits.
+ *
+ * The lock is advisory and bounded: after `LOCK_WAIT_MS` of contention the
+ * write proceeds unguarded. That is deliberate. A daemon that blocks forever on
+ * a lock file someone else leaked is a worse failure than a lost update, and
+ * the rename keeps the document whole either way.
  */
 
-/** A lock older than this is assumed to belong to a process that died holding it. */
+/** A lock older than this is assumed to belong to a process that died. */
 const LOCK_STALE_MS = 30_000;
 
+/** How long to contend for the lock before writing without it. */
+const LOCK_WAIT_MS = 250;
+
+/** Pause between acquisition attempts. */
+const LOCK_RETRY_MS = 10;
+
 /**
- * Marks a scratch file. Shared by the writer and by {@link cleanupTmpFiles}, so
- * the sweeper cannot drift out of step with the names it is sweeping for.
+ * Marks a temp sibling. `cleanupOrphanedTmpFiles` matches on this, so the two
+ * must agree — hence one constant rather than two string literals.
  */
 const TMP_INFIX = ".tmp.";
 
-/** How long a blocked writer waits for the lock before giving up on it. */
-const LOCK_WAIT_MS = 250;
-const LOCK_POLL_MS = 5;
-
 /**
- * Within one process the pid is identical for every writer, so the pid alone
- * does not make a temp name unique. Two overlapping writes in one process would
- * share a scratch file and interleave their bytes.
+ * Distinguishes two writes from the *same* process. The PID alone does not:
+ * one process writing two state files, or the same file twice, reused the name.
  */
 let tmpCounter = 0;
 
-/** Sleep without an event loop turn — the whole write path is synchronous. */
+/**
+ * Block the thread for `ms`.
+ *
+ * `Atomics.wait` rather than `Bun.sleepSync`: this module is reached by the
+ * `--target=node` bundle, where the `Bun` global does not exist. Node and Bun
+ * both allow `Atomics.wait` on the main thread.
+ */
 function sleepSync(ms: number): void {
-  const shared = new Int32Array(new SharedArrayBuffer(4));
-  Atomics.wait(shared, 0, 0, ms);
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-/** Take the lock if it is free, clearing it first if its owner is long gone. */
 function tryAcquire(lockPath: string): number | undefined {
   try {
     return openSync(lockPath, "wx");
   } catch {
-    try {
-      const age = Date.now() - statSync(lockPath).mtimeMs;
-      if (age > LOCK_STALE_MS) unlinkSync(lockPath);
-    } catch {
-      // Gone already, or another process cleaned it. Either way, retry below.
-    }
-    try {
-      return openSync(lockPath, "wx");
-    } catch {
-      return undefined;
-    }
+    return undefined;
+  }
+}
+
+function clearIfStale(lockPath: string): void {
+  try {
+    if (Date.now() - statSync(lockPath).mtimeMs > LOCK_STALE_MS) unlinkSync(lockPath);
+  } catch {
+    /* already gone, or another process cleaned it first */
   }
 }
 
 /**
- * Run `fn` holding an exclusive lock file, waiting briefly for a contended one.
+ * Run `fn` while holding `lockPath`, releasing it afterwards.
  *
- * Deliberately fails open: after {@link LOCK_WAIT_MS} the work runs unlocked
- * rather than throwing. A state-file update is not worth failing a command
- * over, and the temp-write-and-rename below still keeps the document readable
- * and the directory clean under an unlocked overlap — only the lost-update
- * protection is given up.
- *
- * Only the process that created the lock removes it, so a writer that gave up
- * waiting can never delete the holder's lock out from under it.
+ * Deliberately module-private: the point of this issue is that there is one
+ * write path, and an exported lock primitive invites a second one built beside
+ * it rather than through `atomicWriteJSON`.
  */
-function withLock<T>(lockPath: string, fn: () => T): T {
+function withFileLock<T>(lockPath: string, fn: () => T): T {
   let fd = tryAcquire(lockPath);
   const deadline = Date.now() + LOCK_WAIT_MS;
   while (fd === undefined && Date.now() < deadline) {
-    sleepSync(LOCK_POLL_MS);
+    clearIfStale(lockPath);
     fd = tryAcquire(lockPath);
+    if (fd === undefined) sleepSync(LOCK_RETRY_MS);
   }
 
   try {
     return fn();
   } finally {
+    // Only the holder removes the lock. Unlinking one we never acquired would
+    // hand the file to a third process while the real holder is mid-write.
     if (fd !== undefined) {
       try { closeSync(fd); } catch { /* best-effort */ }
       try { unlinkSync(lockPath); } catch { /* best-effort */ }
@@ -102,40 +111,44 @@ function withLock<T>(lockPath: string, fn: () => T): T {
 }
 
 /**
- * Delete scratch files left behind for `prefix` in `dir` by a write that died
- * between creating its temp file and renaming it into place.
+ * Delete temp siblings of `prefix` left behind by a crashed writer.
  *
- * Scoped to one document's prefix on purpose: a blanket sweep of `*.tmp.*`
- * would delete the in-flight scratch file of a concurrent writer working on a
- * different document in the same directory.
+ * Scoped to one file's prefix on purpose: a sweep of every `*.tmp.*` in the
+ * directory would delete the in-flight temp file of a concurrent writer.
  */
-export function cleanupTmpFiles(dir: string, prefix: string): void {
+export function cleanupOrphanedTmpFiles(dir: string, prefix: string): void {
   try {
     for (const entry of readdirSync(dir)) {
       if (entry.startsWith(prefix + TMP_INFIX)) {
         try { unlinkSync(join(dir, entry)); } catch { /* best-effort */ }
       }
     }
-  } catch { /* dir might not exist */ }
+  } catch {
+    /* directory may not exist yet */
+  }
 }
 
 /**
- * Serialise `data` to `filePath` as JSON so a reader never sees a partial
- * document and the directory is never left holding scratch files.
+ * Serialise `value` and replace `filePath` with it atomically, under a lock.
  *
- * The content lands in a per-writer temp file and is moved into place with
- * `rename`, which is atomic within a filesystem: a concurrent reader sees
- * either the old document or the new one, never a half-written one. The parent
- * directory is created if missing, so callers do not each repeat that check.
+ * Creates the parent directory if needed. Throws — rather than writing an
+ * empty or partial file — if `value` cannot be serialised, and removes the
+ * temp file if the write or rename fails.
  */
-export function atomicWriteJSON(filePath: string, data: unknown, indent: number = 2): void {
+export function atomicWriteJSON(filePath: string, value: unknown, space: number = 2): void {
+  // Serialise before touching the filesystem: a value containing a BigInt or a
+  // cycle throws here, and doing it first means the failure leaves nothing
+  // behind — no directory, no lock, no temp file.
+  const content = JSON.stringify(value, null, space);
+  if (content === undefined) {
+    throw new TypeError(`atomicWriteJSON: value for ${filePath} serialises to undefined`);
+  }
+
   const dir = dirname(filePath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
-  const lockPath = filePath + ".lock";
-  withLock(lockPath, () => {
-    const content = JSON.stringify(data, null, indent);
-    const tmpPath = `${filePath}${TMP_INFIX}${process.pid}.${tmpCounter++}`;
+  withFileLock(filePath + ".lock", () => {
+    const tmpPath = `${filePath}${TMP_INFIX}${process.pid}.${++tmpCounter}`;
     try {
       writeFileSync(tmpPath, content, "utf-8");
       renameSync(tmpPath, filePath);

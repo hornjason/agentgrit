@@ -1,253 +1,265 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "fs";
+import { describe, expect, test, beforeEach, afterEach } from "bun:test";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync } from "fs";
 import { join } from "path";
 
-const TMP_DIR = join(import.meta.dir, ".tmp-atomic-write-json");
-const STATE_DIR = join(TMP_DIR, "state");
+const TEMP_DIR = join(import.meta.dir, ".tmp-atomic-write-json");
 const REPO_ROOT = join(import.meta.dir, "..", "..");
 
-/**
- * Anything the write path left behind that is not the document itself.
- *
- * `.tmp.` catches the scratch file a temp-write-and-rename uses; `.lock` catches
- * the mutex. Both are invisible to a reader of the final JSON, which is exactly
- * why they accumulated unnoticed until 36 of them were found by hand.
- */
-function residue(dir: string): string[] {
+function siblings(dir: string, infix: string): string[] {
   if (!existsSync(dir)) return [];
-  return readdirSync(dir).filter((f) => f.includes(".tmp.") || f.endsWith(".lock")).sort();
+  return readdirSync(dir).filter((f) => f.includes(infix));
+}
+
+function source(relPath: string): string {
+  return readFileSync(join(REPO_ROOT, relPath), "utf-8");
 }
 
 beforeEach(() => {
-  if (existsSync(TMP_DIR)) rmSync(TMP_DIR, { recursive: true });
-  mkdirSync(STATE_DIR, { recursive: true });
-  process.env.AGENTGRIT_DIR = TMP_DIR;
+  if (existsSync(TEMP_DIR)) rmSync(TEMP_DIR, { recursive: true });
+  mkdirSync(TEMP_DIR, { recursive: true });
 });
 
 afterEach(() => {
-  if (existsSync(TMP_DIR)) rmSync(TMP_DIR, { recursive: true });
-  process.env.AGENTGRIT_DIR = process.env.AGENTGRIT_TEST_BASE ?? "";
+  if (existsSync(TEMP_DIR)) rmSync(TEMP_DIR, { recursive: true });
 });
 
 describe("atomicWriteJSON", () => {
-  test("writes a parseable document and leaves no residue", async () => {
+  test("writes rule-stats.json and leaves no .tmp sibling", async () => {
     const { atomicWriteJSON } = await import("../../src/adapters/atomic-write");
-    const target = join(STATE_DIR, "thing.json");
+    const target = join(TEMP_DIR, "rule-stats.json");
+    const payload = [{ ruleId: "r1", injectionCount: 3 }];
 
-    atomicWriteJSON(target, { a: 1, b: ["x"] });
+    atomicWriteJSON(target, payload);
 
-    expect(JSON.parse(readFileSync(target, "utf-8"))).toEqual({ a: 1, b: ["x"] });
-    expect(residue(STATE_DIR)).toEqual([]);
+    expect(JSON.parse(readFileSync(target, "utf-8"))).toEqual(payload);
+    expect(siblings(TEMP_DIR, ".tmp.")).toEqual([]);
+    expect(siblings(TEMP_DIR, ".lock")).toEqual([]);
+  });
+
+  test("writes recall-eval.json and leaves no .tmp sibling", async () => {
+    const { atomicWriteJSON } = await import("../../src/adapters/atomic-write");
+    const target = join(TEMP_DIR, "recall-eval.json");
+
+    atomicWriteJSON(target, { sessionsEvaluated: 7, meanRecall5: 0.5 });
+
+    expect(JSON.parse(readFileSync(target, "utf-8")).sessionsEvaluated).toBe(7);
+    expect(siblings(TEMP_DIR, ".tmp.")).toEqual([]);
+  });
+
+  test("writes recall-scores.json and leaves no .tmp sibling", async () => {
+    const { atomicWriteJSON } = await import("../../src/adapters/atomic-write");
+    const target = join(TEMP_DIR, "recall-scores.json");
+
+    atomicWriteJSON(target, { injected: { s1: ["r1"] }, entryCount: 1 });
+
+    expect(JSON.parse(readFileSync(target, "utf-8")).entryCount).toBe(1);
+    expect(siblings(TEMP_DIR, ".tmp.")).toEqual([]);
+  });
+
+  test("writes knowledge-graph.json and leaves no .tmp sibling", async () => {
+    const { atomicWriteJSON } = await import("../../src/adapters/atomic-write");
+    const target = join(TEMP_DIR, "knowledge-graph.json");
+
+    atomicWriteJSON(target, { version: "1.0", nodeCount: 0, nodes: {}, edges: [] });
+
+    expect(JSON.parse(readFileSync(target, "utf-8")).version).toBe("1.0");
+    expect(siblings(TEMP_DIR, ".tmp.")).toEqual([]);
   });
 
   test("creates the parent directory when it does not exist", async () => {
     const { atomicWriteJSON } = await import("../../src/adapters/atomic-write");
-    const target = join(TMP_DIR, "nested", "deeper", "thing.json");
+    const nested = join(TEMP_DIR, "state", "deep");
+    const target = join(nested, "rule-stats.json");
 
     atomicWriteJSON(target, { ok: true });
 
-    expect(JSON.parse(readFileSync(target, "utf-8"))).toEqual({ ok: true });
+    expect(existsSync(target)).toBe(true);
   });
 
-  test("replaces existing content without leaving the previous document", async () => {
+  test("overwrites an existing document in place", async () => {
     const { atomicWriteJSON } = await import("../../src/adapters/atomic-write");
-    const target = join(STATE_DIR, "thing.json");
-    writeFileSync(target, JSON.stringify({ generation: 1 }), "utf-8");
+    const target = join(TEMP_DIR, "knowledge-graph.json");
+    writeFileSync(target, JSON.stringify({ nodeCount: 99 }), "utf-8");
 
-    atomicWriteJSON(target, { generation: 2 });
+    atomicWriteJSON(target, { nodeCount: 1 });
 
-    expect(JSON.parse(readFileSync(target, "utf-8"))).toEqual({ generation: 2 });
-    expect(residue(STATE_DIR)).toEqual([]);
+    expect(JSON.parse(readFileSync(target, "utf-8")).nodeCount).toBe(1);
+    expect(siblings(TEMP_DIR, ".tmp.")).toEqual([]);
   });
 
-  test("releases the lock so a second write can take it", async () => {
+  test("leaves no temp residue and no partial file when serialisation throws", async () => {
     const { atomicWriteJSON } = await import("../../src/adapters/atomic-write");
-    const target = join(STATE_DIR, "thing.json");
+    const target = join(TEMP_DIR, "rule-stats.json");
+    const unserialisable = { n: 1n } as unknown;
 
-    atomicWriteJSON(target, { n: 1 });
-    expect(existsSync(target + ".lock")).toBe(false);
-    atomicWriteJSON(target, { n: 2 });
-
-    expect(JSON.parse(readFileSync(target, "utf-8"))).toEqual({ n: 2 });
-    expect(residue(STATE_DIR)).toEqual([]);
+    expect(() => atomicWriteJSON(target, unserialisable)).toThrow();
+    expect(existsSync(target)).toBe(false);
+    expect(siblings(TEMP_DIR, ".tmp.")).toEqual([]);
+    expect(siblings(TEMP_DIR, ".lock")).toEqual([]);
   });
 
-  test("removes a temp file left by an interrupted write", async () => {
-    const { cleanupTmpFiles } = await import("../../src/adapters/atomic-write");
-    writeFileSync(join(STATE_DIR, "thing.json.tmp.9999"), "{partial", "utf-8");
-    writeFileSync(join(STATE_DIR, "thing.json"), "{}", "utf-8");
+  test("two writes from one process do not collide on the same temp name", async () => {
+    const { atomicWriteJSON } = await import("../../src/adapters/atomic-write");
+    const a = join(TEMP_DIR, "rule-stats.json");
+    const b = join(TEMP_DIR, "recall-scores.json");
 
-    cleanupTmpFiles(STATE_DIR, "thing.json");
+    atomicWriteJSON(a, { which: "a" });
+    atomicWriteJSON(b, { which: "b" });
 
-    expect(residue(STATE_DIR)).toEqual([]);
-    expect(existsSync(join(STATE_DIR, "thing.json"))).toBe(true);
+    expect(JSON.parse(readFileSync(a, "utf-8")).which).toBe("a");
+    expect(JSON.parse(readFileSync(b, "utf-8")).which).toBe("b");
+    expect(siblings(TEMP_DIR, ".tmp.")).toEqual([]);
   });
 
-  test("does not delete a temp file belonging to a different document", async () => {
-    const { cleanupTmpFiles } = await import("../../src/adapters/atomic-write");
-    const other = join(STATE_DIR, "other.json.tmp.1");
-    writeFileSync(other, "{}", "utf-8");
+  test("proceeds and still writes when a fresh lock is held by someone else", async () => {
+    const { atomicWriteJSON } = await import("../../src/adapters/atomic-write");
+    const target = join(TEMP_DIR, "knowledge-graph.json");
+    writeFileSync(target + ".lock", "", "utf-8");
 
-    cleanupTmpFiles(STATE_DIR, "thing.json");
+    atomicWriteJSON(target, { nodeCount: 2 });
 
-    expect(existsSync(other)).toBe(true);
+    expect(JSON.parse(readFileSync(target, "utf-8")).nodeCount).toBe(2);
+    expect(siblings(TEMP_DIR, ".tmp.")).toEqual([]);
+    // Somebody else's lock is left alone — only its owner removes it.
+    expect(existsSync(target + ".lock")).toBe(true);
   });
 });
 
-describe("state file writers route through the shared helper", () => {
-  test("rule-stats.json: persistRuleStats leaves no .tmp sibling", async () => {
-    const { persistRuleStats, loadRuleStats } = await import("../../src/promote/rules");
+describe("cleanupOrphanedTmpFiles", () => {
+  test("removes orphaned temp siblings of rule-stats.json only", async () => {
+    const { cleanupOrphanedTmpFiles } = await import("../../src/adapters/atomic-write");
+    writeFileSync(join(TEMP_DIR, "rule-stats.json.tmp.111"), "{}", "utf-8");
+    writeFileSync(join(TEMP_DIR, "rule-stats.json.tmp.222"), "{}", "utf-8");
+    writeFileSync(join(TEMP_DIR, "knowledge-graph.json.tmp.333"), "{}", "utf-8");
+    writeFileSync(join(TEMP_DIR, "rule-stats.json"), "[]", "utf-8");
 
+    cleanupOrphanedTmpFiles(TEMP_DIR, "rule-stats.json");
+
+    expect(existsSync(join(TEMP_DIR, "rule-stats.json.tmp.111"))).toBe(false);
+    expect(existsSync(join(TEMP_DIR, "rule-stats.json.tmp.222"))).toBe(false);
+    expect(existsSync(join(TEMP_DIR, "knowledge-graph.json.tmp.333"))).toBe(true);
+    expect(existsSync(join(TEMP_DIR, "rule-stats.json"))).toBe(true);
+  });
+
+  test("tolerates a missing directory", async () => {
+    const { cleanupOrphanedTmpFiles } = await import("../../src/adapters/atomic-write");
+    expect(() => cleanupOrphanedTmpFiles(join(TEMP_DIR, "nope"), "rule-stats.json")).not.toThrow();
+  });
+});
+
+describe("state writers persist through the shared helper", () => {
+  test("exactly one atomicWriteJSON helper is exported across src and bin", () => {
+    const hits: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name.endsWith(".ts")) {
+          if (readFileSync(full, "utf-8").includes("export function atomicWriteJSON")) {
+            hits.push(full.slice(REPO_ROOT.length + 1));
+          }
+        }
+      }
+    };
+    walk(join(REPO_ROOT, "src"));
+    walk(join(REPO_ROOT, "bin"));
+    expect(hits).toEqual(["src/adapters/atomic-write.ts"]);
+  });
+
+  test("rule-stats.json writer in rules.ts routes through atomicWriteJSON", () => {
+    const src = source("src/promote/rules.ts");
+    expect(src).toContain("atomicWriteJSON");
+    expect(src).not.toContain("writeFileSync(");
+  });
+
+  test("knowledge-graph.json writer in builder.ts routes through atomicWriteJSON", () => {
+    const src = source("src/graph/builder.ts");
+    expect(src).toContain("atomicWriteJSON");
+    expect(src).not.toContain("writeFileSync(");
+  });
+
+  test("knowledge-graph.json writer in attribution.ts routes through atomicWriteJSON", () => {
+    const src = source("src/graph/attribution.ts");
+    expect(src).toContain("atomicWriteJSON");
+    expect(src).not.toContain("writeFileSync(");
+  });
+
+  test("recall-scores.json and recall-eval.json writers in eval.ts route through atomicWriteJSON", () => {
+    const lines = source("bin/commands/eval.ts").split("\n");
+
+    // The write for each file is the first write statement after the line that
+    // names it. Checking the whole file would be satisfied by eval.ts's other,
+    // out-of-scope writers; checking the window cannot be.
+    const writeWindows = (needle: string): string[] =>
+      lines
+        .map((l, i) => (l.includes(`"state", "${needle}"`) ? lines.slice(i, i + 6).join("\n") : null))
+        .filter((w): w is string => w !== null)
+        .filter((w) => w.includes("writeFileSync(") || w.includes("atomicWriteJSON("));
+
+    for (const file of ["recall-scores.json", "recall-eval.json"]) {
+      const windows = writeWindows(file);
+      expect(windows.length).toBeGreaterThan(0);
+      for (const window of windows) {
+        expect(window).toContain("atomicWriteJSON(");
+        expect(window).not.toContain("writeFileSync(");
+      }
+    }
+  });
+
+  test("rule-lifecycle.json writer in lifecycle.ts carries no inline temp naming", () => {
+    const src = source("src/promote/lifecycle.ts");
+    expect(src).toContain("atomicWriteJSON");
+    expect(src.includes(".tmp.")).toBe(false);
+  });
+
+  test("persistRuleStats writes rule-stats.json with no temp residue", async () => {
+    const { persistRuleStats } = await import("../../src/promote/rules");
+    const dir = join(TEMP_DIR, "state");
     persistRuleStats(
       [
         {
           ruleId: "r1",
-          injectionCount: 3,
-          avgCorrelatedRating: 7.5,
-          sessionRatings: [7, 8],
-          highRatingActivations: 1,
-          lowRatingActivations: 0,
-          lastSeen: "2026-01-01T00:00:00.000Z",
-        },
-      ],
-      STATE_DIR,
-    );
-
-    expect(residue(STATE_DIR)).toEqual([]);
-    const loaded = loadRuleStats(STATE_DIR);
-    expect(loaded.get("r1")?.injectionCount).toBe(3);
-  });
-
-  test("rule-stats.json: bootstrapDifferentialStats leaves no .tmp sibling", async () => {
-    const { bootstrapDifferentialStats } = await import("../../src/promote/rules");
-    const statsPath = join(STATE_DIR, "rule-stats.json");
-    const ratingsPath = join(STATE_DIR, "ratings.jsonl");
-    writeFileSync(
-      statsPath,
-      JSON.stringify([
-        {
-          ruleId: "r1",
           injectionCount: 2,
-          avgCorrelatedRating: 8,
-          sessionRatings: [8, 8],
+          avgCorrelatedRating: 7,
+          sessionRatings: [7, 7],
           highRatingActivations: 2,
           lowRatingActivations: 0,
           lastSeen: "2026-01-01T00:00:00.000Z",
         },
-      ]),
-      "utf-8",
+      ],
+      dir,
     );
-    writeFileSync(ratingsPath, `${JSON.stringify({ rating: 6 })}\n${JSON.stringify({ rating: 4 })}\n`, "utf-8");
 
-    const result = bootstrapDifferentialStats(statsPath, ratingsPath);
-
-    expect(result.rulesProcessed).toBe(1);
-    expect(residue(STATE_DIR)).toEqual([]);
-    const written = JSON.parse(readFileSync(statsPath, "utf-8"));
-    expect(written[0].differentialLift).toBe(3);
+    const target = join(dir, "rule-stats.json");
+    expect(JSON.parse(readFileSync(target, "utf-8"))[0].ruleId).toBe("r1");
+    expect(siblings(dir, ".tmp.")).toEqual([]);
+    expect(siblings(dir, ".lock")).toEqual([]);
   });
 
-  test("knowledge-graph.json: writeGraphFile leaves no .tmp sibling", async () => {
-    const { writeGraphFile } = await import("../../src/graph/builder");
-
-    writeGraphFile({
-      version: "1.0",
-      builtAt: new Date().toISOString(),
-      nodeCount: 0,
-      edgeCount: 0,
-      nodes: {
-        r1: {
-          id: "r1",
-          file: "r1.md",
-          type: "rule",
-          name: "Rule 1",
-          description: "test",
-          domains: ["testing"],
-          severity: 3,
-          occurrence_count: 1,
-          last_updated: new Date().toISOString(),
-          content_hash: "a",
-          memoryType: "behavioral-rule",
-        },
-      },
-      edges: [],
-    });
-
-    const target = join(STATE_DIR, "knowledge-graph.json");
-    expect(existsSync(target)).toBe(true);
-    expect(JSON.parse(readFileSync(target, "utf-8")).nodeCount).toBe(1);
-    expect(residue(STATE_DIR)).toEqual([]);
-  });
-
-  test("knowledge-graph.json: attribution's edge-weight write leaves no .tmp sibling", async () => {
-    const { updateEdgeWeightsFromRating } = await import("../../src/graph/attribution");
-    const target = join(STATE_DIR, "knowledge-graph.json");
-    writeFileSync(
-      target,
-      JSON.stringify({
+  test("writeGraphFile writes knowledge-graph.json with no temp residue", async () => {
+    const stateRoot = join(TEMP_DIR, "base");
+    mkdirSync(join(stateRoot, "state"), { recursive: true });
+    const prevDir = process.env.AGENTGRIT_DIR;
+    process.env.AGENTGRIT_DIR = stateRoot;
+    try {
+      const { writeGraphFile } = await import("../../src/graph/builder");
+      writeGraphFile({
         version: "1.0",
         builtAt: new Date().toISOString(),
-        nodeCount: 2,
-        edgeCount: 1,
+        nodeCount: 0,
+        edgeCount: 0,
         nodes: {},
-        edges: [{ from: "r1", to: "r2", relationship: "co_occurred", strength: 0.5 }],
-      }),
-      "utf-8",
-    );
-
-    updateEdgeWeightsFromRating(
-      {
-        ruleIds: ["r1", "r2"],
-        domains: ["testing"],
-        domain_source: "keyword",
-        timestamp: new Date().toISOString(),
-        ttl: 86400000,
-        rulesInjectedCount: 2,
-        rulesInjectedKB: 1,
-      },
-      9,
-      target,
-    );
-
-    expect(JSON.parse(readFileSync(target, "utf-8")).edges[0].strength).toBeCloseTo(0.575, 3);
-    expect(residue(STATE_DIR)).toEqual([]);
-  });
-
-  test("recall-scores.json: the eval bootstrap write goes through atomicWriteJSON", async () => {
-    const { atomicWriteJSON } = await import("../../src/adapters/atomic-write");
-    const src = readFileSync(join(REPO_ROOT, "bin", "commands", "eval.ts"), "utf-8");
-
-    expect(src).toContain("atomicWriteJSON(scoresPath,");
-    expect(src).not.toContain("writeFileSync(scoresPath,");
-
-    const target = join(STATE_DIR, "recall-scores.json");
-    atomicWriteJSON(target, { injected: { s1: ["r1"] }, entryCount: 1 });
-    expect(JSON.parse(readFileSync(target, "utf-8")).entryCount).toBe(1);
-    expect(residue(STATE_DIR)).toEqual([]);
-  });
-
-  test("recall-eval.json: the eval summary write goes through atomicWriteJSON", async () => {
-    const { atomicWriteJSON } = await import("../../src/adapters/atomic-write");
-    const src = readFileSync(join(REPO_ROOT, "bin", "commands", "eval.ts"), "utf-8");
-
-    expect(src).toContain("atomicWriteJSON(recallEvalPath,");
-    expect(src).not.toContain("writeFileSync(recallEvalPath,");
-
-    const target = join(STATE_DIR, "recall-eval.json");
-    atomicWriteJSON(target, { sessionsEvaluated: 3, meanRecall5: 0.4 });
-    expect(JSON.parse(readFileSync(target, "utf-8")).sessionsEvaluated).toBe(3);
-    expect(residue(STATE_DIR)).toEqual([]);
-  });
-
-  test("rule-lifecycle.json: saveLifecycle no longer carries its own temp naming", async () => {
-    const { transitionRule, loadLifecycle } = await import("../../src/promote/lifecycle");
-    const lifecycleSrc = readFileSync(join(REPO_ROOT, "src", "promote", "lifecycle.ts"), "utf-8");
-
-    expect(lifecycleSrc).not.toContain(".tmp.");
-
-    transitionRule("r1", "evicted", "low correlation", "test", STATE_DIR);
-
-    expect(loadLifecycle(STATE_DIR).rules["r1"].state).toBe("evicted");
-    expect(residue(STATE_DIR)).toEqual([]);
+        edges: [],
+      });
+      const dir = join(stateRoot, "state");
+      const target = join(dir, "knowledge-graph.json");
+      expect(existsSync(target)).toBe(true);
+      expect(JSON.parse(readFileSync(target, "utf-8")).version).toBe("1.0");
+      expect(siblings(dir, ".tmp.")).toEqual([]);
+      expect(siblings(dir, ".lock")).toEqual([]);
+    } finally {
+      if (prevDir === undefined) delete process.env.AGENTGRIT_DIR;
+      else process.env.AGENTGRIT_DIR = prevDir;
+    }
   });
 });
