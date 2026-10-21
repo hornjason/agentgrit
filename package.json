@@ -33,7 +33,7 @@
   "devDependencies": {
     "@huggingface/transformers": "^3.5.1",
     "@types/bun": "latest",
-    "rungate": "github:hornjason/pai-harness#875f9014",
+    "rungate": "github:hornjason/pai-harness#a0dc5f51",
     "typescript": "^5.7.0"
   },
   "engines": {

@@ -1,7 +1,7 @@
 ---
 doc-type: reference
 status: active
-updated: 2026-10-19
+updated: 2026-10-21
 ---
 
 # @agentgrit/core
@@ -28,6 +28,7 @@ updated: 2026-10-19
 |--------|---------|
 | Test | `bun test` |
 | Type check | `bun run typecheck` |
+| Test as CI sees it | `bun scripts/test-clean-env.ts` |
 | Conformity | `bun test test/scaffold-conformity.test.ts` |
 | Create spec | `bunx rungate create-spec "title"` |
 | Create SC | `bunx rungate create-sc --pattern <name> --params '<json>'` |

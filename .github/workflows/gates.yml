@@ -1,3 +1,4 @@
+# generated-sha: 568ce68efb360ffc
 # Managed by rungate — do not edit. Customize the ci section of .claude/rungate/config.json.
 name: Gates
 
@@ -14,7 +15,7 @@ jobs:
     runs-on: "ubuntu-latest"
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           # From ci.bunVersion in .claude/rungate/config.json — this project declares no
           # .bun-version. Add one and re-scaffold to let CI read the declaration directly.
@@ -46,8 +47,14 @@ jobs:
           # NOTE: do NOT append "|| true" to the assignment below. It makes the
           # assignment itself succeed, so $? is always 0 and the error branch
           # becomes dead code — the scan would fail open on a git error.
+          # -i on tier 2 only, never on the tier-1 scan above: tier 1 matches
+          # anchored key FORMATS whose case is part of the format, and it has
+          # no allowlist to absorb a false positive. The flag is interpolated
+          # from lib/secret-patterns.ts rather than typed here, because four
+          # hand-written flags are four things that can disagree about what
+          # counts as a secret (#844).
           set +e
-          tier2=$(git grep -I -hoE '(password|passwd|api[_-]?key|secret)[[:space:]]*[:=][[:space:]]*[A-Za-z0-9/+=_.-]{12,}' -- .)
+          tier2=$(git grep -I -hoE -i '(password|passwd|api[_-]?key|secret)[[:space:]]*[:=][[:space:]]*[A-Za-z0-9/+_.-][A-Za-z0-9/+=_.-]{11,}' -- .)
           rc=$?
           set -e
           # git grep: 0 = match, 1 = no match, >1 = real error.
@@ -58,8 +65,22 @@ jobs:
           # Exclusion applies to the extracted VALUE, not the whole line.
           # Matching anywhere on the line let a trailing "# placeholder"
           # launder a real secret past the check.
-          if printf '%s\n' "$tier2" | grep -qvE '^$|[:=][[:space:]]*(process\.env|os\.environ|Deno\.env|getenv|REDACTED|CHANGEME|placeholder)'; then
+          # It reads case the same way the capture does, for a reason
+          # recorded in lib/secret-patterns.ts: the population the capture
+          # newly sees is mostly .env.example, where a non-value is spelled
+          # CHANGEME and PLACEHOLDER (#844).
+          if printf '%s\n' "$tier2" | grep -qvE -i '^$|[:=][[:space:]]*(process\.env|os\.environ|Deno\.env|getenv|REDACTED|CHANGEME|placeholder)'; then
             echo "::error::Potential credential assignment in tracked files"
             exit 1
           fi
           echo "Secret scan clean"
+
+permissions:
+  # Least privilege, and it matters most on the consumers. A workflow with
+  # no permissions: block inherits the REPOSITORY default, which is a setting
+  # the harness does not control and cannot read at generation time. Measured
+  # 2026-10-20 across the consumers this harness serves: the default is
+  # read-only on some and WRITE on others, so a generated job that declares
+  # nothing holds a push-capable GITHUB_TOKEN wherever the default is write.
+  # Neither job needs it: both check out, install and run tests.
+  contents: read
