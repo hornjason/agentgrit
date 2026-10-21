@@ -70,6 +70,30 @@ Explicit ratings are optional. Corrections and sentiment are captured implicitly
 
 Each signal includes a UUID, timestamp, session ID, and schema version. Correction signals also carry severity (1-10, assigned by pattern match) and context (truncated user message + assistant response).
 
+**Iteration learnings** (`iteration-learning.ts`) are the one capture path that
+is *not* a hook. An iteration loop's LEARN step produces a gap, a root cause
+and a mechanical fix as prose; `captureIterationLearning` is what turns that
+into a routed learning rather than a note:
+
+```bash
+agentgrit iteration-learn \
+  --gap "..." --root-cause "..." --mechanical-fix "..." --artifact-type workflow
+```
+
+It is an adapter, not a third implementation: the category comes from
+`extractWorkLearnings`, the tier from `routeRule`, and the artifact is written
+by `writeLearnings`. Routing is **shadow** — the tier and its rationale are
+recorded on the artifact for calibration and nothing is promoted.
+`IterationLearningResult.applied` is typed as the literal `false` rather than
+`boolean`, so a future change that starts applying rules has to come through
+the type and be read by every caller instead of flipping a flag nobody
+notices.
+
+The learning directory resolves through the path authority, not
+`process.cwd()` — the caller is an iteration loop running in some other
+repository, so a cwd-relative path would scatter learnings across whatever
+directory the loop happened to be in.
+
 ### 2. Evaluate — Quality Scoring
 
 Two independent scoring channels:
@@ -257,6 +281,7 @@ Supports install, uninstall, and status checks. Parses interval strings (`30m`, 
 | `status` | Signal counts, score trends, rule budget utilization |
 | `doctor` | Health check across all five subsystems (capture, scoring, graph, rules, signals) |
 | `inbox` | Review pending rule candidates with tier routing rationale |
+| `iteration-learn` | Record one iteration-loop learning (gap / root cause / mechanical fix). Routes in shadow mode and writes the artifact; promotes nothing. |
 | `rules` | List, rebalance, or compact rules across tiers |
 | `eval` | Evaluate traces, sessions, or recall accuracy against rubrics |
 | `optimize` | Hill-climb prompts or skill descriptions for a target dimension |
