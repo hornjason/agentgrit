@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { dirname, join } from "path";
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
 import { stateDir } from "../adapters/paths";
 import { loadConfig } from "../adapters/paths";
+import { atomicWriteJSON } from "../adapters/atomic-write";
 import type { Rule } from "../adapters/types";
 
 const MAX_SESSION_RATINGS = 20;
@@ -141,10 +142,7 @@ export function loadRuleStats(dir?: string): Map<string, RuleStats> {
 }
 
 export function persistRuleStats(stats: RuleStats[], dir?: string): void {
-  const filePath = ruleStatsPath(dir);
-  const parent = dirname(filePath);
-  if (!existsSync(parent)) mkdirSync(parent, { recursive: true });
-  writeFileSync(filePath, JSON.stringify(stats, null, 2), "utf-8");
+  atomicWriteJSON(ruleStatsPath(dir), stats);
 }
 
 export interface BootstrapResult {
@@ -193,9 +191,7 @@ export function bootstrapDifferentialStats(
   }
 
   const outPath = outputDir ? join(outputDir, "rule-stats.json") : ruleStatsPath;
-  const parent = dirname(outPath);
-  if (!existsSync(parent)) mkdirSync(parent, { recursive: true });
-  writeFileSync(outPath, JSON.stringify(stats, null, 2), "utf-8");
+  atomicWriteJSON(outPath, stats);
 
   return result;
 }

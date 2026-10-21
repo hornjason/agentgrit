@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync, createReadStream, statSync } fro
 import { join, basename } from "path";
 import { createInterface } from "readline";
 import { getBaseDir, loadConfig, resolveSignalDir, resolveSignalFile, resolveTranscriptDir, resolveMemoryDir } from "../../src/adapters/paths";
+import { atomicWriteJSON } from "../../src/adapters/atomic-write";
 import { loadRubric } from "../../src/evaluate/rubric";
 import { judgeTrace, judgeBatch } from "../../src/evaluate/judge";
 import type { JudgeConfig, Trace } from "../../src/evaluate/judge";
@@ -376,9 +377,7 @@ function bootstrapRecallScores(base: string): Record<string, string[]> {
   }
 
   const scoresPath = join(base, "state", "recall-scores.json");
-  const stateDir = join(base, "state");
-  if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true });
-  writeFileSync(scoresPath, JSON.stringify({ injected, bootstrappedAt: new Date().toISOString(), entryCount: Object.keys(injected).length }, null, 2));
+  atomicWriteJSON(scoresPath, { injected, bootstrappedAt: new Date().toISOString(), entryCount: Object.keys(injected).length });
 
   return injected;
 }
@@ -610,11 +609,9 @@ export async function evalCommand(args: string[]): Promise<void> {
     console.log(`  Mean MRR:       ${result.meanMrr.toFixed(3)}`);
     console.log(`  95% CI (R@5):   [${result.ci95Recall5[0].toFixed(3)}, ${result.ci95Recall5[1].toFixed(3)}]`);
 
-    const outputPath = join(base, "state", "recall-eval.json");
-    const dir = join(base, "state");
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(outputPath, JSON.stringify(result, null, 2));
-    console.log(`\n  Results written to: ${outputPath}\n`);
+    const recallEvalPath = join(base, "state", "recall-eval.json");
+    atomicWriteJSON(recallEvalPath, result);
+    console.log(`\n  Results written to: ${recallEvalPath}\n`);
   } else if (sub === "effectiveness") {
     console.log(`  Mode: rule effectiveness tracking\n`);
 

@@ -1,8 +1,9 @@
-import { existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync } from "fs";
-import { join, dirname, resolve } from "path";
+import { existsSync, readFileSync, readdirSync } from "fs";
+import { join, resolve } from "path";
 import { homedir } from "os";
 import { createHash } from "crypto";
 import { getBaseDir, stateDir, ruleDomainsFile } from "../adapters/paths";
+import { atomicWriteJSON } from "../adapters/atomic-write";
 import type { GraphNode, GraphEdge, Rule } from "../adapters/types";
 import type { CorpusProvenance, Graph } from "./types";
 // Banked cycle (#261): domain-propagation.ts imports DOMAINS back from this
@@ -120,9 +121,7 @@ export function syncRuleDomains(
   }
 
   if (added > 0 || pruned > 0) {
-    const dir = dirname(ruleDomainsPath);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(ruleDomainsPath, JSON.stringify(ruleDomains, null, 2), "utf-8");
+    atomicWriteJSON(ruleDomainsPath, ruleDomains);
   }
 
   return { added, pruned };
@@ -265,9 +264,7 @@ function persistGraph(graph: Graph, outputPath: string): void {
 
   assertNoCorpusCollapse(outputPath, graph, previous);
 
-  const dir = dirname(outputPath);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(outputPath, JSON.stringify(graph, null, 2), "utf-8");
+  atomicWriteJSON(outputPath, graph);
 }
 
 export function writeGraphFile(graph: Graph): void {
