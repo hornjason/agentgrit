@@ -450,6 +450,31 @@ All state lives under `~/.agentgrit/` (override with `AGENTGRIT_DIR` env var):
 └── daemon.err               Daemon stderr
 ```
 
+**Everything under `state/` is written through one path:**
+`atomicWriteJSON` in `src/adapters/atomic-write.ts`. Nothing in `src/` or
+`bin/` may call `writeFileSync` on a state file — a conformity test asserts
+exactly one exported copy of the helper, and asserts each writer module is free
+of `writeFileSync(`.
+
+The reason is that every state file is a read-modify-write: load the whole
+document, change one key, write it back. The daemon, a CLI command and a hook
+all do this, concurrently. The helper gives two separate guarantees, which are
+not interchangeable:
+
+| Mechanism | Guarantee | Survives without the other? |
+|---|---|---|
+| write to a temp sibling, then `rename(2)` | a reader sees the old document or the new one, never a half-flushed one | yes — `rename` is atomic within a filesystem |
+| a `.lock` sibling held for the read-modify-write | two writers do not silently drop one of the two edits | no |
+
+The lock is **advisory and bounded**: after 250ms of contention the write
+proceeds without it, and a lock older than 30s is treated as abandoned by a
+dead process. A daemon that blocks forever on a leaked lock file is a worse
+failure than a lost update, and the rename keeps the document whole either way.
+
+`cleanupOrphanedTmpFiles(dir, prefix)` sweeps temp siblings left by a crashed
+writer. It is scoped to one document's prefix deliberately — a blanket sweep of
+`*.tmp.*` would delete a concurrent writer's in-flight scratch file.
+
 ## Configuration
 
 `agentgrit.config.ts` exports three presets (`quick`, `standard`, `full`). After `init`, your active config lives at `~/.agentgrit/config.json`.
