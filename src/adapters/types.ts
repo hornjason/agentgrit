@@ -306,6 +306,12 @@ export interface AgentGritConfig {
     weeklyDay: string;
     autoPrune?: boolean;
   };
+  /** Opt-in daemon health notifications (#321). Unset = none. */
+  notify?: {
+    /** Shell command; gets AGENTGRIT_NOTIFY_TITLE/BODY env vars and the body on stdin. */
+    command?: string;
+    timeoutMs?: number;
+  };
   thresholds?: {
     coolingPeriodDays?: number;
     ratingLowThreshold?: number;
