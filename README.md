@@ -265,6 +265,29 @@ skipped, so re-running over the same `ratings.jsonl` adds nothing.
 - **RULES** — counts rules against budget caps
 - **SIGNALS** — checks JSONL file sizes (warning at 5MB, error at 20MB)
 
+**Notifications** (`notify.ts`, opt-in): set `notify.command` in `config.json`
+and every `daemon run` ends with a doctor pass and at most one message:
+
+| Situation | Title |
+|---|---|
+| New failure: a cycle error, a doctor `error`, or a CAPTURE warning (a hook stopped firing) | `AgentGrit: failing` |
+| Same failure on a new day | `AgentGrit: still failing` |
+| Failure clears | `AgentGrit: recovered` |
+| Healthy and nothing sent yet today | `AgentGrit: healthy` |
+
+The command runs under `/bin/sh` with `AGENTGRIT_NOTIFY_TITLE` and
+`AGENTGRIT_NOTIFY_BODY` set and the body on stdin; it is cut off after
+`notify.timeoutMs` (default 10s) and never fails the cycle. No push service is
+built in. An ntfy example:
+
+```json
+"notify": { "command": "curl -s -H \"Title: $AGENTGRIT_NOTIFY_TITLE\" --data-binary @- https://ntfy.sh/<your-topic>" }
+```
+
+Dedup state lives in `state/notify-state.json`, and only a delivered message
+advances it, so a failed send retries next cycle. Silence means healthy only if
+the daily `healthy` message keeps arriving.
+
 **Scheduler** (`scheduler.ts`): Generates and installs platform-specific daemon configuration:
 - **macOS**: LaunchAgent plist at `~/Library/LaunchAgents/com.agentgrit.daemon.plist`
 - **Linux**: systemd user service + timer at `~/.config/systemd/user/`

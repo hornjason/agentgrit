@@ -9,7 +9,13 @@ import {
   checkSchedulerRegistered,
   parseSchedule,
 } from "../../src/daemon/scheduler";
+import { runNotify } from "../../src/daemon/notify";
 import type { AgentGritConfig } from "../../src/adapters/types";
+
+/** daemon.log is the scheduler's stdout; without a time, a cycle is undatable. */
+export function formatCycleHeader(now: Date = new Date()): string {
+  return `  Running one daemon cycle at ${now.toISOString()}...\n`;
+}
 
 function loadConfig(base: string): AgentGritConfig | null {
   const configPath = join(base, "config.json");
@@ -28,7 +34,7 @@ async function doRun(base: string): Promise<void> {
     return;
   }
 
-  console.log("  Running one daemon cycle...\n");
+  console.log(formatCycleHeader());
 
   const result = await runDaemonCycle(config);
 
@@ -45,9 +51,12 @@ async function doRun(base: string): Promise<void> {
     }
   }
 
+  const cycleErrors = [...result.errors];
+
   if (isWeeklyDay(config)) {
     console.log("\n  Weekly review day — running review...\n");
     const weeklyResult = await runWeeklyReview(config);
+    cycleErrors.push(...weeklyResult.errors);
     console.log(`  Patterns found:  ${weeklyResult.review.patternsFound}`);
     console.log(`  Candidates:      ${weeklyResult.review.candidatesProposed}`);
     console.log(`  Graph rebuilt:   ${weeklyResult.graphRebuilt}`);
@@ -64,6 +73,13 @@ async function doRun(base: string): Promise<void> {
       for (const err of weeklyResult.errors) {
         console.log(`    - ${err}`);
       }
+    }
+  }
+
+  if (config.notify?.command) {
+    const n = await runNotify(config, cycleErrors);
+    if (n.kind !== "none") {
+      console.log(`\n  Notify:    ${n.kind} — ${n.sent ? "sent" : `NOT sent (${n.error})`}`);
     }
   }
 
