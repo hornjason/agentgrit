@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
@@ -9,7 +9,7 @@ import {
   EMPTY_NOTIFY_STATE,
   type NotifyState,
 } from "../../src/daemon/notify";
-import type { DoctorReport, CheckStatus } from "../../src/daemon/doctor";
+import { runDoctor, type DoctorReport, type CheckStatus } from "../../src/daemon/doctor";
 import type { AgentGritConfig } from "../../src/adapters/types";
 import { formatCycleHeader } from "../../bin/commands/daemon";
 
@@ -68,6 +68,15 @@ describe("decideNotification", () => {
     expect(warn.kind).toBe("heartbeat");
   });
 
+  test("a CAPTURE warning alerts: a stale signal file means a hook stopped firing", () => {
+    const d = decideNotification(
+      { cycleErrors: [], doctor: doctor(["CAPTURE", "ratings.jsonl", "warning", "ratings.jsonl last modified 20d ago — hook may not be firing"]), now: DAY1 },
+      EMPTY_NOTIFY_STATE,
+    );
+    expect(d.kind).toBe("alert");
+    expect(d.body).toContain("CAPTURE/ratings.jsonl");
+  });
+
   test("an identical failure on the next cycle sends nothing", () => {
     const input = { cycleErrors: ["test-cache: spawnSync bun ETIMEDOUT"], doctor: HEALTHY, now: DAY1 };
     const first = decideNotification(input, EMPTY_NOTIFY_STATE);
@@ -118,6 +127,46 @@ describe("decideNotification", () => {
     const nextDay = decideNotification({ cycleErrors: ["test-cache: x"], doctor: HEALTHY, now: DAY2 }, first.state);
     expect(nextDay.kind).toBe("alert");
     expect(nextDay.title).toContain("still failing");
+  });
+});
+
+describe("stale capture hooks, through the real doctor", () => {
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "ag-notify-capture-")); });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  const SIGNALS = ["ratings.jsonl", "corrections.jsonl", "sentiment.jsonl", "skills.jsonl"];
+  const configFor = (signalDir: string) =>
+    ({
+      signalDir,
+      adapter: "local",
+      rubrics: [],
+      rules: { globalBudget: 25, projectBudget: 25, autoPromote: false },
+      daemon: { interval: "30m", weeklyDay: "sunday" },
+    }) as AgentGritConfig;
+
+  async function decideWith(staleDays: Record<string, number>) {
+    for (const f of SIGNALS) {
+      const p = join(dir, f);
+      writeFileSync(p, "{}\n");
+      const age = (staleDays[f] ?? 0) * 86_400_000;
+      const t = new Date(Date.now() - age);
+      utimesSync(p, t, t);
+    }
+    const report = await runDoctor(configFor(dir));
+    return decideNotification({ cycleErrors: [], doctor: report, now: new Date() }, EMPTY_NOTIFY_STATE);
+  }
+
+  test("a signal file untouched for 20 days alerts and names the file", async () => {
+    const d = await decideWith({ "ratings.jsonl": 20 });
+    expect(d.kind).toBe("alert");
+    expect(d.body).toContain("CAPTURE/ratings.jsonl");
+    expect(d.body).toContain("hook may not be firing");
+  });
+
+  test("fresh signal files raise no CAPTURE failure", async () => {
+    const d = await decideWith({});
+    expect(d.body ?? "").not.toContain("CAPTURE/");
   });
 });
 

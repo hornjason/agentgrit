@@ -59,7 +59,10 @@ function collectFailures(cycleErrors: string[], doctor: DoctorReport): Failure[]
   const failures: Failure[] = cycleErrors.map((e) => ({ key: `cycle:${e.split(":")[0].trim()}`, text: e }));
   for (const section of doctor.sections) {
     for (const check of section.checks) {
-      if (check.status !== "error") continue;
+      // A CAPTURE warning is a signal file going stale or missing: a capture
+      // hook has stopped firing. Elsewhere a warning is not worth a page.
+      const alerting = check.status === "error" || (section.name === "CAPTURE" && check.status === "warning");
+      if (!alerting) continue;
       failures.push({ key: `doctor:${section.name}/${check.name}`, text: `${section.name}/${check.name}: ${check.message}` });
     }
   }
