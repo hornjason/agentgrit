@@ -185,6 +185,21 @@ describe("score step (#323)", () => {
     expect(warnings.some((w) => w.includes("r-1"))).toBe(true);
   });
 
+  test("#328: with more than 50 ratings, the newest are graded, not the first 50 lines of the file", async () => {
+    const rows = Array.from({ length: 60 }, (_, i) => ({
+      id: `n-${i}`, type: "rating", timestamp: new Date(Date.UTC(2026, 10, 1, 0, i)).toISOString(),
+      session_id: `sess-${i}`, rating: "9", source: "thumbs",
+    }));
+    writeFileSync(join(signalDir, "ratings.jsonl"), rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+    // Only the newest five still have transcripts, as on a real install where old sessions are pruned.
+    for (const r of rows.slice(-5)) writeTranscript(r.session_id, r.timestamp, `q ${r.id}`, `a ${r.id}`);
+    const { judge, calls } = fakeJudge();
+
+    await runScoreStep(config({ provider: "vertex", model: "m", project: "p" }), { judge });
+
+    expect(calls.map((c) => c.trace.id).sort()).toEqual(["n-55", "n-56", "n-57", "n-58", "n-59"]);
+  });
+
   test("CONTROL — a key-based judge still grades", async () => {
     const { judge, calls } = fakeJudge();
     await runScoreStep(config({ provider: "gemini", model: "m", apiKey: "k" }), { judge });

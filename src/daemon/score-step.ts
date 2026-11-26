@@ -13,6 +13,9 @@ import { judgeTrace, judgeUsable, scoresToJsonl, type JudgeConfig, type Trace } 
 import { findTranscript, ratedExchange } from "../evaluate/rated-exchange";
 import { loadRubric } from "../evaluate/rubric";
 
+/** Ratings considered per nightly run, newest first by file order. */
+const RATINGS_PER_RUN = 50;
+
 export interface ScoreStepDeps {
   judge?: typeof judgeTrace;
 }
@@ -64,7 +67,8 @@ export async function runScoreStep(config: AgentGritConfig, deps: ScoreStepDeps 
 
   const scoresFile = resolveSignalFile(config.signalDir, "quality-scores.jsonl");
   const already = scoredTraceIds(scoresFile);
-  const signals = await readSignals(join(config.signalDir, "ratings.jsonl"), { limit: 50 });
+  // The newest ratings, not readSignals' { limit } — that is the FIRST lines of the file, the oldest (#328).
+  const signals = (await readSignals(join(config.signalDir, "ratings.jsonl"))).slice(-RATINGS_PER_RUN);
 
   const warnings: string[] = [];
   const roots = transcriptRoots(config);
