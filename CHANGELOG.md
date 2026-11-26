@@ -101,6 +101,10 @@ in a scratch edit: `test/graph/context-rule-text.test.ts` goes 8 pass / 0 fail â
   skipped it; and with `adapter: "local"` nothing ever wrote the scores. The step now lives in
   `src/daemon/score-step.ts`, resolves rubric names against `<base>/rubrics/` the way
   `agentgrit eval` does, and appends to `quality-scores.jsonl` once per trace id.
+- **The score step graded the oldest 50 ratings, not the newest (#328).** `readSignals({ limit: 50 })`
+  returns the first 50 lines of `ratings.jsonl`; on a real install those are months old and their
+  transcripts are gone, so the step graded nothing. It now takes the last 50. Found by a real
+  end-to-end run; with the fix the same run graded 50 rated replies and a second run added none.
 - **The daemon's judge graded a session id instead of the exchange (#324).** The score step passed
   `session_id` as the judge's input, and it skipped any rating without `response_preview` â€” which
   is every rating since 2026-10-02 (thumbs rows carry no reply text). `src/evaluate/rated-exchange.ts`
