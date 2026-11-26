@@ -19,6 +19,8 @@ Reads a trace (input + output pair), scores it against each dimension in a rubri
    - Lists each rubric dimension with its scoring criteria
    - Requests JSON output with per-dimension `score` (1-5) and `reasoning`
 
+   - In the daemon, the trace comes from the session transcript (#324): `rated-exchange.ts` finds `<hostDir>/projects/*/<session>.jsonl`, takes the last message the human typed before the rated reply as the input, and every assistant text in that turn up to the rating as the output (tail-trimmed to 3900 characters).
+
 2. **Call the provider** — `callInference()` sends the prompt to the configured LLM:
    - **Gemini**: `generativelanguage.googleapis.com` with `responseMimeType: "application/json"`
    - **Claude**: `api.anthropic.com/v1/messages` with `anthropic-version: 2023-06-01`

@@ -101,6 +101,13 @@ in a scratch edit: `test/graph/context-rule-text.test.ts` goes 8 pass / 0 fail �
   skipped it; and with `adapter: "local"` nothing ever wrote the scores. The step now lives in
   `src/daemon/score-step.ts`, resolves rubric names against `<base>/rubrics/` the way
   `agentgrit eval` does, and appends to `quality-scores.jsonl` once per trace id.
+- **The daemon's judge graded a session id instead of the exchange (#324).** The score step passed
+  `session_id` as the judge's input, and it skipped any rating without `response_preview` — which
+  is every rating since 2026-10-02 (thumbs rows carry no reply text). `src/evaluate/rated-exchange.ts`
+  now reads both sides from the session transcript under `<hostDir>/projects/*/` (or
+  `transcriptDir`): the input is the last message the human typed, the output is every assistant
+  text in that turn up to the rating, trimmed to its last 3900 characters. On the owner's install
+  it recovers 97 of 107 thumbs; the other 10 transcripts no longer exist.
 
 ## [0.1.8] — 2026-08-07
 

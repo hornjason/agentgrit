@@ -1,13 +1,16 @@
 /**
  * The daemon's score step (#323): grade recent rated replies with the
  * configured judge and append the scores to quality-scores.jsonl, once per trace.
+ * The judge sees what the human asked and what the assistant replied, both read
+ * from the session transcript (#324) — rating rows carry neither.
  */
 import { appendFileSync, existsSync, readFileSync } from "fs";
 import { isAbsolute, join } from "path";
 import type { AgentGritConfig, RubricConfig, Score } from "../adapters/types";
 import { readSignals } from "../adapters/jsonl";
-import { getBaseDir, resolveSignalFile } from "../adapters/paths";
-import { judgeTrace, judgeUsable, scoresToJsonl, type JudgeConfig } from "../evaluate/judge";
+import { expandPath, getBaseDir, hostDir, resolveSignalFile } from "../adapters/paths";
+import { judgeTrace, judgeUsable, scoresToJsonl, type JudgeConfig, type Trace } from "../evaluate/judge";
+import { findTranscript, ratedExchange } from "../evaluate/rated-exchange";
 import { loadRubric } from "../evaluate/rubric";
 
 export interface ScoreStepDeps {
@@ -30,6 +33,12 @@ function loadConfiguredRubric(ref: string): { rubric: RubricConfig } | { error: 
   const file = ref.endsWith(".json") ? ref : `${ref}.json`;
   const path = isAbsolute(file) ? file : join(getBaseDir(), "rubrics", file);
   try { return { rubric: loadRubric(path) }; } catch (err) { return { error: `rubric ${ref} not loaded: ${err instanceof Error ? err.message : String(err)}` }; }
+}
+
+function transcriptRoots(config: AgentGritConfig): string[] {
+  const roots = [join(hostDir(), "projects")];
+  if (config.transcriptDir) roots.unshift(expandPath(config.transcriptDir));
+  return roots;
 }
 
 function scoredTraceIds(file: string): Set<string> {
@@ -57,22 +66,36 @@ export async function runScoreStep(config: AgentGritConfig, deps: ScoreStepDeps 
   const already = scoredTraceIds(scoresFile);
   const signals = await readSignals(join(config.signalDir, "ratings.jsonl"), { limit: 50 });
 
-  const graded: Score[] = [];
   const warnings: string[] = [];
+  const roots = transcriptRoots(config);
+  const traces: Trace[] = [];
+  let considered = 0;
+  for (const signal of signals) {
+    const row = signal as { id?: string; session_id?: string; timestamp?: string };
+    if (!row.session_id || !row.timestamp) continue;
+    const id = row.id ?? `${row.session_id}@${row.timestamp}`;
+    if (already.has(id)) continue;
+    considered++;
+    const path = findTranscript(row.session_id, roots);
+    const exchange = path ? await ratedExchange(path, row.timestamp) : null;
+    if (exchange) traces.push({ id, input: exchange.input, output: exchange.output });
+  }
+  if (considered > 0 && traces.length === 0) {
+    warnings.push(`no transcript exchange found for any of ${considered} ratings (looked under ${roots.join(", ")})`);
+  }
+
+  const graded: Score[] = [];
   let attempted = 0;
   let succeeded = 0;
   for (const ref of config.rubrics) {
+    if (traces.length === 0) break;
     const loaded = loadConfiguredRubric(ref);
     if ("error" in loaded) { warnings.push(loaded.error); continue; }
     const { rubric } = loaded;
-    for (const signal of signals) {
-      if (!("response_preview" in signal) || !signal.response_preview) continue;
-      const row = signal as { id?: string; session_id: string; timestamp: string; response_preview: string };
-      const id = row.id ?? `${row.session_id}@${row.timestamp}`;
-      if (already.has(id)) continue;
+    for (const trace of traces) {
       attempted++;
-      const scores = await judge({ id, input: row.session_id, output: row.response_preview }, rubric, judgeConfig);
-      if (scores.length > 0) { already.add(id); succeeded++; }
+      const scores = await judge(trace, rubric, judgeConfig);
+      if (scores.length > 0) succeeded++;
       graded.push(...scores);
     }
   }
