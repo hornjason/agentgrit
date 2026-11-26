@@ -288,9 +288,13 @@ export interface AgentGritConfig {
     baseUrl: string;
   };
   judge?: {
-    provider: "gemini" | "claude" | "openai";
+    provider: "gemini" | "claude" | "openai" | "vertex";
     model: string;
     apiKey?: string;
+    /** vertex only: Google Cloud project hosting the model; the token comes from the gcloud login (#323). */
+    project?: string;
+    /** vertex only: model location, "global" by default. */
+    location?: string;
   };
   rubrics: string[];
   rules: {

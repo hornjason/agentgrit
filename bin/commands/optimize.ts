@@ -266,6 +266,8 @@ function getJudgeConfig(base: string): JudgeConfig | null {
       provider: config.judge.provider,
       model: config.judge.model,
       apiKey: config.judge.apiKey ?? process.env.OPENAI_API_KEY ?? process.env.GEMINI_API_KEY ?? process.env.ANTHROPIC_API_KEY,
+      project: config.judge.project,
+      location: config.judge.location,
     };
   }
   if (process.env.OPENAI_API_KEY) return { provider: "openai", model: "gpt-4o", apiKey: process.env.OPENAI_API_KEY };

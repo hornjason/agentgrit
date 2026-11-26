@@ -260,43 +260,10 @@ export async function runDaemonCycle(
     errors: [],
   };
 
-  // 1. Score — evaluate new traces against rubric
+  // 1. Score — grade recent rated replies and append to quality-scores.jsonl (#323)
   try {
-    const { judgeTrace } = await import("../evaluate/judge");
-    const { loadRubric } = await import("../evaluate/rubric");
-    const { readSignals } = await import("../adapters/jsonl");
-    const { join } = await import("path");
-
-    if (config.judge?.apiKey) {
-      for (const rubricName of config.rubrics) {
-        let rubric;
-        try {
-          rubric = loadRubric(rubricName);
-        } catch {
-          continue;
-        }
-
-        const signals = await readSignals(
-          join(config.signalDir, "ratings.jsonl"),
-          { limit: 50 },
-        );
-
-        for (const signal of signals) {
-          if (!("response_preview" in signal) || !signal.response_preview) continue;
-
-          const scores = await judgeTrace(
-            { input: signal.session_id, output: signal.response_preview },
-            rubric,
-            {
-              provider: config.judge.provider,
-              model: config.judge.model,
-              apiKey: config.judge.apiKey,
-            },
-          );
-          result.scores.push(...scores);
-        }
-      }
-    }
+    const { runScoreStep } = await import("./score-step");
+    result.scores.push(...(await runScoreStep(config)));
   } catch (err) {
     result.errors.push(`score: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -783,11 +750,8 @@ export async function runDaemonCycle(
             };
 
             const optimizeStateDir = join(config.signalDir, "..", "state", "optimize");
-            const judgeConfig = config.judge ? {
-              provider: config.judge.provider,
-              model: config.judge.model,
-              apiKey: config.judge.apiKey,
-            } : undefined;
+            const { judgeConfigFrom } = await import("./score-step");
+            const judgeConfig = judgeConfigFrom(config);
 
             if (judgeConfig) {
               try {

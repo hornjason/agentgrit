@@ -1,4 +1,5 @@
 import { existsSync, statSync, readdirSync, readFileSync } from "fs";
+import { judgeUsable } from "../evaluate/judge";
 import { join, resolve } from "path";
 import { resolveSignalFile, resolveSignalDir, resolveMemoryDir, getBaseDir } from "../adapters/paths";
 import type { AgentGritConfig } from "../adapters/types";
@@ -128,7 +129,7 @@ function checkCapture(config: AgentGritConfig): DoctorSection {
 export function checkScoring(config: AgentGritConfig): DoctorSection {
   const checks: CheckResult[] = [];
 
-  const judgeConfigured = Boolean(config.judge?.apiKey);
+  const judgeConfigured = Boolean(config.judge && judgeUsable(config.judge));
 
   if (!judgeConfigured) {
     checks.push({

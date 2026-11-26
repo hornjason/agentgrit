@@ -101,8 +101,8 @@ Two independent scoring channels:
 **Channel 1: Human signals (always on, zero cost)**
 Rating composites, corrections, and sentiment flow in automatically from hooks.
 
-**Channel 2: LLM judge (opt-in, requires API key)**
-The judge reads an LLM trace (input + output pair) and scores it against each dimension in your rubric. It builds a structured prompt with the trace content and rubric criteria, sends it to the configured provider (Gemini, Claude, or OpenAI), and parses the JSON response into per-dimension scores with reasoning.
+**Channel 2: LLM judge (opt-in: an API key, or a Vertex AI project reached through the gcloud login)**
+The judge reads an LLM trace (input + output pair) and scores it against each dimension in your rubric. It builds a structured prompt with the trace content and rubric criteria, sends it to the configured provider (Gemini, Claude, OpenAI, or Gemini on Vertex AI), and parses the JSON response into per-dimension scores with reasoning.
 
 The judge supports retry with exponential backoff on rate limits (429), and gracefully returns empty results on API errors rather than crashing.
 
@@ -260,7 +260,7 @@ skipped, so re-running over the same `ratings.jsonl` adds nothing.
 
 **Health checks** (`doctor.ts`): Inspects five sections:
 - **CAPTURE** — checks each signal file exists and was modified within 14 days
-- **SCORING** — verifies judge API key is configured and scores file is recent
+- **SCORING** — verifies a usable judge is configured (an API key, or a project for `vertex`) and the scores file is recent
 - **GRAPH** — checks knowledge-graph.json exists and was rebuilt within 7 days
 - **RULES** — counts rules against budget caps
 - **SIGNALS** — checks JSONL file sizes (warning at 5MB, error at 20MB)
@@ -575,9 +575,11 @@ writer. It is scoped to one document's prefix deliberately — a blanket sweep o
 | `langfuse.publicKey` | string | — | Langfuse public key (Full Auto only) |
 | `langfuse.secretKey` | string | — | Langfuse secret key (Full Auto only) |
 | `langfuse.baseUrl` | string | `https://us.cloud.langfuse.com` | Langfuse API base URL |
-| `judge.provider` | `"gemini"` \| `"claude"` \| `"openai"` | `"gemini"` | LLM judge provider |
+| `judge.provider` | `"gemini"` \| `"claude"` \| `"openai"` \| `"vertex"` | `"gemini"` | LLM judge provider |
 | `judge.model` | string | `"gemini-2.5-flash"` | Judge model ID |
-| `judge.apiKey` | string | — | Judge API key (env var recommended) |
+| `judge.apiKey` | string | — | Judge API key (env var recommended). Not used by `vertex` |
+| `judge.project` | string | — | `vertex` only: Google Cloud project hosting the model. The token comes from the gcloud login |
+| `judge.location` | string | `"global"` | `vertex` only: model location |
 | `rubrics` | string[] | `["starter.json"]` | Rubric filenames to load |
 | `rules.globalBudget` | number | `25` | Max rules in global CLAUDE.md |
 | `rules.projectBudget` | number | `25` | Max rules per project CLAUDE.md |

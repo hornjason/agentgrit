@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
-import { judgeBatch, judgeTrace, jsonlToScores, scoresToJsonl } from "../../src/evaluate/judge";
+import { judgeBatch, judgeTrace, judgeUsable, jsonlToScores, scoresToJsonl } from "../../src/evaluate/judge";
 import type { RubricConfig, Score } from "../../src/adapters/types";
 
 const testRubric: RubricConfig = { version: "1.0", schemaVersion: 1, dimensions: [{ name: "accuracy", description: "correct?", weight: 0.5, rubric: "Score 1-5" }, { name: "conciseness", description: "minimal?", weight: 0.5, rubric: "Score 1-5" }], judgeModel: "test" };
@@ -23,4 +23,74 @@ describe("JSONL", () => {
   test("round-trip", () => { const s: Score[] = [{ traceId: "t1", dimension: "a", value: 4, rubric: "r", judgeModel: "m", timestamp: "t", schemaVersion: 1 }]; expect(jsonlToScores(scoresToJsonl(s))[0].traceId).toBe("t1"); });
   test("empty", () => { expect(scoresToJsonl([])).toBe(""); expect(jsonlToScores("")).toEqual([]); });
   test("malformed", () => { expect(jsonlToScores('{"traceId":"t1","dimension":"a","value":4,"rubric":"r","judgeModel":"m","timestamp":"t","schemaVersion":1}\nnot json\n')).toHaveLength(1); });
+});
+
+// #323 — Vertex AI judge authenticated by the machine's gcloud login, no API key.
+describe("vertex judge (#323)", () => {
+  const vertexOk = () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ candidates: [{ content: { parts: [{ text: JSON.stringify({ accuracy: { score: 4, reasoning: "r" }, conciseness: { score: 2, reasoning: "v" } }) }] } }] }) } as Response);
+
+  test("grades with no apiKey, using the token source and the project's global endpoint", async () => {
+    const f = globalThis.fetch; const calls: Array<{ url: string; init: RequestInit }> = [];
+    globalThis.fetch = mock((url: string, init: RequestInit) => { calls.push({ url, init }); return vertexOk(); }) as unknown as typeof fetch;
+    try {
+      const s = await judgeTrace({ input: "a", output: "b", id: "v1" }, testRubric, { provider: "vertex", model: "gemini-x", project: "proj-1", location: "global", getToken: () => "tok-123" });
+      expect(s.find((x) => x.dimension === "accuracy")?.value).toBe(4);
+      expect(s.find((x) => x.dimension === "conciseness")?.value).toBe(2);
+      expect(calls).toHaveLength(1);
+      expect(calls[0].url).toBe("https://aiplatform.googleapis.com/v1/projects/proj-1/locations/global/publishers/google/models/gemini-x:generateContent");
+      expect((calls[0].init.headers as Record<string, string>).Authorization).toBe("Bearer tok-123");
+      expect(calls[0].url).not.toContain("key=");
+    } finally { globalThis.fetch = f; }
+  });
+
+  test("a regional location uses that region's host", async () => {
+    const f = globalThis.fetch; let seen = "";
+    globalThis.fetch = mock((url: string) => { seen = url; return vertexOk(); }) as unknown as typeof fetch;
+    try {
+      await judgeTrace({ input: "a", output: "b" }, testRubric, { provider: "vertex", model: "m", project: "p", location: "us-east1", getToken: () => "t" });
+      expect(seen).toBe("https://us-east1-aiplatform.googleapis.com/v1/projects/p/locations/us-east1/publishers/google/models/m:generateContent");
+    } finally { globalThis.fetch = f; }
+  });
+
+  test("location defaults to global", async () => {
+    const f = globalThis.fetch; let seen = "";
+    globalThis.fetch = mock((url: string) => { seen = url; return vertexOk(); }) as unknown as typeof fetch;
+    try {
+      await judgeTrace({ input: "a", output: "b" }, testRubric, { provider: "vertex", model: "m", project: "p", getToken: () => "t" });
+      expect(seen).toStartWith("https://aiplatform.googleapis.com/v1/projects/p/locations/global/");
+    } finally { globalThis.fetch = f; }
+  });
+
+  test("no token means no request and no scores", async () => {
+    const f = globalThis.fetch; const fm = mock(vertexOk); globalThis.fetch = fm as unknown as typeof fetch;
+    try {
+      expect(await judgeTrace({ input: "a", output: "b" }, testRubric, { provider: "vertex", model: "m", project: "p", getToken: () => null })).toEqual([]);
+      expect(fm).toHaveBeenCalledTimes(0);
+    } finally { globalThis.fetch = f; }
+  });
+
+  test("no project means no request and no scores", async () => {
+    const f = globalThis.fetch; const fm = mock(vertexOk); globalThis.fetch = fm as unknown as typeof fetch;
+    try {
+      expect(await judgeTrace({ input: "a", output: "b" }, testRubric, { provider: "vertex", model: "m", getToken: () => "t" })).toEqual([]);
+      expect(fm).toHaveBeenCalledTimes(0);
+    } finally { globalThis.fetch = f; }
+  });
+
+  test("judgeUsable: vertex needs a project, key providers need a key", () => {
+    expect(judgeUsable({ provider: "vertex", model: "m", project: "p" })).toBe(true);
+    expect(judgeUsable({ provider: "vertex", model: "m" })).toBe(false);
+    expect(judgeUsable({ provider: "vertex", model: "m", project: "" })).toBe(false);
+    expect(judgeUsable({ provider: "gemini", model: "m", apiKey: "k" })).toBe(true);
+    expect(judgeUsable({ provider: "gemini", model: "m" })).toBe(false);
+    expect(judgeUsable({ provider: "openai", model: "m", project: "p" })).toBe(false);
+  });
+
+  test("judgeBatch grades with a vertex judge and no apiKey", async () => {
+    const f = globalThis.fetch; globalThis.fetch = mock(vertexOk) as unknown as typeof fetch;
+    try {
+      const { evaluated, failed } = await judgeBatch([{ input: "a", output: "b", id: "t1" }], testRubric, { provider: "vertex", model: "m", project: "p", getToken: () => "t" }, { delayMs: 0 });
+      expect(evaluated).toBe(1); expect(failed).toBe(0);
+    } finally { globalThis.fetch = f; }
+  });
 });

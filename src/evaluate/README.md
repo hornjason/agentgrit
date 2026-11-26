@@ -1,6 +1,6 @@
 # evaluate/
 
-Quality scoring module. Two independent channels assess output quality: human signals (automatic, zero cost) and LLM-as-judge (opt-in, rubric-driven). The judge supports Gemini, Claude, and OpenAI as scoring providers.
+Quality scoring module. Two independent channels assess output quality: human signals (automatic, zero cost) and LLM-as-judge (opt-in, rubric-driven). The judge supports Gemini, Claude, OpenAI, and Gemini on Vertex AI as scoring providers.
 
 ## Two Scoring Channels
 
@@ -23,6 +23,7 @@ Reads a trace (input + output pair), scores it against each dimension in a rubri
    - **Gemini**: `generativelanguage.googleapis.com` with `responseMimeType: "application/json"`
    - **Claude**: `api.anthropic.com/v1/messages` with `anthropic-version: 2023-06-01`
    - **OpenAI**: `api.openai.com/v1/chat/completions` with `response_format: { type: "json_object" }`
+   - **Vertex** (#323): `aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent` (regional host when `location` is not `global`). No API key: the bearer token comes from `gcloud auth application-default print-access-token`, cached for 50 minutes. `maxOutputTokens` is 8192 because Gemini 2.5+ models spend output budget on thinking.
    - Temperature defaults to 0.1 for consistency
    - Retries on 429 (rate limit) with exponential backoff: `min(30 * (attempt + 1), 120)` seconds
    - Max retries: 2 (configurable via `maxRetries`)
