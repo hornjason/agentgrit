@@ -50,7 +50,7 @@ const SECRET_PATTERNS: RegExp[] = [
   /\b((?:api[_-]?key|secret|password|passwd|token|client[_-]?secret)\s*[:=]\s*)["']?[^\s"']{6,}/gi,
 ];
 
-export function redactSecrets(text: string): string {
+function redactSecrets(text: string): string {
   let out = text;
   for (const re of SECRET_PATTERNS) {
     // A capture group, when the pattern has one, is the label to keep ("Bearer", "password=").
