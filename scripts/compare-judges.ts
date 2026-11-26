@@ -12,12 +12,12 @@
  *   bun scripts/compare-judges.ts --limit 20 --repeat 10     # pilot, all models
  *   bun scripts/compare-judges.ts --models a,b --repeat 30   # full set, chosen models
  *
- * Options: --project (default jhorn-pai) --location (default global)
+ * Options: --project (default: config judge.project, then $VERTEX_PROJECT_ID) --location (default global)
  *          --concurrency per model (default 3) --seed (default 1) --out FILE
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
-import { getBaseDir, hostDir, resolveSignalDir } from "../src/adapters/paths";
+import { getBaseDir, hostDir, loadConfig, resolveSignalDir } from "../src/adapters/paths";
 import type { RubricConfig, Score } from "../src/adapters/types";
 import { judgeTrace, type JudgeConfig, type Trace } from "../src/evaluate/judge";
 import { findTranscript, ratedExchange } from "../src/evaluate/rated-exchange";
@@ -134,7 +134,9 @@ async function main(): Promise<void> {
   const repeatN = Number(arg("repeat") ?? 0);
   const seed = Number(arg("seed") ?? 1);
   const conc = Number(arg("concurrency") ?? 3);
-  const base = { provider: "vertex" as const, project: arg("project") ?? "jhorn-pai", location: arg("location") ?? "global", maxRetries: 2 };
+  const project = arg("project") ?? loadConfig().judge?.project ?? process.env.VERTEX_PROJECT_ID;
+  if (!project) { console.error("No Vertex project: pass --project, set judge.project in config, or set VERTEX_PROJECT_ID."); process.exit(2); }
+  const base = { provider: "vertex" as const, project, location: arg("location") ?? "global", maxRetries: 2 };
   const rubric = loadRubric(join(getBaseDir(), "rubrics", "starter.json"));
 
   const { items: all, thumbs, missing } = await loadItems();
