@@ -173,6 +173,18 @@ describe("score step (#323)", () => {
     expect(warnings[0]).toContain("transcript");
   });
 
+  test("#324: one unreadable transcript is reported and does not stop the others being graded", async () => {
+    rmSync(join(projectsDir(), "s-1.jsonl"), { force: true });
+    mkdirSync(join(projectsDir(), "s-1.jsonl"), { recursive: true }); // a directory where a transcript should be
+    const { judge, calls } = fakeJudge();
+
+    const { scores, warnings } = await runScoreStep(config({ provider: "vertex", model: "m", project: "p" }), { judge });
+
+    expect(calls.map((c) => c.trace.id)).toEqual(["r-2"]);
+    expect(scores).toHaveLength(1);
+    expect(warnings.some((w) => w.includes("r-1"))).toBe(true);
+  });
+
   test("CONTROL — a key-based judge still grades", async () => {
     const { judge, calls } = fakeJudge();
     await runScoreStep(config({ provider: "gemini", model: "m", apiKey: "k" }), { judge });

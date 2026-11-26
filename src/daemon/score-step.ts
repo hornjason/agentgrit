@@ -76,9 +76,14 @@ export async function runScoreStep(config: AgentGritConfig, deps: ScoreStepDeps 
     const id = row.id ?? `${row.session_id}@${row.timestamp}`;
     if (already.has(id)) continue;
     considered++;
-    const path = findTranscript(row.session_id, roots);
-    const exchange = path ? await ratedExchange(path, row.timestamp) : null;
-    if (exchange) traces.push({ id, input: exchange.input, output: exchange.output });
+    try {
+      const path = findTranscript(row.session_id, roots);
+      const exchange = path ? await ratedExchange(path, row.timestamp) : null;
+      if (exchange) traces.push({ id, input: exchange.input, output: exchange.output });
+    } catch (err) {
+      // One unreadable transcript (a directory, no permission) must not stop the rest being graded.
+      warnings.push(`rating ${id}: transcript unreadable: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
   if (considered > 0 && traces.length === 0) {
     warnings.push(`no transcript exchange found for any of ${considered} ratings (looked under ${roots.join(", ")})`);

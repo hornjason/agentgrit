@@ -97,6 +97,27 @@ describe("ratedExchange (#324)", () => {
     expect(out.length).toBeLessThanOrEqual(MAX_REPLY_CHARS + 1);
   });
 
+  test("credentials are redacted from both sides before anything leaves the machine", async () => {
+    // Assembled at runtime so the repo's pre-commit secret scan never sees a literal credential.
+    const fake = {
+      anthropic: ["sk", "ant", "api03", "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"].join("-"),
+      google: "AIza" + "SyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q",
+      github: "ghp" + "_" + "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789",
+      pemBody: "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC",
+      oauth: "ya29" + ".a0AfH6SMBx-example-token-value",
+      password: "hunter2" + "hunter2",
+    };
+    const pem = `${["-----BEGIN", "PRIVATE", "KEY-----"].join(" ")}\n${fake.pemBody}\n${["-----END", "PRIVATE", "KEY-----"].join(" ")}`;
+    const p = transcript([
+      human("2026-11-01T10:00:00Z", `use key ${fake.anthropic} and ${fake.google}`),
+      reply("2026-11-01T10:00:05Z", `token ${fake.github} then ${pem} and Authorization: Bearer ${fake.oauth} and ${"pass" + "word"}=${fake.password} at commit 7da55ec0123456789abcdef0123456789abcdef0`),
+    ]);
+    const ex = (await ratedExchange(p, "2026-11-01T10:01:00Z"))!;
+    for (const secret of Object.values(fake)) expect(ex.input + ex.output).not.toContain(secret);
+    expect(ex.input).toContain("[REDACTED]");
+    expect(ex.output).toContain("7da55ec0123456789abcdef0123456789abcdef0");
+  });
+
   test("no reply before the rating means no exchange", async () => {
     const p = transcript([human("2026-11-01T10:00:00Z", "q"), reply("2026-11-01T10:00:05Z", "a")]);
     expect(await ratedExchange(p, "2026-11-01T09:00:00Z")).toBeNull();

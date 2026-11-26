@@ -32,6 +32,33 @@ const SESSION_ID = /^[\w-]+$/;
 export const MAX_REPLY_CHARS = 3900;
 const SYSTEM_REMINDER = /<system-reminder>[\s\S]*?<\/system-reminder>/g;
 
+/**
+ * Credential shapes that show up in pasted messages and echoed replies. The
+ * exchange is sent to an external judge, so these never leave the machine.
+ * Deliberately no generic long-base64 rule: it would also eat 40-char git SHAs.
+ */
+const SECRET_PATTERNS: RegExp[] = [
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+  /\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}/g,               // Anthropic / OpenAI
+  /\bAIza[0-9A-Za-z_-]{30,}/g,                        // Google API key
+  /\bya29\.[0-9A-Za-z._-]{10,}/g,                     // Google OAuth access token
+  /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{30,}|\bgithub_pat_[A-Za-z0-9_]{30,}/g,
+  /\bxox[abprs]-[A-Za-z0-9-]{10,}/g,                  // Slack
+  /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g,                    // AWS access key id
+  /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, // JWT
+  /\b(Bearer)\s+[A-Za-z0-9._~+\/-]{16,}=*/gi,
+  /\b((?:api[_-]?key|secret|password|passwd|token|client[_-]?secret)\s*[:=]\s*)["']?[^\s"']{6,}/gi,
+];
+
+export function redactSecrets(text: string): string {
+  let out = text;
+  for (const re of SECRET_PATTERNS) {
+    // A capture group, when the pattern has one, is the label to keep ("Bearer", "password=").
+    out = out.replace(re, (_m, keep?: unknown) => (typeof keep === "string" ? `${keep}${/[\s:=]$/.test(keep) ? "" : " "}[REDACTED]` : "[REDACTED]"));
+  }
+  return out;
+}
+
 /** `<root>/<id>.jsonl` or `<root>/<project>/<id>.jsonl` under the first root that has it. */
 export function findTranscript(sessionId: string, roots: string[]): string | null {
   if (!SESSION_ID.test(sessionId)) return null;
@@ -87,13 +114,13 @@ export async function ratedExchange(transcriptPath: string, ratedAt: string): Pr
 
       if (entry.type === "user") {
         if (entry.isCompactSummary || entry.isMeta) continue;
-        const text = textOf(entry).replace(SYSTEM_REMINDER, "").trim();
+        const text = redactSecrets(textOf(entry).replace(SYSTEM_REMINDER, "")).trim();
         if (!text) continue;
         lastUserText = text;
         if (isHuman(entry)) lastHuman = text;
         turn = [];
       } else {
-        const text = textOf(entry).trim();
+        const text = redactSecrets(textOf(entry)).trim();
         if (!text) continue;
         turn.push(text);
         const whole = turn.join("\n\n");

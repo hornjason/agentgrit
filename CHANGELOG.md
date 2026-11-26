@@ -107,7 +107,10 @@ in a scratch edit: `test/graph/context-rule-text.test.ts` goes 8 pass / 0 fail â
   now reads both sides from the session transcript under `<hostDir>/projects/*/` (or
   `transcriptDir`): the input is the last message the human typed, the output is every assistant
   text in that turn up to the rating, trimmed to its last 3900 characters. On the owner's install
-  it recovers 97 of 107 thumbs; the other 10 transcripts no longer exist.
+  it recovers 97 of 107 thumbs; the other 10 transcripts no longer exist. Credential shapes
+  (provider keys, OAuth/bearer tokens, private-key blocks, `password=`-style pairs) are redacted from
+  both sides before the exchange reaches the judge, and one unreadable transcript is reported as a
+  warning instead of aborting the step.
 
 ## [0.1.8] â€” 2026-08-07
 
