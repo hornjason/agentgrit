@@ -1,0 +1,129 @@
+---
+doc-type: research
+status: active
+governs: "Which model the daemon's judge uses (config judge.model); scripts/compare-judges.ts"
+updated: 2026-11-26
+---
+
+# Choosing the nightly judge model (#327)
+
+## Question
+
+Which Gemini model, reachable on the owner's Vertex project with the gcloud
+login (#323), grades rated replies the way the owner rates them?
+
+Model names do not answer it: most of the candidates postdate any prior
+knowledge here, and Google's own descriptions only restate the names.
+
+## Method
+
+`scripts/compare-judges.ts`, re-runnable whenever new models appear.
+
+- **Answer key.** Thumbs rows in `ratings.jsonl` (rating 9 = up, 2 = down)
+  whose transcript still exists. Each is turned into the exchange the daemon
+  would grade, by the same code (`ratedExchange`, #324): the last message the
+  owner typed, and the assistant text of that turn up to the thumb, redacted.
+- **Grading.** Each model grades each exchange through the production path
+  (`judgeTrace`, provider `vertex`, global endpoint, project `jhorn-pai`),
+  with the starter rubric (task-completion 0.3, accuracy 0.3, conciseness
+  0.2, safety 0.2), blind to the thumb. The score is the weighted mean of the
+  dimensions returned.
+- **Agreement.** AUC of that score against up/down: the chance a random
+  thumbs-up reply outscores a random thumbs-down one (ties count half;
+  0.5 = no signal). 95% interval by stratified bootstrap (2000 rounds).
+- **Consistency.** A subset is graded twice; reported as mean absolute
+  difference and the share of identical scores.
+- **Reliability and speed.** Exchanges a model failed to grade (no
+  parseable scores), and mean latency per call.
+- **Control.** Reply length as a predictor, taking whichever direction scores
+  better. A judge that cannot beat it is not reading the content.
+
+Not measured: price. Token use is estimated for the prompt side only
+(characters / 4); thinking and output tokens are not reported by the
+production path.
+
+## Results
+
+### Pilot — 14 models, 20 exchanges (14 up, 6 down), 10 graded twice
+
+`bun scripts/compare-judges.ts --limit 20 --repeat 10 --concurrency 3`, seed 1, 2026-11-26.
+Control (reply length): AUC 0.536.
+
+```
+model                    AUC    95% CI          failed  repeat |Δ|  repeat same  mean ms
+gemini-2.5-flash         0.827  [0.613, 0.964]     0/20     0.44      30%        7689
+gemini-3.1-pro-preview   0.631  [0.357, 0.869]     0/20     0.12      60%       11980
+gemini-2.5-pro           0.595  [0.345, 0.833]     0/20     0.44      40%       14821
+gemini-3-flash-preview   0.595  [0.333, 0.839]     0/20     0.45      20%        8496
+gemini-3.1-flash-lite    0.583  [0.286, 0.857]     0/20     0.24      40%        1389
+gemini-3.8-flash         0.542  [0.280, 0.786]     0/20     0.15      50%        5844
+gemini-3.7-flash         0.530  [0.226, 0.810]     0/20     0.11      70%        4846
+gemini-4-hydrogen        0.524  [0.190, 0.827]     0/20     0.18      30%        6458
+gemini-2.5-flash-lite    0.500  [0.220, 0.780]     0/20     0.12      80%        1211
+gemini-3.5-flash         0.476  [0.196, 0.756]     0/20     0.06      70%        5341
+gemini-4-carbon          0.470  [0.167, 0.786]     0/20     0.15      60%       43259
+gemini-4-neon            0.417  [0.083, 0.750]     0/20     0.15      50%       13075
+gemini-4-argon           0.399  [0.101, 0.714]     0/20     0.30      30%        9391
+gemini-3.5-flash-lite    0.375  [0.107, 0.679]     0/20     0.12      60%        1223
+```
+
+Every model parsed every exchange. Only gemini-2.5-flash has an interval
+clear of 0.5. With 6 thumbs-down and 14 models, one model clearing 0.5 can
+be luck, so the top five went to the full set, and agreement is also
+reported on the 77 exchanges the pilot never saw.
+
+### Full set — top five, 97 exchanges (69 up, 28 down), 30 graded twice
+
+`bun scripts/compare-judges.ts --models gemini-2.5-flash,gemini-3.1-pro-preview,gemini-2.5-pro,gemini-3-flash-preview,gemini-3.1-flash-lite --repeat 30 --concurrency 4`, seed 1.
+Control (reply length): AUC 0.504.
+
+```
+model                    AUC    95% CI          failed  repeat |Δ|  repeat same  mean ms
+gemini-3.1-pro-preview   0.499  [0.361, 0.641]     3/97     0.23      53%       12143
+gemini-2.5-flash         0.488  [0.362, 0.611]     0/97     0.51      33%        7208
+gemini-3-flash-preview   0.459  [0.326, 0.595]     0/97     0.30      30%        7782
+gemini-3.1-flash-lite    0.448  [0.322, 0.576]     0/97     0.08      77%        1521
+gemini-2.5-pro           0.432  [0.312, 0.558]     3/97     0.30      53%       15335
+```
+
+Split by whether the pilot saw the exchange, with the spread of scores:
+
+```
+model                    held-out AUC (77: 55 up, 22 down)  pilot-20 AUC  mean  sd    up-mean  down-mean
+gemini-3.1-pro-preview   0.468                              0.607         3.30  1.37  3.33     3.24
+gemini-2.5-flash         0.490                              0.494         3.41  1.19  3.39     3.47
+gemini-3-flash-preview   0.412                              0.649         3.79  1.24  3.78     3.83
+gemini-3.1-flash-lite    0.420                              0.554         3.81  1.19  3.77     3.90
+gemini-2.5-pro           0.396                              0.583         3.43  1.30  3.34     3.64
+```
+
+### Checks on the result
+
+- **Not a ceiling.** Scores spread (sd 1.2–1.4), so the judges do tell replies
+  apart, just not the way the owner does. Thumbs-down replies average the
+  same or slightly higher than thumbs-up ones.
+- **The pilot winner was noise.** gemini-2.5-flash scored 0.827 on the 20 pilot
+  exchanges and 0.494 when it graded the same 20 again in the full run. It
+  also has the least stable repeat grades (mean |Δ| 0.51).
+- **The exchange is the one that was rated.** From the matched reply to the
+  thumb: median 87 s, 75th percentile 262 s, and 95 of 97 within 30 minutes.
+
+## Conclusion
+
+No candidate grades the way the owner rates under the starter rubric. Every
+model's interval contains 0.5, and none beats the reply-length control.
+**The judge is left off** (`judge` is unset in the owner's config). Low daemon
+scores (≤ 2) trigger prompt optimization, so grades that do not track the
+owner's judgment would steer it at random.
+
+What would change the answer, in order of cost:
+
+1. A rubric aimed at what the owner's thumbs-down actually punish, instead of
+   generic completion, accuracy, concision and safety. The judge sees only the
+   exchange, so it cannot check claims against the owner's systems, which is
+   where many corrections come from. Re-run this script; enable a model only
+   if its held-out interval clears 0.5 and it beats the control.
+2. More thumbs-down. With 28, the intervals above are about ±0.14 wide.
+
+Re-run: `bun scripts/compare-judges.ts --dry-run`, then the two commands above.
+Per-item results land in `~/.agentgrit/state/judge-compare/`.
