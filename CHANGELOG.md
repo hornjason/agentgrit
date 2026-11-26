@@ -10,6 +10,10 @@ updated: 2026-08-07
 ## [Unreleased]
 
 ### Added
+- **Vertex AI judge with no API key (#323)** — `judge.provider: "vertex"` with `judge.project`
+  (and optional `judge.location`, default `global`) grades through Vertex AI using the machine's
+  gcloud login. `judgeUsable()` replaces every `apiKey` check: a vertex judge needs a project, the
+  others need a key. `doctor` reports `Judge configured: vertex/<model>`.
 - **Reflection-driven optimization without an LLM (#250)** — `algorithm-reflections.jsonl` used to
   be written only by PAI's Algorithm LEARN phase, so every consumer of it — skill-synthesizer,
   skill-forge, hill-climb, eval — was dead for a standalone install. Two halves close that:
@@ -89,6 +93,14 @@ updated: 2026-08-07
 
 The regression tests were proven by reverting `resolveRuleText` to `readRuleTextFromDocument(id, index) ?? id`
 in a scratch edit: `test/graph/context-rule-text.test.ts` goes 8 pass / 0 fail → 4 pass / 4 fail.
+
+### Fixed
+- **The daemon's score step could not produce a score (#323).** Three independent faults, each
+  enough on its own: it only ran when `judge.apiKey` was set; it loaded the rubric by bare name
+  relative to the process cwd (`/` under launchd), so `loadRubric` threw and `catch { continue; }`
+  skipped it; and with `adapter: "local"` nothing ever wrote the scores. The step now lives in
+  `src/daemon/score-step.ts`, resolves rubric names against `<base>/rubrics/` the way
+  `agentgrit eval` does, and appends to `quality-scores.jsonl` once per trace id.
 
 ## [0.1.8] — 2026-08-07
 

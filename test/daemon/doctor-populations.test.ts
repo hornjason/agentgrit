@@ -145,6 +145,26 @@ describe("scoring staleness is a fault only when scoring could have run", () => 
   });
 });
 
+describe("a vertex judge counts as configured (#323)", () => {
+  test("vertex with a project and no key — judge ok, named, and missing scores warn", () => {
+    const config = configFor();
+    config.judge = { provider: "vertex", model: "gemini-x", project: "proj-1" };
+
+    const section = checkScoring(config);
+
+    expect(find(section.checks, "judge-api-key")?.status).toBe("ok");
+    expect(find(section.checks, "judge-api-key")?.message).toContain("vertex/gemini-x");
+    expect(find(section.checks, "scores")?.status).toBe("warning");
+  });
+
+  test("vertex with no project is not a usable judge — info, scoring disabled", () => {
+    const config = configFor();
+    config.judge = { provider: "vertex", model: "gemini-x" };
+
+    expect(find(checkScoring(config).checks, "judge-api-key")?.status).toBe("info");
+  });
+});
+
 describe("the orphan-export baseline is a ratchet", () => {
   function fixture(exports: string[], baseline: string[] | null): string {
     const root = join(base, "proj");
