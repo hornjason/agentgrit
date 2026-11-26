@@ -54,8 +54,10 @@ async function callInference(prompt: string, config: JudgeConfig): Promise<Recor
     body = JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: config.temperature ?? 0.1, maxOutputTokens: 2048, responseMimeType: "application/json" } });
   } else if (config.provider === "vertex") {
     if (!config.project) return null;
-    const token = (config.getToken ?? gcloudAccessToken)(); if (!token) return null;
     const location = config.location || "global";
+    // These become URL segments next to a bearer token: anything but a plain identifier could redirect the token to another host.
+    if (!/^[a-z0-9-]+$/.test(location) || !/^[\w.-]+$/.test(config.project) || !/^[\w.-]+$/.test(config.model)) return null;
+    const token = (config.getToken ?? gcloudAccessToken)(); if (!token) return null;
     const host = location === "global" ? "aiplatform.googleapis.com" : `${location}-aiplatform.googleapis.com`;
     url = `https://${host}/v1/projects/${config.project}/locations/${location}/publishers/google/models/${config.model}:generateContent`; headers["Authorization"] = `Bearer ${token}`;
     // Gemini 2.5+ models think before answering and that thinking spends the same output budget, so 2048 truncates the JSON.

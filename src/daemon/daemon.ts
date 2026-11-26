@@ -263,7 +263,9 @@ export async function runDaemonCycle(
   // 1. Score — grade recent rated replies and append to quality-scores.jsonl (#323)
   try {
     const { runScoreStep } = await import("./score-step");
-    result.scores.push(...(await runScoreStep(config)));
+    const step = await runScoreStep(config);
+    result.scores.push(...step.scores);
+    for (const w of step.warnings) result.errors.push(`score: ${w}`);
   } catch (err) {
     result.errors.push(`score: ${err instanceof Error ? err.message : String(err)}`);
   }

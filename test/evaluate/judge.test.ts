@@ -77,6 +77,16 @@ describe("vertex judge (#323)", () => {
     } finally { globalThis.fetch = f; }
   });
 
+  test("a location, project, or model that is not a plain identifier sends no request (the token must not reach another host)", async () => {
+    const f = globalThis.fetch; const fm = mock(vertexOk); globalThis.fetch = fm as unknown as typeof fetch;
+    try {
+      for (const bad of [{ location: "evil.com/x#" }, { project: "p/../../x" }, { model: "m?x=1" }, { location: "us-east1.evil.com" }]) {
+        expect(await judgeTrace({ input: "a", output: "b" }, testRubric, { provider: "vertex", model: "m", project: "p", getToken: () => "t", ...bad })).toEqual([]);
+      }
+      expect(fm).toHaveBeenCalledTimes(0);
+    } finally { globalThis.fetch = f; }
+  });
+
   test("judgeUsable: vertex needs a project, key providers need a key", () => {
     expect(judgeUsable({ provider: "vertex", model: "m", project: "p" })).toBe(true);
     expect(judgeUsable({ provider: "vertex", model: "m" })).toBe(false);

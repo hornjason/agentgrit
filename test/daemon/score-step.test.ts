@@ -63,9 +63,10 @@ afterEach(() => {
 describe("score step (#323)", () => {
   test("a vertex judge with no apiKey grades, and the project and location reach the judge", async () => {
     const { judge, calls } = fakeJudge();
-    const scores = await runScoreStep(config({ provider: "vertex", model: "gemini-x", project: "proj-1", location: "global" }), { judge });
+    const { scores, warnings } = await runScoreStep(config({ provider: "vertex", model: "gemini-x", project: "proj-1", location: "global" }), { judge });
 
     expect(scores).toHaveLength(2);
+    expect(warnings).toEqual([]);
     expect(calls).toHaveLength(2);
     expect(calls[0].config).toMatchObject({ provider: "vertex", model: "gemini-x", project: "proj-1", location: "global" });
     expect(calls[0].config.apiKey).toBeUndefined();
@@ -96,21 +97,41 @@ describe("score step (#323)", () => {
     const again = await runScoreStep(config({ provider: "vertex", model: "m", project: "p" }), { judge: second.judge });
 
     expect(second.calls).toHaveLength(0);
-    expect(again).toEqual([]);
+    expect(again.scores).toEqual([]);
+    expect(again.warnings).toEqual([]);
     expect(scoreLines()).toHaveLength(2);
   });
 
   test("no judge configured: nothing is graded and no file is written", async () => {
     const { judge, calls } = fakeJudge();
-    expect(await runScoreStep(config(undefined), { judge })).toEqual([]);
+    expect(await runScoreStep(config(undefined), { judge })).toEqual({ scores: [], warnings: [] });
     expect(calls).toHaveLength(0);
     expect(existsSync(scoresFile())).toBe(false);
   });
 
   test("a vertex judge with no project is not usable", async () => {
     const { judge, calls } = fakeJudge();
-    expect(await runScoreStep(config({ provider: "vertex", model: "m" }), { judge })).toEqual([]);
+    expect((await runScoreStep(config({ provider: "vertex", model: "m" }), { judge })).scores).toEqual([]);
     expect(calls).toHaveLength(0);
+  });
+
+  test("a rubric that does not load is reported, not skipped silently", async () => {
+    const { judge, calls } = fakeJudge();
+    const { scores, warnings } = await runScoreStep(config({ provider: "vertex", model: "m", project: "p" }, ["missing.json"]), { judge });
+    expect(scores).toEqual([]);
+    expect(calls).toHaveLength(0);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("missing.json");
+  });
+
+  test("a judge that grades nothing it was given is reported", async () => {
+    const calls: Trace[] = [];
+    const judge = async (trace: Trace): Promise<Score[]> => { calls.push(trace); return []; };
+    const { scores, warnings } = await runScoreStep(config({ provider: "vertex", model: "m", project: "p" }), { judge });
+    expect(calls).toHaveLength(2);
+    expect(scores).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("0 of 2");
   });
 
   test("CONTROL — a key-based judge still grades", async () => {
