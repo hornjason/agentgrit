@@ -41,6 +41,18 @@ function fakeJudge() {
 }
 
 const scoresFile = () => join(signalDir, "quality-scores.jsonl");
+const projectsDir = () => join(process.env.AGENTGRIT_HOST_DIR!, "projects", "-Users-test-proj");
+
+/** A transcript in which the human typed `question` and the assistant answered `answer` one second later. */
+function writeTranscript(sessionId: string, at: string, question: string, answer: string): void {
+  const t = Date.parse(at);
+  const iso = (ms: number) => new Date(ms).toISOString();
+  mkdirSync(projectsDir(), { recursive: true });
+  writeFileSync(join(projectsDir(), `${sessionId}.jsonl`), [
+    { type: "user", timestamp: iso(t - 60_000), origin: { kind: "human" }, promptSource: "typed", message: { role: "user", content: question } },
+    { type: "assistant", timestamp: iso(t - 59_000), message: { role: "assistant", content: [{ type: "text", text: answer }] } },
+  ].map((r) => JSON.stringify(r)).join("\n") + "\n");
+}
 const scoreLines = () => (existsSync(scoresFile()) ? readFileSync(scoresFile(), "utf-8").split("\n").filter(Boolean) : []);
 
 beforeEach(() => {
@@ -53,11 +65,14 @@ beforeEach(() => {
     { id: "r-1", type: "rating", timestamp: "2026-09-30T10:00:00Z", session_id: "s-1", rating: 2, source: "explicit", response_preview: "reply one", schemaVersion: 1 },
     { id: "r-2", type: "rating", timestamp: "2026-09-30T11:00:00Z", session_id: "s-2", rating: 9, source: "explicit", response_preview: "reply two", schemaVersion: 1 },
   ].map((r) => JSON.stringify(r)).join("\n") + "\n");
+  writeTranscript("s-1", "2026-09-30T10:00:00Z", "question one", "reply one");
+  writeTranscript("s-2", "2026-09-30T11:00:00Z", "question two", "reply two");
 });
 
 afterEach(() => {
   rmSync(scratch, { recursive: true, force: true });
   rmSync(join(baseDir(), "rubrics", "starter.json"), { force: true });
+  rmSync(projectsDir(), { recursive: true, force: true });
 });
 
 describe("score step (#323)", () => {
@@ -132,6 +147,42 @@ describe("score step (#323)", () => {
     expect(scores).toEqual([]);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("0 of 2");
+  });
+
+  test("#324: a thumbs row with no reply text is graded from its transcript — input is what the human typed, never the session id", async () => {
+    writeFileSync(join(signalDir, "ratings.jsonl"), JSON.stringify({ id: "t-1", type: "rating", timestamp: "2026-11-26T09:01:58.091Z", session_id: "s-thumb", rating: "2", source: "thumbs", schemaVersion: "1" }) + "\n");
+    writeTranscript("s-thumb", "2026-11-26T09:01:58.091Z", "please ship the fix", "Shipped it.");
+    const { judge, calls } = fakeJudge();
+
+    await runScoreStep(config({ provider: "vertex", model: "m", project: "p" }), { judge });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].trace).toMatchObject({ id: "t-1", input: "please ship the fix", output: "Shipped it." });
+    expect(calls[0].trace.input).not.toContain("s-thumb");
+  });
+
+  test("#324: ratings whose transcript is missing are not graded, and when none has one that is reported", async () => {
+    writeFileSync(join(signalDir, "ratings.jsonl"), JSON.stringify({ id: "t-9", type: "rating", timestamp: "2026-11-26T09:00:00Z", session_id: "gone", rating: "9", source: "thumbs" }) + "\n");
+    const { judge, calls } = fakeJudge();
+
+    const { scores, warnings } = await runScoreStep(config({ provider: "vertex", model: "m", project: "p" }), { judge });
+
+    expect(calls).toHaveLength(0);
+    expect(scores).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("transcript");
+  });
+
+  test("#324: one unreadable transcript is reported and does not stop the others being graded", async () => {
+    rmSync(join(projectsDir(), "s-1.jsonl"), { force: true });
+    mkdirSync(join(projectsDir(), "s-1.jsonl"), { recursive: true }); // a directory where a transcript should be
+    const { judge, calls } = fakeJudge();
+
+    const { scores, warnings } = await runScoreStep(config({ provider: "vertex", model: "m", project: "p" }), { judge });
+
+    expect(calls.map((c) => c.trace.id)).toEqual(["r-2"]);
+    expect(scores).toHaveLength(1);
+    expect(warnings.some((w) => w.includes("r-1"))).toBe(true);
   });
 
   test("CONTROL — a key-based judge still grades", async () => {
