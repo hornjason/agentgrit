@@ -16,6 +16,7 @@
  * payload documents no origin field, so when it is absent the decision falls
  * back to the wrappers machine prompts arrive in. The patterns are the shapes
  * observed at the start of real prompts in sentiment.jsonl and in transcripts.
+ * Pasted text arrives as `<pasted_content …>`: the human submitted it, so it counts.
  */
 
 const MACHINE_PROMPT = new RegExp(
@@ -26,7 +27,8 @@ const MACHINE_PROMPT = new RegExp(
       "\\[Cross-session (?:delivery|idle) notice\\]",
       // A /loop iteration re-submits the /loop line; it is an instruction, never a reaction.
       "/loop\\b",
-      // The same messages as transcripts record them.
+      // The same messages as transcripts record them (a /loop line has no origin there).
+      "<command-message>loop</command-message>",
       "Another Claude session sent a message:",
       "The coordinator sent a message while you were working:",
       "This session is being continued from a previous conversation",

@@ -107,6 +107,12 @@ describe("#331 hook capture ignores prompts no human typed", () => {
     expect(await runCapture("sentiment", "thanks, that works")).toBe(0);
     expect(rows("sentiment.jsonl")).toHaveLength(1);
   });
+
+  test("pasted text counts: the human submitted it, even when it holds a wrapper", async () => {
+    const pasted = '<pasted_content id="p1">\n<task-notification>log</task-notification>\n</pasted_content id="p1">\n👍';
+    expect(await runCapture("rating", pasted)).toBe(0);
+    expect(rows("ratings.jsonl").map((r) => r.rating)).toEqual([9]);
+  });
 });
 
 describe("#331 +1 / -1 count only as a short standalone reaction", () => {
@@ -192,6 +198,15 @@ describe("#331 transcript capture ignores user-role text no human typed", () => 
     assistant,
     // Origin missing AND a wrapper: the text fallback must still catch it.
     line({ type: "user", message: { role: "user", content: "<task-notification>\n<result>incorrect, stop</result>\n</task-notification>" } }),
+    assistant,
+    // How transcripts record a /loop line: no origin field at all.
+    line({
+      type: "user",
+      message: {
+        role: "user",
+        content: "<command-message>loop</command-message>\n<command-name>/loop</command-name>\n<command-args>stop when the board is wrong</command-args>",
+      },
+    }),
     assistant,
   ].join("\n");
 
