@@ -61,6 +61,8 @@ Session signals (ratings, corrections, failures)
 
 643+ ratings, 1245+ corrections captured to date. Tool audit logs `{ts, tool, ok}` per tool call via PAI hook.
 
+**Human-typed only (#331).** Every capture that reads user text asks `isHumanPrompt` (`src/capture/human-prompt.ts`) first. The hook path recognises the wrappers that machine prompts arrive in, because the `UserPromptSubmit` payload has no origin field. The transcript path trusts `origin.kind` and drops compaction and meta entries. Rows written from machine text before this fix were moved out of the live logs into `signals/<name>.quarantined.jsonl` by `scripts/quarantine-signals.ts`. Sentiment and correction rows were selected by running `isHumanPrompt` over their stored text. Thumbs ratings store no prompt text, so they were selected by source and date. The moved rows are kept, tagged, and read by nothing.
+
 ### 2. Pattern Detection (`src/detect/`)
 
 - **Failure pattern mining** — clusters corrections by theme, scores severity. Supports rule-based AND opt-in LLM semantic clustering.
@@ -223,7 +225,7 @@ AgentGrit is imported at runtime via dynamic `import()`. If unavailable, PAI fal
 
 | Area | Status | Reference |
 |------|--------|-----------|
-| Signal capture | COMPLETE | 344 tests pass |
+| Signal capture | COMPLETE | 368 tests pass |
 | Pattern detection | COMPLETE | 52 tests pass |
 | Rule promotion | COMPLETE | 393 tests pass |
 | Graph + injection | SHIPPED (hybrid) | BM25 + vector + graph 3-way RRF (#97, #98). PRF query expansion (#213). sanitizeRuleText. |

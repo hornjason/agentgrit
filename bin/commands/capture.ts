@@ -12,6 +12,7 @@ import { loadConfig, resolveSignalDir, resolveMemoryDir } from "../../src/adapte
 import { generateFeedback, generateSuccess } from "../../src/daemon/feedback";
 import { inference, type InferenceOptions, type InferenceResult } from "../../src/adapters/inference";
 import { captureToolUse } from "../../src/capture/tool-audit";
+import { isHumanPrompt } from "../../src/capture/human-prompt";
 
 export type InferenceFn = (opts: InferenceOptions) => Promise<InferenceResult>;
 
@@ -95,6 +96,7 @@ function extractPromptText(input: unknown): string | null {
 /**
  * Parse a hook payload and extract the user text, complaining to stderr on every
  * failure path. A silent `return` here is what made #257 invisible for 18 days.
+ * Also returns null, without a warning, for a prompt the human did not type (#331).
  */
 function readPromptPayload(
   sub: string,
@@ -124,6 +126,11 @@ function readPromptPayload(
     );
     return null;
   }
+
+  // #331: rating, correction and sentiment all read the prompt through here, so
+  // this one check keeps machine text out of every one of them. Quiet on
+  // purpose: a task notification is a normal prompt, not a broken payload.
+  if (!isHumanPrompt(text, (input as { origin?: unknown }).origin)) return null;
 
   const sessionId =
     (input as { session_id?: unknown }).session_id &&

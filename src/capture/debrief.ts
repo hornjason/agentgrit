@@ -17,6 +17,7 @@
 import { randomUUID } from "crypto";
 import type { CorrectionSignal } from "../adapters/types";
 import { SCHEMA_VERSION } from "../adapters/types";
+import { isHumanPrompt } from "./human-prompt";
 
 // ── Types ──
 
@@ -109,6 +110,9 @@ export function parseTranscript(transcript: string): Turn[] {
                   .map((c: { text: string }) => c.text)
                   .join(" ")
               : "";
+        // #331: drop user-role text no human typed — task notifications, peer
+        // and coordinator messages, compaction summaries, injected skill text.
+        if (entry.isCompactSummary || entry.isMeta || !isHumanPrompt(text, entry.origin)) continue;
         if (text.trim()) turns.push({ role: "user", text: text.trim() });
       } else if (entry.type === "assistant" && entry.message?.content) {
         const text =

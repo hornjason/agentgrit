@@ -68,6 +68,8 @@ Hooks fire automatically during Claude Code sessions. No manual work required.
 
 Explicit ratings are optional. Corrections and sentiment are captured implicitly from natural conversation — the user doesn't need to do anything special.
 
+Only text the human typed is captured (#331). `UserPromptSubmit` also fires for task notifications, messages from other sessions, teammate and agent messages, and `/loop` iterations. Transcripts hold those as user-role entries too, along with compaction summaries. `src/capture/human-prompt.ts` drops all of them before any rating, correction or sentiment parser sees them. A `+1` / `-1` counts only as a short reaction that opens with the token, never inside other text.
+
 Each signal includes a UUID, timestamp, session ID, and schema version. Correction signals also carry severity (1-10, assigned by pattern match) and context (truncated user message + assistant response).
 
 **Iteration learnings** (`iteration-learning.ts`) are the one capture path that

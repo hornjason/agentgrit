@@ -467,21 +467,30 @@ export function parsePraiseRating(message: string, config?: AgentGritConfig): { 
 
 // ── Thumbs up/down parsing ──
 
-const THUMBS_UP_PATTERNS = [/👍/, /\bthumbs\s*up\b/i, /\+1\b/];
-const THUMBS_DOWN_PATTERNS = [/👎/, /\bthumbs\s*down\b/i, /(?<!\w)-1\b/];
+const THUMBS_UP_PATTERNS = [/👍/, /\bthumbs\s*up\b/i];
+const THUMBS_DOWN_PATTERNS = [/👎/, /\bthumbs\s*down\b/i];
+
+/**
+ * `+1` / `-1` are a rating only as a short reaction that opens with the token:
+ * "+1", "-1", "+1 nice work", "-1, wrong file". Anywhere else they are text —
+ * "N+1", "+1 more", `slice(0, -1)`, `at === -1`, "set retries to -1" (#331).
+ * The 5-word cap is the one parsePraiseRating and backfill-ratings already use.
+ */
+const PLUS_MINUS_ONE_REACTION = /^([+-])1(?=$|[\s.,!])/;
+const MAX_REACTION_WORDS = 5;
 
 export function parseThumbsRating(message: string, config?: AgentGritConfig): ThumbsRating | null {
   const t = config?.thresholds;
-  for (const pat of THUMBS_UP_PATTERNS) {
-    if (pat.test(message)) {
-      return { direction: "up", score: t?.thumbsUpScore ?? 9 };
-    }
-  }
-  for (const pat of THUMBS_DOWN_PATTERNS) {
-    if (pat.test(message)) {
-      return { direction: "down", score: t?.thumbsDownScore ?? 2 };
-    }
-  }
+  const up = { direction: "up", score: t?.thumbsUpScore ?? 9 } as const;
+  const down = { direction: "down", score: t?.thumbsDownScore ?? 2 } as const;
+  if (THUMBS_UP_PATTERNS.some((p) => p.test(message))) return up;
+  if (THUMBS_DOWN_PATTERNS.some((p) => p.test(message))) return down;
+
+  const trimmed = message.trim();
+  if (trimmed.split(/\s+/).length > MAX_REACTION_WORDS) return null;
+  const sign = trimmed.match(PLUS_MINUS_ONE_REACTION)?.[1];
+  if (sign === "+") return up;
+  if (sign === "-") return down;
   return null;
 }
 
