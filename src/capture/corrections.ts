@@ -15,6 +15,7 @@ import { appendSignal } from "../adapters/jsonl";
 import { signalPath } from "../adapters/paths";
 import type { CorrectionSignal } from "../adapters/types";
 import { SCHEMA_VERSION } from "../adapters/types";
+import { isHumanPrompt } from "./human-prompt";
 
 const CORRECTIONS_FILE = "corrections.jsonl";
 
@@ -170,7 +171,7 @@ export async function detectCorrection(
   assistantResponse: string,
   sessionId: string,
 ): Promise<CorrectionSignal | null> {
-  if (isNoise(message)) return null;
+  if (!isHumanPrompt(message) || isNoise(message)) return null;
 
   for (const { pattern } of CORRECTION_PATTERNS) {
     if (pattern.test(message)) {
